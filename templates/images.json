@@ -1,0 +1,11 @@
+{
+  "style": "Photorealistic, ultra realistic skin and fabric detail, natural light, cinematic but believable. No text, no watermark, no logo.",
+  "images": [
+    {"id": "char_a_sheet", "kind": "character", "out": "stills/char_a_sheet.png", "aspect_ratio": "3:2", "refs": [],
+     "prompt": "Character reference sheet of <NAME>, <age>, <look>, <clothes>: full-body front, side and back views, plus a grid of facial expressions labelled NEUTRAL, HAPPY, ANGRY, SAD, SURPRISED, THINKING, LAUGHING, CONCERNED, plus close-ups of the face and clothing detail."},
+    {"id": "place_a", "kind": "background", "out": "stills/place_a.png", "aspect_ratio": "3:2", "refs": [],
+     "prompt": "<PLACE> empty, eye-level, daylight, no people."},
+    {"id": "s01", "kind": "frame", "out": "stills/s01.png", "aspect_ratio": "9:16", "refs": ["char_a_sheet", "place_a"],
+     "prompt": "The same man from the first reference image stands in the place shown in the second reference image, <expression>, looking at the camera, <pose>. Same face, same clothes, same place as the references."}
+  ]
+}

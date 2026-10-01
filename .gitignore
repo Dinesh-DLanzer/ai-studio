@@ -1,0 +1,25 @@
+.env
+*.mp4
+*.mov
+__pycache__/
+*.pyc
+.DS_Store
+node_modules/
+dist/
+.venv/
+web/UI-images/
+# client projects and generated media stay local; examples/ is the public sample
+projects/
+projects-backup/
+!projects/.gitkeep
+image_tests/
+checks/
+_discarded/
+/wt/
+_trash/
+_import_tmp/
+# workspace-local configuration (provider choices, model chains, limits): per computer, never committed
+/settings/
+/ai_settings.json
+# screenshots of a running app can show real projects: keep them local
+/screenshots/

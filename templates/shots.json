@@ -1,0 +1,20 @@
+{
+  "aspect_ratio": "9:16",
+  "audio": false,
+  "shots": [
+    {
+      "id": "s01",
+      "model": "bytedance/seedance-2.5",
+      "seconds": 5,
+      "first_frame": "stills/s01.png",
+      "prompt": "SUBJECT: ... ACTION: one action only. CAMERA: slow push-in. LIGHTING: soft daylight. STYLE: clean cinematic. NEGATIVE: no text, no logos, no hands close-up."
+    },
+    {
+      "id": "s02",
+      "model": "bytedance/seedance-2.5",
+      "seconds": 5,
+      "first_frame": "stills/s02.png",
+      "prompt": "..."
+    }
+  ]
+}

@@ -1,0 +1,32 @@
+{
+  "_note": "USD per second. A rate is a number, or {\"audio\": x, \"no_audio\": y}, or duration tiers [{\"up_to\": 8, \"rate\": x}, {\"rate\": y}]. Verified against OpenRouter pricing_skus on 2026-09-30 (Seedance is per-token: ~21,600 tokens/s at 720p/24fps). Veo has no 480p, so it has no draft rate.",
+  "models": {
+    "bytedance/seedance-2.5": {
+      "720p": 0.231,
+      "480p": 0.103
+    },
+    "bytedance/seedance-2.0": {
+      "720p": 0.15,
+      "480p": 0.07
+    },
+    "alibaba/wan-3.0": {
+      "720p": 0.1,
+      "480p": 0.05
+    },
+    "google/veo-3.1": {
+      "720p": {
+        "audio": 0.4,
+        "no_audio": 0.2
+      }
+    },
+    "google/veo-3.1-lite": {
+      "720p": {
+        "audio": 0.05,
+        "no_audio": 0.03
+      }
+    }
+  },
+  "image_models": {
+    "qwen/qwen-image-3": 0.036
+  }
+}
