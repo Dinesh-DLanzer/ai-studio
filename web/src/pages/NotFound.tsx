@@ -40,9 +40,9 @@ export default function NotFound({ kind = "page", name, onRestored }: { kind?: "
         </div>
       )}
       {similar.length > 0 && (
-        <div className="mt-6 w-full text-left" data-testid="nf-similar">
+        <div className="mt-6 w-full text-center" data-testid="nf-similar">
           <div className="mb-2 text-xs font-bold uppercase tracking-wider text-slate-400">Did you mean</div>
-          <ul className="flex flex-wrap gap-2">{similar.slice(0, 6).map((n) => <li key={n}><Link className="btn btn-outline btn-sm" to={`/p/${n}`}><FolderOpen size={13} />{n}</Link></li>)}</ul>
+          <ul className="flex flex-wrap justify-center gap-2">{similar.slice(0, 6).map((n) => <li key={n}><Link className="btn btn-outline btn-sm" to={`/p/${n}`}><FolderOpen size={13} />{n}</Link></li>)}</ul>
         </div>
       )}
 
