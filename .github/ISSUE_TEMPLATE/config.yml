@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Questions and ideas
+    url: https://github.com/Dinesh-DLanzer/ai-studio/discussions
+    about: Ask how to do something or share what you made.
+  - name: Security problem
+    url: https://github.com/Dinesh-DLanzer/ai-studio/security/policy
+    about: Please report vulnerabilities privately, see SECURITY.md.

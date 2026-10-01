@@ -1,6 +1,6 @@
 # Contributing
 
-Thanks for helping! AI Studio is small and dependency-light on purpose.
+Thanks for helping! AI Studio is small and dependency-light on purpose. Please follow the [Code of Conduct](CODE_OF_CONDUCT.md); questions and ideas are welcome in [Discussions](https://github.com/Dinesh-DLanzer/ai-studio/discussions).
 
 ## Setup
 ```

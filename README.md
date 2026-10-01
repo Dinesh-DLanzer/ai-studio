@@ -15,11 +15,11 @@ An open-source video generation app with a built-in AI agent flow.
 
 [Quick start](#quick-start) · [How it works](#how-a-video-gets-made) · [Safety](#safety-model) · [Agents and API](#agents-and-the-http-api) · [User guide](GUIDE.md)
 
-![A project overview: storyboard, assets, budget and cost](docs/img/showcase-overview.jpg)
+![AI Studio demo: projects, chat with Tara, assets, shots and the video editor](docs/img/demo.gif)
 
 </div>
 
-Describe your idea to **Tara**, the built-in producer. She interviews you, writes the storyboard, and guides you through character sheets, scene frames, video clips, a timeline editor and one exported MP4. It runs on your own computer with your own provider keys. **Nothing is spent until you approve that exact price.**
+Describe your idea to **Tara**, the built-in producer. She interviews you, writes the storyboard, and guides you through character sheets, scene frames, video clips, a timeline editor and one exported MP4. It runs on your own computer with your own provider keys, and works with AI agents such as Claude Code and OpenCode through **MCP** and an HTTP API. **Nothing is spent until you approve that exact price.**
 
 ## Highlights
 
@@ -34,6 +34,10 @@ Describe your idea to **Tara**, the built-in producer. She interviews you, write
 | **Agents and API** | Claude Code, OpenCode or your own scripts connect through MCP or an HTTP API with revocable keys. They propose; you approve. |
 
 ## See it
+
+**A project overview: storyboard, assets, budget and cost**
+
+![A project overview](docs/img/showcase-overview.jpg)
 
 **Chat with Tara and the production checklist**
 
@@ -158,6 +162,7 @@ python3 -m aistudio.cli serve | projects | pending <p> | approve <p> <id> | appr
 python3 -m aistudio.mcp_server           # MCP over stdio
 python3 vidad.py -h                      # the original one-file CLI (see GUIDE.md)
 node web/e2e/readme-shots.mjs            # retake the screenshots in docs/img
+node web/e2e/demo-gif.mjs                # re-record docs/img/demo.gif
 ```
 
 ## Project layout
@@ -192,7 +197,7 @@ docs/img/      the screenshots in this README
 
 ## Contributing
 
-Issues and pull requests are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) and [SECURITY.md](SECURITY.md), and read the [CHANGELOG](CHANGELOG.md) for what changed.
+Issues and pull requests are welcome, and [Discussions](https://github.com/Dinesh-DLanzer/ai-studio/discussions) is open for questions. See [CONTRIBUTING.md](CONTRIBUTING.md) and [SECURITY.md](SECURITY.md), and read the [CHANGELOG](CHANGELOG.md) for what changed.
 
 ## License
 
