@@ -1,5 +1,5 @@
 import tests._hermetic  # noqa: F401
-import json, stat, tempfile, unittest, zipfile
+import json, os, stat, tempfile, unittest, zipfile
 from pathlib import Path
 from aistudio import importzip
 from aistudio.service import Workspace
@@ -97,7 +97,8 @@ class TestImport(unittest.TestCase):
     def test_unsafe_entries(self):
         self.refused(build(good(), extra=[("../evil.json", "{}")]), None, "safe relative path")
         self.refused(build(good(), extra=[("/abs.json", "{}")]), None, "safe relative path")
-        self.refused(build(good(), extra=[("demo/a\\b.json", "{}")]), None, "backslash")
+        if os.name != "nt":                       # zipfile turns backslashes into separators when reading on Windows
+            self.refused(build(good(), extra=[("demo/a\\b.json", "{}")]), None, "backslash")
         info = zipfile.ZipInfo("demo/link.txt")
         info.external_attr = (stat.S_IFLNK | 0o777) << 16
         self.refused(build(good(), extra=[(info, "/etc/passwd")]), None, "symbolic link")

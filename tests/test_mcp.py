@@ -1,5 +1,5 @@
 import tests._hermetic as HERM  # noqa: F401  (no real key or network in tests)
-import json, subprocess, sys, tempfile, unittest
+import json, os, subprocess, sys, tempfile, unittest
 from pathlib import Path
 from aistudio import mcp_server as M
 from aistudio.service import Workspace
@@ -76,7 +76,7 @@ class TestMcp(unittest.TestCase):
             {"jsonrpc": "2.0", "method": "notifications/initialized"},
             {"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "list_projects", "arguments": {}}}]) + "\nnot json\n"
         p = subprocess.run([sys.executable, "-m", "aistudio.mcp_server"], input=lines, capture_output=True, text=True,
-                           env={"AISTUDIO_HOME": home, "PATH": "/usr/bin"}, cwd=str(Path(__file__).resolve().parent.parent))
+                           env={**os.environ, "AISTUDIO_HOME": home, "AISTUDIO_NO_KEYRING": "1"}, cwd=str(Path(__file__).resolve().parent.parent))
         out = [json.loads(x) for x in p.stdout.strip().splitlines()]
         self.assertEqual(len(out), 3)
         self.assertEqual(out[1]["result"]["isError"], False)

@@ -13,7 +13,10 @@ jobs:
         with: { python-version: "3.12" }
       - uses: actions/setup-node@v4
         with: { node-version: "22" }
-      - uses: FedericoCarboni/setup-ffmpeg@v3
+      - if: runner.os != 'macOS'
+        uses: FedericoCarboni/setup-ffmpeg@v3
+      - if: runner.os == 'macOS'
+        run: brew install ffmpeg
       - run: pip install -r requirements-dev.txt
       - run: python -m unittest discover -s tests
       - run: python scripts/secret_scan.py
