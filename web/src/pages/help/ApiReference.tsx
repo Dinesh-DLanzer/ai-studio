@@ -15,9 +15,9 @@ const WORKFLOW = `1  create_project            name                      -> a pr
 2  update_brief / write_doc  brief fields, Story.md    -> free
 3  convert_story                                       -> shots.json + images.json
 4  estimate                                            -> price and stop-loss (free)
-   --- a HUMAN approves the budget in the page ---
+   --- a HUMAN approves the budget via MCP elicitation, terminal fallback, or the page ---
 5  propose  kind=image target=ramesh                   -> exact price + proposal id (no code for agents)
-   --- a HUMAN approves that price in the page ---
+   --- a HUMAN approves that price via MCP elicitation, terminal fallback, or the page ---
 6  run_proposal  id                                    -> the image is made
 7  repeat 5-6 for characters, backgrounds, frames, then kind=clip
 8  get_costs / get_project                             -> read progress and spend`;
@@ -39,11 +39,11 @@ export default function ApiReference() {
         <div className="grid gap-3 md:grid-cols-3">
           {[
             ["The page", "For you. Everything, including every approval. Uses the session token from the start-up link."],
-            ["MCP (Claude Code, OpenCode, ...)", "For an AI agent on this computer. Runs as a local process: no network, no key. It can write the story and propose work, not approve it."],
+            ["MCP (Claude Code, OpenCode, ...)", "For an AI agent on this computer. Runs as a local process: no network, no key. It can write the story and propose work, but a human must approve through elicitation or the one-time terminal fallback."],
             ["HTTP API + API key", "For scripts and tools. Same limits as the MCP agent. Create keys in Settings > Integrations; revoke any time."],
           ].map(([t, d]) => <div key={t} className="panel-quiet p-3.5"><div className="text-sm font-bold">{t}</div><p className="mt-1 text-xs leading-relaxed text-slate-400">{d}</p></div>)}
         </div>
-        <p className="mt-3 flex items-start gap-2 text-xs text-slate-300"><ShieldCheck size={14} className="mt-0.5 shrink-0 text-emerald-300" />The safety rule is the same everywhere: an agent or a key can propose and run what a human has already approved. Approving a budget or a price, changing providers, keys or limits, and deleting projects stay with the page.</p>
+        <p className="mt-3 flex items-start gap-2 text-xs text-slate-300"><ShieldCheck size={14} className="mt-0.5 shrink-0 text-emerald-300" />The safety rule is the same everywhere: an agent or a key can propose and run what a human has already approved. Agents and API keys cannot approve; MCP can request a human through elicitation or the one-time fallback, while API-key approvals remain page/session-only.</p>
       </Card>
 
       <Card title={<span className="flex items-center gap-2"><IconTile tone="pink"><Terminal size={15} /></IconTile> Connect an agent with MCP</span>} sub="These commands are filled in for this install. The same snippets, with a tool list, are in Settings > Integrations.">
@@ -71,9 +71,9 @@ export default function ApiReference() {
 curl -H "$K" -H 'content-type: application/json' -d '{"name":"my-ad"}' ${base}/api/projects
 curl -H "$K" -X PUT -H 'content-type: application/json' -d '{"text":"# My Ad: AI VIDEO STORYBOARD ..."}' ${base}/api/projects/my-ad/docs/Story.md
 curl -H "$K" -X POST ${base}/api/projects/my-ad/estimate -H 'content-type: application/json' -d '{"failure":0.2}'
-# a human approves the budget in the page, then:
+# a human approves the budget in the page/session, then:
 curl -H "$K" -H 'content-type: application/json' -d '{"kind":"image","target":"s01"}' ${base}/api/projects/my-ad/proposals
-# a human approves the price in the page, then:
+# a human approves the price in the page/session, then:
 curl -H "$K" -X POST ${base}/api/projects/my-ad/proposals/<id>/execute   # -> {"job":"..."}; poll /api/jobs/<job>`} /></div>
           <p className="text-xs text-slate-400">Manage keys in <Link to="/settings" className="text-brand underline">Settings &gt; Integrations</Link>. A key is shown once when created and only its hash is stored.</p>
         </div>

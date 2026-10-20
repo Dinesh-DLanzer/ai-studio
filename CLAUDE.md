@@ -11,7 +11,7 @@ This repository is **AI Studio**, a local-first video and commercial production 
   - MCP clients advertising form elicitation receive an `elicitation/create` dialog showing the exact request and price. Clients without elicitation receive a one-time code challenge; the code appears only in the local AI Studio notification and `aistudio serve` stderr, never in the MCP response or project files.
   - **CLI-first human approval:** The terminal remains a supported human-facing approval channel. Agents must ask the human and pass the elicitation response or one-time fallback code; never claim that an agent approved anything.
 * **Non-Interactive Execution:**
-  - When running `aistudio` CLI subcommands in bash, append `--json` and `-y` / `--yes` for automated script pipelines, or omit `-y` for interactive human prompts.
+  - Use `--json` for machine-readable CLI output. `-y` / `--yes` is only for free operations or executing an exact proposal after a human has already approved it; never use it for budget, proposal, or clip approval.
 
 ---
 
@@ -25,7 +25,7 @@ When running in Claude Code, the following tools are available via MCP (`.mcp.js
 * `convert_story`: Parse `Story.md` and generate `shots.json` and `images.json`.
 * `estimate` / `approve_budget`: Estimate and request human approval of the project budget ceiling through elicitation or the one-time fallback code.
 * `propose` / `approve_proposal` / `run_proposal`: Propose, request human approval through elicitation or the fallback code, and execute only an approved proposal.
-* `approve_shot` / `discard` / `restore`: Review, approve clips, or discard with reasons.
+* `approve_shot` / `discard` / `restore`: Inspect clip decisions and discard/restore files; clip approval is human-only and the MCP approve_shot tool refuses agent calls.
 * `get_verification`: Check rule violations and model reviews.
 * `production_progress`: Get production checklist groups and queue items.
 * `generate_all_plan`: Compute exact prices and generate batch proposals for pending assets.

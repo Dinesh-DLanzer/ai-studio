@@ -4,7 +4,7 @@ import unittest
 
 import tests._hermetic as HERM  # noqa: F401
 from aistudio.service import Workspace, ServiceError
-from aistudio import costlog
+from aistudio import costlog, mcp_server as M
 from tests.test_story_convert import MD
 
 
@@ -71,6 +71,11 @@ class TestProposalOnlyPaidTools(unittest.TestCase):
         self.assertEqual(result["review_type"], "character")
         self.assertEqual(costlog.read_log(self.p)[-1]["stage"], "vision")
 
+    def test_paid_runner_call_without_grant_is_refused(self):
+        from aistudio.roles import GrantRequired
+        with self.assertRaises(GrantRequired):
+            self.ws.runner().image("do not run", project_dir=self.p)
+
     def test_edit_and_extend_cannot_execute_without_human_approval(self):
         for prop in (
             self.ws.edit_still("demo", "s01", "change the sky"),
@@ -79,6 +84,40 @@ class TestProposalOnlyPaidTools(unittest.TestCase):
         ):
             with self.assertRaises(ServiceError):
                 self.ws.execute("demo", prop["id"])
+
+
+class TestMcpCannotSelfApprove(unittest.TestCase):
+    def setUp(self):
+        HERM.all_test(self)
+        self.ws = Workspace(tempfile.mkdtemp())
+        self.ws.create_project("demo")
+        self.ws.put_text("demo", "Story.md", MD)
+        self.ws.convert_story("demo")
+
+    @staticmethod
+    def call(ws, tool, **args):
+        response = M.handle({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": tool, "arguments": args}}, ws)
+        result = response["result"]
+        return json.loads(result["content"][0]["text"]), result["isError"]
+
+    def test_mcp_cannot_approve_a_clip(self):
+        result, error = self.call(self.ws, "approve_shot", name="demo", shot_id="s01")
+        self.assertTrue(error)
+        self.assertIn("human-only", result["error"])
+
+    def test_confirm_boolean_is_refused_for_budget_and_proposal(self):
+        self.call(self.ws, "estimate", name="demo")
+        before = self.ws.overview("demo")["budget"]
+        budget, error = self.call(self.ws, "approve_budget", name="demo", confirm=True)
+        self.assertTrue(error)
+        self.assertIn("not human approval", budget["error"])
+        self.assertEqual(self.ws.overview("demo")["budget"], before)
+        proposal, error = self.call(self.ws, "propose", name="demo", kind="image", target="s01")
+        self.assertFalse(error)
+        refused, error = self.call(self.ws, "approve_proposal", name="demo", id=proposal["id"], confirm=True)
+        self.assertTrue(error)
+        self.assertIn("not human approval", refused["error"])
+        self.assertEqual(self.ws.proposal_status("demo", proposal["id"])["status"], "pending")
 
 
 class TestChatCannotApprove(unittest.TestCase):

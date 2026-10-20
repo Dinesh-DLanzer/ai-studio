@@ -148,6 +148,10 @@ def _propose_mcp(ws, a):
     return res
 
 
+def _human_only_shot_approval(ws, a):
+    raise ServiceError("clip approval is human-only; use the web page or a human session")
+
+
 def _run_proposal_mcp(ws, a, session=None):
     name, pid = a["name"], a["id"]
     prop = ws.proposal_status(name, pid)
@@ -222,9 +226,9 @@ TOOLS = {
         lambda ws, a: ws.set_max_attempts(a["name"], a["max_attempts"]),
     ),
     "approve_shot": (
-        "Approve a generated video clip for a shot.",
+        "Human-only clip decision. Agents may inspect clips but cannot approve them through MCP; use the web page or a human session.",
         S(name=STR, shot_id=STR),
-        lambda ws, a: ws.approve_shot(a["name"], a["shot_id"]) or {"ok": True, "approved_shot": a["shot_id"]},
+        _human_only_shot_approval,
     ),
     "get_costs": ("Cost log, used vs discarded split, budget.", S(name=STR), lambda ws, a: ws.costs(a["name"])),
     "discard": ("Move a clip/still to _discarded (never deletes) with a reason.", S(name=STR, rel=STR, reason={"type": "string", "optional": True}), lambda ws, a: ws.discard(a["name"], a["rel"], a.get("reason", ""))),

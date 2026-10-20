@@ -38,7 +38,7 @@ try {
   const early = await tool("run_proposal", { name: "agentdemo", id: prop.data.id });
   ok(early.err, "agent could not run it before approval");
   const tools = (await rpc("tools/list", {})).result.tools.map((t) => t.name);
-  ok(!tools.some((t) => /approve|(^|_)mode(_|$)/.test(t)), "MCP exposes no approval or mode tools");
+  ok(["approve_budget", "approve_proposal", "run_proposal"].every((t) => tools.includes(t)) && !tools.includes("set_mode") && !tools.includes("reveal_code"), "MCP exposes human-mediated approval requests, never raw confirmation or mode tools");
 
   const browser = await chromium.launch(); const page = await browser.newPage({ viewport: { width: 1200, height: 900 } });
   page.on("dialog", (d) => d.accept());
