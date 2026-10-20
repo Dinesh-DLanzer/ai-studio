@@ -1,0 +1,29 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/tsc-on-web-edit.sh",
+            "timeout": 120,
+            "statusMessage": "Type-checking web app"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/tests-on-stop.sh",
+            "timeout": 300,
+            "statusMessage": "Running Python tests"
+          }
+        ]
+      }
+    ]
+  }
+}
