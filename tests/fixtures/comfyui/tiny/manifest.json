@@ -1,0 +1,6 @@
+{
+  "id": "tiny",
+  "task": "image",
+  "inputs": {"prompt": ["6", "text"], "negative_prompt": ["7", "text"], "seed": ["3", "seed"]},
+  "profile": {"durations": [], "resolutions": ["512x512"], "frames": {"start": false, "end": false}, "camera": {"mode": "none"}}
+}
