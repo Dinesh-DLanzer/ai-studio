@@ -34,6 +34,8 @@ PROVIDER_TYPES = {
     "runway": {"label": "Runway", "sub": "Gen-3/Gen-4 video generation", "adapter": "runway.RunwayAdapter", "fields": ["api_key"], "base_url": False},
     "kling": {"label": "Kling", "sub": "Kling AI video generation", "adapter": "kling.KlingAdapter", "fields": ["access_key", "secret_key"], "base_url": False},
     "replicate": {"label": "Replicate", "sub": "Open source image and video models", "adapter": "replicate.ReplicateAdapter", "fields": ["api_key"], "base_url": False},
+    "whisper_cpp": {"label": "whisper.cpp (local)", "sub": "Local, free speech-to-text with word timestamps (needs the whisper.cpp binary and a model file)", "adapter": "whisper_cpp.WhisperCppAdapter", "fields": ["binary", "model_path"], "base_url": False},
+    "sync": {"label": "sync.so", "sub": "Lip sync: match the lips in a video to an audio track", "adapter": "sync_so.SyncAdapter", "fields": ["api_key"], "base_url": False},
     "comfyui": {"label": "ComfyUI", "sub": "Local image and video engine", "adapter": "comfyui.ComfyUIAdapter", "fields": [], "base_url": True},
     "chatgpt": {"label": "ChatGPT (Subscription)", "sub": "Use your ChatGPT Plus/Pro plan (sign-in) for chat, vision, verify and images", "adapter": "chatgpt.ChatGPTAdapter", "fields": [], "base_url": False, "auth_type": "oauth"},
     "codex_cli": {"label": "Codex CLI", "sub": "Your signed-in Codex terminal agent (chat, vision). Runs on your plan", "adapter": "cli_agent.CodexCLIAdapter", "fields": [], "base_url": False, "auth_type": "local", "binary": "codex"},

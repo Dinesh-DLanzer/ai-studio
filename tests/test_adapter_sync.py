@@ -121,6 +121,15 @@ class TestSync(unittest.TestCase):
             a.lipsync_download({"job_id": "G1", "model": "lipsync-2"})
         self.assertEqual(len(t.calls), 1)
 
+    def test_the_provider_type_is_registered(self):
+        from aistudio.providers import config as C
+        meta = C.PROVIDER_TYPES["sync"]
+        self.assertEqual(meta["label"], "sync.so")
+        self.assertEqual(meta["fields"], ["api_key"])
+        self.assertFalse(meta["base_url"])
+        self.assertEqual(C.capabilities_of("sync"), ["lipsync"])
+        self.assertIs(C.adapter_class("sync"), SyncAdapter)
+
 
 def _file(name, data):
     import tempfile

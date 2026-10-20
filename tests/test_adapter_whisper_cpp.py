@@ -195,6 +195,15 @@ class TestWhisperCpp(unittest.TestCase):
             with self.assertRaises(Retryable):
                 a.transcribe("whisper-cpp", str(self.audio), {"workdir": str(self.work)})
 
+    def test_the_provider_type_is_registered(self):
+        from aistudio.providers import config as C
+        meta = C.PROVIDER_TYPES["whisper_cpp"]
+        self.assertEqual(meta["label"], "whisper.cpp (local)")
+        self.assertEqual(meta["fields"], ["binary", "model_path"])
+        self.assertFalse(meta["base_url"])
+        self.assertEqual(C.capabilities_of("whisper_cpp"), ["transcribe"])
+        self.assertIs(C.adapter_class("whisper_cpp"), WhisperCppAdapter)
+
 
 if __name__ == "__main__":
     unittest.main()
