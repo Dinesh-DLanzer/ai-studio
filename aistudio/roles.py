@@ -14,6 +14,7 @@ returns {"status":"pending", "job": ...} so `sync` can finish it later.
 import shutil
 import time
 
+from aistudio import approvals
 from aistudio.providers import config as cfg
 from aistudio.providers.base import AuthError, ProviderError, Retryable, scrub
 
@@ -30,6 +31,11 @@ class NeedsNewApproval(ChainError):
     def __init__(self, message, entry, price, attempts=()):
         super().__init__(message, attempts, "needs_approval")
         self.entry, self.price = entry, price
+
+
+class GrantRequired(ChainError):
+    def __init__(self, message="a human approval grant is required for this paid operation"):
+        super().__init__(message, code="grant_required")
 
 
 class Health:
@@ -65,6 +71,18 @@ class RoleRunner:
 
     def _fake(self, role, project_dir=None):
         return self.fake_for(role, project_dir) if self.fake_for else self.fake_mode()
+
+    def _grant(self, role, project_dir, grant):
+        """Require a Grant whenever the configured role can call a non-free card."""
+        if grant is not None and not isinstance(grant, approvals.Grant):
+            raise GrantRequired("invalid approval grant")
+        if grant is not None:
+            return grant
+        entries = self.resolve(role, project_dir)
+        paid = [e for e in entries if e.get("problem") is None and not self.pricing.is_free(e.get("card"))]
+        if paid:
+            raise GrantRequired(f"a human approval grant is required before calling {role}")
+        return None
 
     # -------------------------------------------------------------- resolving
     def providers(self):
@@ -193,14 +211,18 @@ class RoleRunner:
         cost, src = self._cost("vision", out, r["card"])
         return {**out, "cost": cost, "cost_source": src, "provider": r["provider"], "attempts": r["attempts"]}
 
-    def image(self, prompt, refs=(), aspect_ratio="9:16", opts=None, project_dir=None, approved_price=None):
+    def image(self, prompt, refs=(), aspect_ratio="9:16", opts=None, project_dir=None, *, grant=None):
+        grant = self._grant("image", project_dir, grant)
+        approved_price = grant.price if grant else None
         price_of = lambda e: self.pricing.image_price(e["card"])
         r = self.run("image", lambda a, m: a.image(m, prompt, refs, aspect_ratio, opts), project_dir, None, approved_price, price_of)
         out = r["result"]
         cost, src = self._cost("image", out, r["card"])
         return {**out, "cost": cost, "cost_source": src, "provider": r["provider"], "attempts": r["attempts"]}
 
-    def image_edit(self, image_path, prompt, edit_mode="inpaint_insertion", mask_mode="MASK_MODE_BACKGROUND", aspect_ratio="9:16", opts=None, project_dir=None, approved_price=None):
+    def image_edit(self, image_path, prompt, edit_mode="inpaint_insertion", mask_mode="MASK_MODE_BACKGROUND", aspect_ratio="9:16", opts=None, project_dir=None, *, grant=None):
+        grant = self._grant("image", project_dir, grant)
+        approved_price = grant.price if grant else None
         price_of = lambda e: self.pricing.image_price(e["card"])
         r = self.run("image", lambda a, m: a.image_edit(m, image_path, prompt, edit_mode=edit_mode, mask_mode=mask_mode, opts={**(opts or {}), "aspect_ratio": aspect_ratio}), project_dir, None, approved_price, price_of)
         out = r["result"]
@@ -210,7 +232,9 @@ class RoleRunner:
     def video_price(self, entry, req):
         return self.pricing.video_price(entry["card"], req["seconds"], req.get("resolution", "720p"), req.get("audio", False))
 
-    def video_extend(self, video_path, prompt, seconds=5, aspect_ratio="16:9", resolution="720p", project_dir=None, approved_price=None, timeout=None):
+    def video_extend(self, video_path, prompt, seconds=5, aspect_ratio="16:9", resolution="720p", project_dir=None, *, grant=None, timeout=None):
+        grant = self._grant("video", project_dir, grant)
+        approved_price = grant.price if grant else None
         req = {"seconds": seconds, "resolution": resolution, "audio": False}
         price_of = lambda e: self.video_price(e, req)
         pol = self.policy("video", project_dir) if not self._fake("video", project_dir) else cfg.default_policy("video")
@@ -247,8 +271,10 @@ class RoleRunner:
         cost, src = self._cost("video", {"cost": out.get("reported")}, r["card"], extra=req)
         return {**base, "status": "done", "bytes": out["bytes"], "cost": cost, "cost_source": src}
 
-    def video(self, req, project_dir=None, approved_price=None, timeout=None):
+    def video(self, req, project_dir=None, *, grant=None, timeout=None):
         """-> {"status":"done","bytes",...} | {"status":"pending","job"} | {"status":"failed","error",...}. Raises ChainError/NeedsNewApproval."""
+        grant = self._grant("video", project_dir, grant)
+        approved_price = grant.price if grant else None
         price_of = lambda e: self.video_price(e, req)
         pol = self.policy("video", project_dir) if not self._fake("video", project_dir) else cfg.default_policy("video")
         limit = timeout if timeout is not None else pol.get("timeout", 1500)
@@ -283,6 +309,11 @@ class RoleRunner:
             return {**base, "status": "pending", "cost": 0.0, "cost_source": "unknown"}
         cost, src = self._cost("video", {"cost": out.get("reported")}, r["card"], extra=req)
         return {**base, "status": "done", "bytes": out["bytes"], "cost": cost, "cost_source": src}
+
+    def review(self, prompt, images, opts=None, project_dir=None, *, grant=None):
+        """Run a paid review only with the grant consumed for its proposal."""
+        self._grant("vision", project_dir, grant)
+        return self.vision(prompt, images, opts, project_dir=project_dir)
 
     def fetch_video(self, job, req=None):
         """Resolve a job left pending by a timeout. job = {"job_id","model","provider"}."""

@@ -22,7 +22,9 @@ class TestApprovals(unittest.TestCase):
         r = self.prop()
         self.assertEqual(r["status"], "pending")
         self.assertEqual(A.approve(self.p, r["id"], r["code"])["status"], "approved")
-        self.assertTrue(A.consume(self.p, r["id"], **self.req))
+        grant = A.consume(self.p, r["id"], **self.req)
+        self.assertIsInstance(grant, A.Grant)
+        self.assertEqual((grant.proposal_id, grant.request_hash, grant.price, grant.actor), (r["id"], r["hash"], 0.2, "local"))
         with self.assertRaises(A.ApprovalError):
             A.consume(self.p, r["id"], **self.req)  # single use
 
@@ -73,12 +75,24 @@ class TestApprovals(unittest.TestCase):
         r = A.propose(self.p, summary={"prompt": "x"}, **self.req)      # agent-style: no code
         self.assertEqual(A.get(self.p, r["id"])["summary"], {"prompt": "x"})
         self.assertEqual(A.approve_human(self.p, r["id"])["status"], "approved")
-        self.assertTrue(A.consume(self.p, r["id"], **self.req))
+        self.assertIsInstance(A.consume(self.p, r["id"], **self.req), A.Grant)
         with self.assertRaises(A.ApprovalError):
             A.approve_human(self.p, r["id"])                            # already used
         r2 = A.propose(self.p, ttl=5, now=100.0, **self.req)
         with self.assertRaises(A.ApprovalError):
             A.approve_human(self.p, r2["id"], now=200.0)                # expired
+
+    def test_consume_accepts_exact_request_hash(self):
+        r = self.prop()
+        A.approve(self.p, r["id"], r["code"])
+        grant = A.consume(self.p, r["id"], r["hash"])
+        self.assertEqual(grant.price, self.req["price"])
+
+    def test_consume_rejects_wrong_request_hash(self):
+        r = self.prop()
+        A.approve(self.p, r["id"], r["code"])
+        with self.assertRaises(A.ApprovalError):
+            A.consume(self.p, r["id"], "wrong-hash")
 
     def test_negative_price(self):
         with self.assertRaises(A.ApprovalError):

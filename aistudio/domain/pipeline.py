@@ -241,14 +241,15 @@ class PipelineDomain:
         attempts = len([r for r in rows if r["shot"] == target and r["stage"] == stage])
         try:
             gates.check_run(b, costlog.spent(p), price, attempts if kind == "clip" else 0, override=override)
-            approvals.consume(p, pid, kind, target, model, price, payload)
+            request_digest = approvals.request_hash(kind, target, model, price, payload)
+            grant = approvals.consume(p, pid, request_digest)
         except (gates.GateError, approvals.ApprovalError) as e:
             raise ServiceError(str(e)) from None
         attempt = attempts + 1
         log = {"shot": target, "stage": stage, "model": model, "attempt": str(attempt), "job_id": "", "seconds": "", "provider": payload.get("provider", "")}
         activity.record_start(p, pid, kind, target, model, price, source="mcp")
         try:
-            res = self._execute_kind(p, kind, target, payload, model, price, attempt, log)
+            res = self._execute_kind(p, kind, target, payload, model, price, attempt, log, grant)
             activity.record_finish(p, pid, status="done", result=res)
             return res
         except roles_mod.NeedsNewApproval as e:
@@ -261,13 +262,13 @@ class PipelineDomain:
             activity.record_finish(p, pid, status="error", error=str(e))
             raise
 
-    def _execute_kind(self, p, kind, target, payload, model, price, attempt, log):
+    def _execute_kind(self, p, kind, target, payload, model, price, attempt, log, grant):
         if kind == "image":
             _, refs, _ = self.ws._image_spec(p, target)
             out = p / payload["out"]
             if out.exists():
                 raise ServiceError(f"{payload['out']} exists; discard it first")
-            res = self.ws.runner().image(payload["prompt"], [str(r) for r in refs], payload["aspect_ratio"], project_dir=p, approved_price=price)
+            res = self.ws.runner().image(payload["prompt"], [str(r) for r in refs], payload["aspect_ratio"], project_dir=p, grant=grant)
             log = {**log, "model": res["model"], "provider": res["provider"], "cost_source": res["cost_source"]}
             data = res["bytes"]
             out = out.with_suffix(".jpg" if data[:3] == b"\xff\xd8\xff" else ".png")
@@ -279,7 +280,7 @@ class PipelineDomain:
             ff = str(p / payload["first_frame"]) if payload["first_frame"] else None
             req = {"prompt": payload["prompt"], "seconds": payload["seconds"], "resolution": payload["resolution"], "aspect_ratio": payload["aspect_ratio"],
                    "audio": payload["audio"], "first_frame": ff}
-            res = self.ws.runner().video(req, project_dir=p, approved_price=price)
+            res = self.ws.runner().video(req, project_dir=p, grant=grant)
             job = res.get("job") or {}
             row = {**log, "model": res.get("model") or model, "provider": res.get("provider") or log["provider"], "cost_source": res.get("cost_source", ""),
                    "timestamp": datetime.now().isoformat(timespec="seconds"), "resolution": payload["resolution"], "seconds": str(payload["seconds"]),
@@ -295,9 +296,9 @@ class PipelineDomain:
             out.write_bytes(res["bytes"])
             costlog.append_log(p, {**row, "cost": res["cost"], "result": "completed"})
             return {"kind": kind, "file": out.relative_to(p).as_posix(), "cost": res["cost"]}
-        return self._do_review(p, target, payload, model, log)
+        return self._do_review(p, target, payload, model, log, grant)
 
-    def _do_review(self, p, target, payload, model, log):
+    def _do_review(self, p, target, payload, model, log, grant):
         f = p / payload["file"]
         outdir = p / "checks" / f.stem
         outdir.mkdir(parents=True, exist_ok=True)
@@ -318,7 +319,7 @@ class PipelineDomain:
             refs = [(p / by[r]["out"]) for r in spec.get("refs", []) if r in by and (p / by[r]["out"]).exists()]
             prompt = image_checklist.build_prompt(spec, [r.name for r in refs])
             frames = [str(r) for r in refs] + [str(f)]
-        raw = self.ws.runner().vision(prompt, frames, {"max_tokens": 3500, "temperature": 0.2}, project_dir=p)
+        raw = self.ws.runner().review(prompt, frames, {"max_tokens": 3500, "temperature": 0.2}, project_dir=p, grant=grant)
         res = {**clip_checklist.parse_review(raw["text"]), "cost": raw["cost"]}
         log = {**log, "model": raw["model"], "provider": raw["provider"], "cost_source": raw["cost_source"]}
         review = {k: res[k] for k in ("verdict", "findings", "summary")}

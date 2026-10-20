@@ -1,7 +1,7 @@
 import tempfile
 import unittest
 from pathlib import Path
-from aistudio import roles as R
+from aistudio import approvals, roles as R
 from aistudio.pricing import Pricing, key
 from aistudio.providers import config as C
 from aistudio.providers.base import Adapter, AuthError, Rejected, Retryable
@@ -141,7 +141,8 @@ class TestChain(unittest.TestCase):
         r.factory = None
         out = r.chat("chat", [{"role": "user", "content": "yo"}])
         self.assertEqual((out["provider"], out["text"]), ("fake", "FAKE: yo"))
-        self.assertEqual(r.image("p")["model"], "fake/image")
+        with self.assertRaises(R.GrantRequired):
+            r.image("p")
 
     def test_project_override(self):
         r, d = setup(chains={"chat": ch(("g", "gem"))})
@@ -153,34 +154,44 @@ class TestChain(unittest.TestCase):
 class TestPaid(unittest.TestCase):
     REQ = {"prompt": "p", "seconds": 4, "resolution": "720p", "aspect_ratio": "9:16", "audio": False}
 
+    @staticmethod
+    def grant(price):
+        return approvals.Grant("proposal", "request", price)
+
+    def test_image_requires_grant(self):
+        r, _ = setup(chains={"image": ch(("g", "img"))})
+        with self.assertRaises(R.GrantRequired):
+            r.image("p")
+
     def test_image_price_rule(self):
         r, _ = setup(chains={"image": ch(("g", "img"))})
-        out = r.image("p", approved_price=0.04)
+        grant = approvals.Grant("proposal", "request", 0.04)
+        out = r.image("p", grant=grant)
         self.assertEqual((out["cost"], out["cost_source"]), (0.04, "computed"))
 
     def test_unknown_price_blocks_when_approved_price_given(self):
         r, _ = setup(chains={"image": ch(("g", "mystery"))})
         with self.assertRaises(R.ChainError) as c:
-            r.image("p", approved_price=1.0)
+            r.image("p", grant=self.grant(1.0))
         self.assertIn("price unknown", str(c.exception))
 
     def test_video_fallback_only_if_not_dearer(self):
         # primary submit fails; chain: veo ($0.05/s), veo2 ($0.5/s, too dear), kling ($0.02/s)
         r, _ = setup({"g": {"veo": [Rejected("HTTP 400")]}}, {"video": ch(("g", "veo"), ("r", "veo2"), ("k", "kling-v1"))})
-        out = r.video(self.REQ, approved_price=0.2)
+        out = r.video(self.REQ, grant=self.grant(0.2))
         self.assertEqual((out["status"], out["provider"], out["cost"]), ("done", "k", 0.08))
         self.assertNotIn(("r", "veo2", "submit"), Script.log)
 
     def test_needs_new_approval_when_only_dearer_left(self):
         r, _ = setup({"g": {"veo": [Rejected("HTTP 400")]}}, {"video": ch(("g", "veo"), ("r", "veo2"))})
         with self.assertRaises(R.NeedsNewApproval) as c:
-            r.video(self.REQ, approved_price=0.2)
+            r.video(self.REQ, grant=self.grant(0.2))
         self.assertEqual(c.exception.entry["model"], "veo2")
         self.assertEqual(c.exception.price, 2.0)
 
     def test_accepted_job_that_fails_is_not_resubmitted(self):
         r, _ = setup({"g": {"poll:veo": [{"status": "failed", "error": "policy", "cost": 0.1}]}}, {"video": ch(("g", "veo"), ("k", "kling-v1"))})
-        out = r.video(self.REQ, approved_price=0.2)
+        out = r.video(self.REQ, grant=self.grant(0.2))
         self.assertEqual((out["status"], out["error"], out["provider"]), ("failed", "policy", "g"))
         self.assertEqual([a for a in Script.log if a[2] == "submit"], [("g", "veo", "submit")])
 
@@ -189,7 +200,7 @@ class TestPaid(unittest.TestCase):
         r, _ = setup({"g": {"poll:veo": [{"status": "pending", "error": None, "cost": None}]}}, {"video": ch(("g", "veo"))})
         r.clock = lambda: (t.__setitem__(0, t[0] + 100) or t[0])
         r.sleep = lambda s: None
-        out = r.video(self.REQ, approved_price=0.2, timeout=250)
+        out = r.video(self.REQ, grant=self.grant(0.2), timeout=250)
         self.assertEqual(out["status"], "pending")
         self.assertEqual(out["job"], {"job_id": "J-veo", "model": "veo", "provider": "g"})
 

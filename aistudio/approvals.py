@@ -17,6 +17,7 @@ import hashlib
 import json
 import secrets
 import time
+from dataclasses import dataclass
 from pathlib import Path
 
 FILE = "proposals.json"
@@ -25,6 +26,16 @@ MAX_TRIES = 5
 
 class ApprovalError(Exception):
     pass
+
+
+@dataclass(frozen=True)
+class Grant:
+    """One-use authority issued by consuming one exact, human-approved request."""
+
+    proposal_id: str
+    request_hash: str
+    price: float
+    actor: str = "local"
 
 
 def _canon(d):
@@ -52,14 +63,14 @@ def _find(items, pid):
     raise ApprovalError(f"unknown proposal {pid}")
 
 
-def propose(pdir, kind, shot, model, price, payload, ttl=3600, reveal_code=False, now=None, summary=None):
+def propose(pdir, kind, shot, model, price, payload, ttl=3600, reveal_code=False, now=None, summary=None, actor="local"):
     now = time.time() if now is None else now
     if float(price) < 0:
         raise ApprovalError("negative price")
     code = f"{secrets.randbelow(10**6):06d}"
     p = {"id": secrets.token_hex(6), "kind": kind, "shot": shot, "model": model, "price": round(float(price), 6),
          "hash": request_hash(kind, shot, model, price, payload), "created": now, "expires": now + ttl,
-         "status": "pending", "tries": 0, "code_sha": hashlib.sha256(code.encode()).hexdigest(), "summary": summary or {}}
+         "status": "pending", "tries": 0, "code_sha": hashlib.sha256(code.encode()).hexdigest(), "summary": summary or {}, "actor": actor}
     items = _load(pdir)
     items.append(p)
     _save(pdir, items)
@@ -121,8 +132,13 @@ def reject(pdir, pid):
     _save(pdir, items)
 
 
-def consume(pdir, pid, kind, shot, model, price, payload, now=None):
-    """Call immediately before the paid request. Raises ApprovalError unless this EXACT request was approved."""
+def consume(pdir, pid, request_hash_value=None, *, kind=None, shot=None, model=None, price=None, payload=None, now=None):
+    """Consume one approved request and return a one-use :class:`Grant`.
+
+    New callers pass the already-computed exact request hash.  The keyword form is
+    retained for compatibility with older callers and independently recomputes the
+    hash before issuing the grant.
+    """
     now = time.time() if now is None else now
     items = _load(pdir)
     p = _find(items, pid)
@@ -132,10 +148,20 @@ def consume(pdir, pid, kind, shot, model, price, payload, now=None):
         p["status"] = "expired"
         _save(pdir, items)
         raise ApprovalError("approval expired")
-    if p["hash"] != request_hash(kind, shot, model, price, payload):
+    if request_hash_value is None:
+        if any(v is None for v in (kind, shot, model, price, payload)):
+            raise ApprovalError("exact request hash is required")
+        request_hash_value = request_hash(kind, shot, model, price, payload)
+    elif all(v is not None for v in (kind, shot, model, price, payload)):
+        # Do not let a caller supply a hash for a different request.
+        if request_hash_value != request_hash(kind, shot, model, price, payload):
+            p["status"] = "void"
+            _save(pdir, items)
+            raise ApprovalError("request changed after approval; propose again")
+    if p["hash"] != request_hash_value:
         p["status"] = "void"
         _save(pdir, items)
         raise ApprovalError("request changed after approval; propose again")
     p["status"] = "used"
     _save(pdir, items)
-    return True
+    return Grant(proposal_id=pid, request_hash=request_hash_value, price=float(p["price"]), actor=p.get("actor", "local"))
