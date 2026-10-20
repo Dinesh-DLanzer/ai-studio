@@ -26,9 +26,13 @@ Subclass of aistudio.providers.base.Adapter (read its docstring first).
   transcribe(model, audio_path, opts=None) -> {"text", "words": [{"text","start","end"}], "language"}
     "start" / "end" are SECONDS.  The words come from the per-token timestamps, so they are whisper word
     pieces, not always whole words.  "model" is ignored unless it points at an existing model file.
+    opts: "workdir"/"project_dir" (where the temporary folder goes), "language", "threads", "timeout",
+          "ffmpeg" (the ffmpeg program), "model_path" (overrides the connection).
   test(): the binary must exist and "--help" must run.  Never raises.
   Errors: binary or model file missing -> AuthError ; ffmpeg or the binary refused the file -> Rejected ;
     timeout -> Retryable.
+
+  The program runner is injectable for tests: conn["runner"](cmd, cwd, timeout) -> (returncode, stdout, stderr).
 
   Both programs run in a temporary folder INSIDE the project (opts["workdir"] / opts["project_dir"]); the
   folder is deleted again when the call ends.  Without a project folder the system temp folder is used.
