@@ -84,7 +84,9 @@ def default_transport(timeout=120, secret=None):
         hdrs.setdefault("User-Agent", "AIStudio/1.0 (Macintosh; OpenCode-Client)")
         data = None
         if body is not None:
-            if "form" in hdrs.get("Content-Type", ""):
+            if isinstance(body, (bytes, bytearray)):
+                data = bytes(body)                 # a body the adapter built itself (multipart uploads): sent as it is
+            elif "form" in hdrs.get("Content-Type", ""):
                 data = urllib.parse.urlencode(body).encode()
             else:
                 data = json.dumps(body).encode()
