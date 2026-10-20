@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI Studio</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header>
+    <div class="brand-title">
+      <span>AI Studio</span>
+      <span class="brand-badge">UXP</span>
+    </div>
+    <div class="connection-status">
+      <div id="status-dot" class="status-dot"></div>
+      <span id="status-text">Disconnected</span>
+    </div>
+  </header>
+
+  <div id="storage-warning" class="alert-banner">
+    ⚠️ Warning: UXP secureStorage is unavailable in this environment. Token is stored unencrypted in localStorage.
+  </div>
+
+  <section class="panel-section connection-section">
+    <div class="section-title">Connection</div>
+    <div class="form-group">
+      <label for="server-url">Server URL</label>
+      <input type="text" id="server-url" value="http://127.0.0.1:8765" placeholder="http://127.0.0.1:8765">
+    </div>
+    <div class="form-group">
+      <label for="token">Access Token / Pairing Key</label>
+      <div class="flex-row">
+        <input type="password" id="token" placeholder="Enter session token">
+        <button id="btn-connect" class="btn btn-primary btn-sm">Connect</button>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel-section project-section">
+    <div class="section-title">Project</div>
+    <div class="form-group">
+      <div class="flex-row">
+        <select id="project-select" disabled>
+          <option value="">Select a project...</option>
+        </select>
+        <button id="btn-refresh" class="btn btn-sm" title="Refresh projects and media" disabled>↻</button>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel-section media-section">
+    <div class="media-toolbar">
+      <span class="section-title" style="margin-bottom: 0;">Approved Media</span>
+      <div class="flex-row">
+        <button id="btn-select-all" class="btn btn-sm" style="font-size: 10px; padding: 2px 5px;" disabled>Select All</button>
+      </div>
+    </div>
+    <div class="media-list-container">
+      <ul id="media-list" class="media-list">
+        <li class="empty-state">Connect to AI Studio to view approved assets.</li>
+      </ul>
+    </div>
+  </section>
+
+  <div class="action-bar">
+    <button id="btn-import-bin" class="btn btn-primary" disabled>Import to bin</button>
+    <button id="btn-create-sequence" class="btn" disabled>Create sequence</button>
+  </div>
+
+  <div id="status-log" class="status-log">Ready.</div>
+
+  <script src="index.js"></script>
+</body>
+</html>
