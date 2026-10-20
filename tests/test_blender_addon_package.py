@@ -1,6 +1,12 @@
 import ast
+import io
+import json
 from pathlib import Path
+import sys
 import unittest
+from unittest.mock import MagicMock, patch
+import urllib.error
+
 try:
     import tomllib
 except ImportError:
@@ -8,6 +14,12 @@ except ImportError:
 
 ADDON_DIR = Path(__file__).resolve().parent.parent / "integrations" / "blender" / "aistudio_bridge"
 MANIFEST_PATH = ADDON_DIR / "blender_manifest.toml"
+
+# Allow importing the client module directly without requiring bpy
+if str(ADDON_DIR) not in sys.path:
+    sys.path.insert(0, str(ADDON_DIR))
+
+from client import AIStudioClient, AIStudioError  # noqa: E402
 
 
 class TestBlenderAddonPackage(unittest.TestCase):
@@ -109,6 +121,143 @@ class TestBlenderAddonPackage(unittest.TestCase):
                                 self.fail(
                                     f"Non-literal shell= argument found in {py_file} at line {node.lineno}"
                                 )
+
+
+class TestBlenderAddonClient(unittest.TestCase):
+    def setUp(self):
+        self.client = AIStudioClient(base_url="http://127.0.0.1:8765", token="test-token", timeout=2.0)
+
+    @patch("urllib.request.urlopen")
+    def test_pair_and_list_projects(self, mock_urlopen):
+        mock_resp = MagicMock()
+        mock_resp.read.return_value = json.dumps({"projects": [{"name": "proj1"}, {"name": "proj2"}]}).encode("utf-8")
+        mock_resp.headers = {"Content-Type": "application/json"}
+        mock_resp.__enter__.return_value = mock_resp
+        mock_urlopen.return_value = mock_resp
+
+        projects = self.client.pair()
+        self.assertEqual(len(projects), 2)
+        self.assertEqual(projects[0]["name"], "proj1")
+
+        # Verify headers and URL
+        call_args = mock_urlopen.call_args[0]
+        req = call_args[0]
+        self.assertEqual(req.get_full_url(), "http://127.0.0.1:8765/api/projects")
+        self.assertEqual(req.get_header("X-aistudio-token"), "test-token")
+        self.assertEqual(req.get_header("Authorization"), "Bearer test-token")
+
+    @patch("urllib.request.urlopen")
+    def test_get_shots_direct(self, mock_urlopen):
+        mock_resp = MagicMock()
+        mock_resp.read.return_value = json.dumps({"shots": [{"id": "s01", "seconds": 4}]}).encode("utf-8")
+        mock_resp.headers = {"Content-Type": "application/json"}
+        mock_resp.__enter__.return_value = mock_resp
+        mock_urlopen.return_value = mock_resp
+
+        shots = self.client.get_shots("proj1")
+        self.assertIn("shots", shots)
+        self.assertEqual(shots["shots"][0]["id"], "s01")
+
+    @patch("urllib.request.urlopen")
+    def test_get_shots_fallback_to_overview(self, mock_urlopen):
+        # 1st call to /api/projects/proj1/shots raises HTTPError 404
+        fp = io.BytesIO(b'{"detail":"Not Found"}')
+        http_err = urllib.error.HTTPError("http://127.0.0.1:8765/api/projects/proj1/shots", 404, "Not Found", {}, fp)
+
+        # 2nd call to /api/projects/proj1 succeeds with overview
+        mock_overview = MagicMock()
+        mock_overview.read.return_value = json.dumps({
+            "name": "proj1",
+            "shots": {"aspect_ratio": "9:16", "shots": [{"id": "s02", "seconds": 5}]},
+        }).encode("utf-8")
+        mock_overview.headers = {"Content-Type": "application/json"}
+        mock_overview.__enter__.return_value = mock_overview
+
+        mock_urlopen.side_effect = [http_err, mock_overview]
+
+        shots = self.client.get_shots("proj1")
+        self.assertEqual(shots["aspect_ratio"], "9:16")
+        self.assertEqual(shots["shots"][0]["id"], "s02")
+        fp.close()
+
+    @patch("urllib.request.urlopen")
+    def test_put_shots(self, mock_urlopen):
+        mock_resp = MagicMock()
+        mock_resp.read.return_value = b'{"ok":true}'
+        mock_resp.headers = {"Content-Type": "application/json"}
+        mock_resp.__enter__.return_value = mock_resp
+        mock_urlopen.return_value = mock_resp
+
+        doc = {"aspect_ratio": "16:9", "shots": [{"id": "s01", "prompt": "test"}]}
+        res = self.client.put_shots("proj1", doc)
+        self.assertTrue(res.get("ok"))
+
+        req = mock_urlopen.call_args[0][0]
+        self.assertEqual(req.get_method(), "PUT")
+        self.assertEqual(req.get_full_url(), "http://127.0.0.1:8765/api/projects/proj1/shots")
+        self.assertEqual(json.loads(req.data.decode("utf-8")), doc)
+
+    @patch("urllib.request.urlopen")
+    def test_upload_frame(self, mock_urlopen):
+        mock_resp = MagicMock()
+        mock_resp.read.return_value = b'{"ok":true}'
+        mock_resp.headers = {"Content-Type": "application/json"}
+        mock_resp.__enter__.return_value = mock_resp
+        mock_urlopen.return_value = mock_resp
+
+        fake_png = b"\x89PNG\r\n\x1a\nfakeimagebytes"
+        res = self.client.upload_frame("proj1", "stills/s01-blender-1.png", fake_png, replace=1)
+        self.assertTrue(res.get("ok"))
+
+        req = mock_urlopen.call_args[0][0]
+        self.assertEqual(req.get_method(), "POST")
+        self.assertIn("/api/projects/proj1/upload?rel=stills%2Fs01-blender-1.png&replace=1", req.get_full_url())
+        self.assertEqual(req.data, fake_png)
+        self.assertEqual(req.get_header("Content-type"), "image/png")
+
+    @patch("urllib.request.urlopen")
+    def test_send_camera_move(self, mock_urlopen):
+        mock_resp = MagicMock()
+        mock_resp.read.return_value = b'{"direction":{"movement":"dolly-in"}}'
+        mock_resp.headers = {"Content-Type": "application/json"}
+        mock_resp.__enter__.return_value = mock_resp
+        mock_urlopen.return_value = mock_resp
+
+        payload = {"samples": [{"frame": 1, "matrix": [[1, 0, 0, 0]]}], "fps": 24.0, "lens_samples": []}
+        res = self.client.send_camera_move("proj1", "s01", payload)
+        self.assertIn("direction", res)
+
+        req = mock_urlopen.call_args[0][0]
+        self.assertEqual(req.get_method(), "POST")
+        self.assertEqual(req.get_full_url(), "http://127.0.0.1:8765/api/projects/proj1/shots/s01/camera-move")
+        self.assertEqual(json.loads(req.data.decode("utf-8")), payload)
+
+    @patch("urllib.request.urlopen")
+    def test_download_file(self, mock_urlopen):
+        mock_resp = MagicMock()
+        mock_resp.read.return_value = b"video-stream-content"
+        mock_resp.headers = {"Content-Type": "video/mp4"}
+        mock_resp.__enter__.return_value = mock_resp
+        mock_urlopen.return_value = mock_resp
+
+        data = self.client.download_file("proj1", "clips/s01_final_a1.mp4")
+        self.assertEqual(data, b"video-stream-content")
+
+        req = mock_urlopen.call_args[0][0]
+        self.assertEqual(req.get_method(), "GET")
+        self.assertEqual(req.get_full_url(), "http://127.0.0.1:8765/files/proj1/clips/s01_final_a1.mp4")
+
+    @patch("urllib.request.urlopen")
+    def test_error_handling(self, mock_urlopen):
+        fp = io.BytesIO(b'{"detail":"Unauthorized token"}')
+        http_err = urllib.error.HTTPError("http://127.0.0.1:8765/api/projects", 401, "Unauthorized", {}, fp)
+        mock_urlopen.side_effect = http_err
+
+        with self.assertRaises(AIStudioError) as ctx:
+            self.client.list_projects()
+        self.assertIn("401", str(ctx.exception))
+        self.assertIn("Unauthorized token", str(ctx.exception))
+        fp.close()
 
 
 if __name__ == "__main__":

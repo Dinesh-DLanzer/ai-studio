@@ -1,0 +1,17 @@
+schema_version = "1.0.0"
+
+id = "aistudio_bridge"
+version = "0.1.0"
+name = "AI Studio Bridge"
+tagline = "Bridge Blender previs and camera data with AI Studio"
+maintainer = "AI Studio Team"
+type = "add-on"
+
+blender_version_min = "4.2.0"
+license = [
+    "SPDX:GPL-3.0-or-later",
+]
+
+[permissions]
+network = "talk to the local AI Studio server"
+files = "save rendered frames temporarily"
