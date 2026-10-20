@@ -45,6 +45,9 @@ PROVIDER_TYPES = {
     "custom": {"label": "Custom (OpenAI-compatible)", "sub": "Any server with /chat/completions", "adapter": "openai.OpenAIAdapter", "fields": ["api_key"], "base_url": True},
     "fake": {"label": "Built-in test", "sub": "Free, offline, for trying things out", "adapter": "fake.FakeAdapter", "fields": [], "base_url": False},
     "elevenlabs": {"label": "ElevenLabs", "sub": "TTS, voice clone, SFX, music, transcription (Scribe)", "adapter": "elevenlabs.ElevenLabsAdapter", "fields": ["api_key"], "base_url": False},
+    "google_cloud_tts": {"label": "Google Cloud TTS", "sub": "Neural TTS with Tamil (ta-IN) voices", "adapter": "google_cloud_tts.GoogleCloudTTSAdapter", "fields": ["api_key"], "base_url": False},
+    "azure_speech": {"label": "Azure Speech", "sub": "TTS (SSML, neural voices) + fast transcription", "adapter": "azure_speech.AzureSpeechAdapter", "fields": ["api_key", "region"], "base_url": False},
+    "sarvam": {"label": "Sarvam AI", "sub": "Bulbul TTS + Saaras STT (Indian languages, Tamil ta-IN)", "adapter": "sarvam.SarvamAdapter", "fields": ["api_key"], "base_url": False},
 }
 
 
