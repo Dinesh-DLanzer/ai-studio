@@ -1,0 +1,16 @@
+{
+  "id": "instagram-reel",
+  "label": "Instagram Reel",
+  "aspect_ratio": "9:16",
+  "shots": 5,
+  "seconds_per_shot": 4,
+  "resolution": "720p",
+  "audio": true,
+  "safe_area": {"top": 0.12, "bottom": 0.22, "left": 0.06, "right": 0.06},
+  "caption": {"font": "Poppins", "size": 40, "weight": 700, "y": 0.72, "bg": "#000000AA"},
+  "cta": {"text": "Follow for more", "last_seconds": 2},
+  "loudness": -14,
+  "brief": {"length": "20 seconds", "purpose": "social"},
+  "suggested_models": {"video": ["google/veo-3.1-lite"]},
+  "notes": "Platform margins must be re-verified against current Instagram guidelines"
+}

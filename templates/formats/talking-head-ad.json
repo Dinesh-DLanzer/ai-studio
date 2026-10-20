@@ -1,0 +1,16 @@
+{
+  "id": "talking-head-ad",
+  "label": "Talking Head Ad",
+  "aspect_ratio": "9:16",
+  "shots": 4,
+  "seconds_per_shot": 6,
+  "resolution": "1080p",
+  "audio": true,
+  "safe_area": {"top": 0.12, "bottom": 0.2, "left": 0.08, "right": 0.08},
+  "caption": {"font": "Poppins", "size": 36, "weight": 500, "y": 0.8, "bg": "#00000099"},
+  "cta": {"text": "Get Started", "last_seconds": 3},
+  "loudness": -16,
+  "brief": {"length": "24 seconds", "purpose": "advertising"},
+  "suggested_models": {"video": ["google/veo-3.1-lite", "runway/gen-3-alpha-turbo"]},
+  "notes": "Platform margins must be re-verified against current platform guidelines"
+}

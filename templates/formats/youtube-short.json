@@ -1,0 +1,16 @@
+{
+  "id": "youtube-short",
+  "label": "YouTube Short",
+  "aspect_ratio": "9:16",
+  "shots": 5,
+  "seconds_per_shot": 4,
+  "resolution": "720p",
+  "audio": true,
+  "safe_area": {"top": 0.1, "bottom": 0.2, "left": 0.05, "right": 0.05},
+  "caption": {"font": "Poppins", "size": 38, "weight": 700, "y": 0.7, "bg": "#000000AA"},
+  "cta": {"text": "Subscribe", "last_seconds": 2},
+  "loudness": -14,
+  "brief": {"length": "20 seconds", "purpose": "social"},
+  "suggested_models": {"video": ["google/veo-3.1-lite"]},
+  "notes": "Platform margins must be re-verified against current YouTube Shorts guidelines"
+}

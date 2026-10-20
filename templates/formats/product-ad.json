@@ -1,0 +1,16 @@
+{
+  "id": "product-ad",
+  "label": "Product Ad",
+  "aspect_ratio": "9:16",
+  "shots": 6,
+  "seconds_per_shot": 4,
+  "resolution": "1080p",
+  "audio": true,
+  "safe_area": {"top": 0.1, "bottom": 0.18, "left": 0.05, "right": 0.05},
+  "caption": {"font": "Anton", "size": 44, "weight": 400, "y": 0.75, "bg": "#000000CC"},
+  "cta": {"text": "Shop Now", "last_seconds": 3},
+  "loudness": -14,
+  "brief": {"length": "24 seconds", "purpose": "advertising"},
+  "suggested_models": {"video": ["google/veo-3.1-lite", "runway/gen-3-alpha-turbo"]},
+  "notes": "Platform margins must be re-verified against current ad platform guidelines"
+}
