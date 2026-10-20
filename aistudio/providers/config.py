@@ -45,6 +45,9 @@ PROVIDER_TYPES = {
     "custom": {"label": "Custom (OpenAI-compatible)", "sub": "Any server with /chat/completions", "adapter": "openai.OpenAIAdapter", "fields": ["api_key"], "base_url": True},
     "fake": {"label": "Built-in test", "sub": "Free, offline, for trying things out", "adapter": "fake.FakeAdapter", "fields": [], "base_url": False},
     "elevenlabs": {"label": "ElevenLabs", "sub": "TTS, voice clone, SFX, music, transcription (Scribe)", "adapter": "elevenlabs.ElevenLabsAdapter", "fields": ["api_key"], "base_url": False},
+    "stability": {"label": "Stability AI", "sub": "Stable Audio: music and sound effects", "adapter": "stability.StabilityAdapter", "fields": ["api_key"], "base_url": False},
+    "cartesia": {"label": "Cartesia", "sub": "Fast text-to-speech and voice cloning", "adapter": "cartesia.CartesiaAdapter", "fields": ["api_key"], "base_url": False},
+    "fal": {"label": "fal.ai", "sub": "One key for many hosted models: music, SFX, lip sync, speech, image, video", "adapter": "fal.FalAdapter", "fields": ["api_key"], "base_url": False},
 }
 
 
