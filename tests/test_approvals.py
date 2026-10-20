@@ -1,3 +1,4 @@
+import json
 import tempfile, unittest
 from pathlib import Path
 from aistudio import approvals as A
@@ -111,6 +112,21 @@ class TestApprovals(unittest.TestCase):
         self.assertIs(A.redeem(self.p, grant, "image"), grant)
         with self.assertRaises(A.ApprovalError):
             A.redeem(self.p, grant, "image")
+
+    def test_fallback_code_is_hmac_derived_and_not_stored(self):
+        secret = "keychain-only-secret"
+        challenge = A.issue_code(self.p, "proposal", "proposal", "hash", secret, now=100.0)
+        stored = (self.p / "approval_challenges.json").read_text(encoding="utf-8")
+        self.assertNotIn(challenge["code"], stored)
+        self.assertNotIn('"code_sha"', stored)
+        self.assertTrue(A.redeem_code(self.p, challenge["id"], challenge["code"], "proposal", "proposal", "hash", secret, now=101.0))
+        with self.assertRaises(A.ApprovalError):
+            A.redeem_code(self.p, challenge["id"], challenge["code"], "proposal", "proposal", "hash", secret, now=102.0)
+
+    def test_fallback_code_wrong_secret_fails(self):
+        challenge = A.issue_code(self.p, "proposal", "proposal", "hash", "first", now=100.0)
+        with self.assertRaises(A.ApprovalError):
+            A.redeem_code(self.p, challenge["id"], challenge["code"], "proposal", "proposal", "hash", "second", now=101.0)
 
     def test_negative_price(self):
         with self.assertRaises(A.ApprovalError):

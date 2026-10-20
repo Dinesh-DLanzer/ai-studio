@@ -1,9 +1,9 @@
-"""MCP server (stdio, newline-delimited JSON-RPC) so AI agents can drive AI Studio projects.  Standard library only.
+"""MCP server (stdio, newline-delimited JSON-RPC) so agents can drive AI Studio projects. Standard library only.
 
-APPROVAL BY DESIGN: AI agents (Claude Code, OpenCode, Codex, Antigravity CLI/IDE) can perform ALL processes
-end-to-end, including story conversion, budget approvals, proposals, shot approvals, and project trashing/deletion.
-High-impact and spending actions enforce explicit confirmation parameters (e.g. confirm=true or confirm=project_name),
-prompting the client agent to show interactive user approval popups before execution.
+APPROVAL BY DESIGN: agents can inspect projects and create proposals, but a human must approve every budget and
+paid proposal. MCP clients advertising form elicitation receive an ``elicitation/create`` dialog. Other clients get
+a one-time code challenge; the code is shown only in the local web notification and ``aistudio serve`` stderr.
+``confirm=true`` is never an approval signal. ``delete_project`` remains a non-spending name confirmation.
 
 Run:  python3 -m aistudio.mcp_server      (AISTUDIO_HOME = workspace folder; default: the repo)
 Claude Code:  claude mcp add ai-studio -- python3 -m aistudio.mcp_server
@@ -12,6 +12,7 @@ import json
 import os
 import sys
 
+from aistudio import approvals, notifications
 from aistudio.service import REPO, ServiceError, Workspace
 
 PROTOCOL = "2024-11-05"
@@ -19,84 +20,152 @@ S = lambda **props: {"type": "object", "properties": props, "required": [k for k
 STR = {"type": "string"}
 
 
-def _approve_budget_mcp(ws, a):
-    b = ws.overview(a["name"]).get("budget") or {}
+class MCPConnection:
+    """Small transport seam for nested server-to-client MCP requests and tests."""
+
+    def __init__(self, request=None, client_capabilities=None):
+        self.request_callback = request
+        self.client_capabilities = client_capabilities or {}
+
+    def supports(self, mode="form"):
+        caps = self.client_capabilities or {}
+        if not isinstance(caps, dict) or "elicitation" not in caps:
+            return False
+        elicitation = caps.get("elicitation")
+        if elicitation == {}:
+            return mode == "form"
+        return mode in elicitation
+
+    def request(self, method, params):
+        if not self.request_callback:
+            return None
+        return self.request_callback(method, params)
+
+
+def _client_capabilities(params):
+    params = params or {}
+    meta = params.get("_meta") or {}
+    namespaced = meta.get("io.modelcontextprotocol/clientCapabilities")
+    return namespaced if isinstance(namespaced, dict) else (params.get("capabilities") or {})
+
+
+def _budget_request(ws, name):
+    b = ws.overview(name).get("budget") or {}
     if not b.get("estimate"):
-        b = ws.estimate(a["name"])
+        b = ws.estimate(name)
+    return b, approvals.request_hash("budget", name, "budget", b.get("estimate", 0), {"estimate": b.get("estimate", 0), "stop_loss": b.get("stop_loss", 0)})
+
+
+def _approval_secret(ws):
+    """Load or create the MCP fallback HMAC key in the external secret store."""
+    ref = "mcp-approval-hmac"
+    fields = ws.secrets.get(ref)
+    if not fields.get("secret"):
+        import secrets as _secrets
+        ws.secrets.set(ref, {"secret": _secrets.token_urlsafe(32)})
+        fields = ws.secrets.get(ref)
+    return fields["secret"]
+
+
+def _fallback_approval(ws, name, reference, kind, request_hash_value, message):
+    challenge = approvals.issue_code(ws.pdir(name), reference, kind, request_hash_value, _approval_secret(ws))
+    notifications.publish_approval(ws.pdir(name), challenge["id"], challenge["code"], message)
+    print(f"[AI Studio approval] {message} Code ID: {challenge['id']}. One-time code: {challenge['code']} (expires in 10 minutes)", file=sys.stderr, flush=True)
+    return {"approval_needed": True, "code_id": challenge["id"], "expires": challenge["expires"],
+            "message": message, "next_step": f"Have the human provide the one-time code for code_id '{challenge['id']}' and call again with code and code_id. The code is not in this response."}
+
+
+def _elicit_approval(session, message, price):
+    if not session or not session.supports("form"):
+        return False
+    response = session.request("elicitation/create", {
+        "mode": "form",
+        "message": message,
+        "requestedSchema": {"type": "object", "properties": {
+            "approve": {"type": "boolean", "title": f"I approve ${float(price):.3f}", "description": "Tick only after reviewing the exact request and price.", "default": False}
+        }, "required": ["approve"]},
+    }) or {}
+    if response.get("action") != "accept":
+        raise ServiceError(f"human approval {response.get('action', 'was not accepted')}")
+    if not isinstance(response.get("content"), dict) or response["content"].get("approve") is not True:
+        raise ServiceError("human approval checkbox was not ticked")
+    return True
+
+
+def _approve_budget_mcp(ws, a, session=None):
+    name = a["name"]
+    b, request_digest = _budget_request(ws, name)
     est, stop = b.get("estimate", 0), b.get("stop_loss", 0)
-    if not a.get("confirm"):
-        raise ServiceError(
-            f"Budget approval requires confirm=true. Ask user in CLI: 'Approve project budget estimate of ${est:.2f} (stop-loss: ${stop:.2f})?' "
-            f"and on confirmation call approve_budget(name='{a['name']}', confirm=true)."
-        )
-    ws.approve_budget(a["name"])
-    return {
-        "ok": True,
-        "approved": True,
-        "project": a["name"],
-        "budget": ws.overview(a["name"]).get("budget"),
-        "message": f"Budget approved (${est:.2f}). Generation proposals can now be created and executed.",
-    }
+    if a.get("confirm") is not None:
+        raise ServiceError("confirm=true is not human approval; use MCP elicitation or the one-time fallback code")
+    if a.get("code"):
+        if not a.get("code_id"):
+            raise ServiceError("code_id is required with an approval code")
+        try:
+            approvals.redeem_code(ws.pdir(name), a["code_id"], a["code"], name, "budget", request_digest, _approval_secret(ws))
+            notifications.mark_used(a["code_id"])
+        except approvals.ApprovalError as e:
+            raise ServiceError(str(e)) from None
+    elif not _elicit_approval(session, f"Approve project budget estimate of ${est:.2f} (stop-loss: ${stop:.2f})?", est):
+        return _fallback_approval(ws, name, name, "budget", request_digest, f"Approve project budget estimate of ${est:.2f} (stop-loss: ${stop:.2f})?")
+    ws.approve_budget(name)
+    return {"ok": True, "approved": True, "project": name, "budget": ws.overview(name).get("budget"),
+            "message": f"Budget approved (${est:.2f}). Generation proposals can now be created and executed."}
 
 
-def _approve_proposal_mcp(ws, a):
-    prop = ws.proposal_status(a["name"], a["id"])
-    if not a.get("confirm"):
-        raise ServiceError(
-            f"Proposal approval requires confirm=true. Ask user in CLI: 'Approve {prop['kind']} {prop['shot']} for ${prop['price']:.3f}?' "
-            f"and on confirmation call approve_proposal(name='{a['name']}', id='{a['id']}', confirm=true)."
-        )
-    ws.approve_human(a["name"], a["id"])
-    return {
-        "ok": True,
-        "approved": True,
-        "proposal_id": a["id"],
-        "message": f"Proposal {a['id']} approved (${prop['price']:.3f}). Run it via run_proposal(name='{a['name']}', id='{a['id']}').",
-    }
+def _approve_proposal_mcp(ws, a, session=None):
+    name, pid = a["name"], a["id"]
+    prop = ws.proposal_status(name, pid)
+    if a.get("confirm") is not None:
+        raise ServiceError("confirm=true is not human approval; use MCP elicitation or the one-time fallback code")
+    request_digest = prop.get("hash")
+    message = f"Approve {prop['kind']} '{prop['shot']}' with {prop.get('model', '')} for ${prop['price']:.3f}?"
+    if a.get("code"):
+        if not a.get("code_id"):
+            raise ServiceError("code_id is required with an approval code")
+        try:
+            approvals.redeem_code(ws.pdir(name), a["code_id"], a["code"], pid, "proposal", request_digest, _approval_secret(ws))
+            notifications.mark_used(a["code_id"])
+        except approvals.ApprovalError as e:
+            raise ServiceError(str(e)) from None
+    elif not _elicit_approval(session, message, prop["price"]):
+        return _fallback_approval(ws, name, pid, "proposal", request_digest, message)
+    ws.approve_human(name, pid)
+    return {"ok": True, "approved": True, "proposal_id": pid,
+            "message": f"Proposal {pid} approved (${prop['price']:.3f}). Run it via run_proposal(name='{name}', id='{pid}')."}
 
 
 def _estimate_mcp(ws, a):
     b = ws.estimate(a["name"], float(a.get("failure", 0.2)))
     est, stop = b.get("estimate", 0), b.get("stop_loss", 0)
-    b["cli_approval_prompt"] = f"Approve estimated project budget of ${est:.2f} (stop-loss: ${stop:.2f})?"
-    b["next_step"] = f"Ask user: '{b['cli_approval_prompt']}'. On confirmation call approve_budget(name='{a['name']}', confirm=true). Do NOT redirect user to web UI."
+    b["human_approval"] = f"Approve estimated project budget of ${est:.2f} (stop-loss: ${stop:.2f}) using approve_budget; MCP will show an elicitation dialog when supported."
     return b
 
 
 def _propose_mcp(ws, a):
-    res = ws.propose(a["name"], a["kind"], a["target"], reveal_code=False)
-    res["cli_approval_prompt"] = f"Approve {res['kind']} '{res['shot']}' with {res['model']} for ${res['price']:.3f}?"
-    res["next_step"] = f"Ask user: '{res['cli_approval_prompt']}'. On confirmation call run_proposal(name='{a['name']}', id='{res['id']}', confirm=true). Do NOT redirect user to web UI."
+    res = ws.propose(a["name"], a["kind"], a["target"])
+    res["human_approval"] = f"Use approve_proposal or run_proposal; the MCP client will show the exact price and request for human approval."
     return res
 
 
-def _run_proposal_mcp(ws, a):
+def _run_proposal_mcp(ws, a, session=None):
     name, pid = a["name"], a["id"]
     prop = ws.proposal_status(name, pid)
     overview = ws.overview(name)
     b = overview.get("budget") or {}
     if not b.get("approved"):
         est = b.get("estimate", 0)
-        raise ServiceError(
-            f"Project budget is not approved yet (estimate: ${est:.2f}). "
-            f"Ask the user in terminal: 'Approve budget estimate of ${est:.2f}?' "
-            f"and on confirmation call approve_budget(name='{name}', confirm=true). "
-            f"Do NOT tell the user to open the web UI."
-        )
+        raise ServiceError(f"Project budget is not approved yet (estimate: ${est:.2f}). Use approve_budget; confirm=true is not accepted.")
+    if a.get("confirm") is not None:
+        raise ServiceError("confirm=true is not human approval; use MCP elicitation or the one-time fallback code")
     if prop["status"] == "pending":
-        if a.get("confirm"):
-            ws.approve_human(name, pid)
-        else:
-            kind, target, model, price = prop.get("kind"), prop.get("shot"), prop.get("model"), prop.get("price", 0)
-            raise ServiceError(
-                f"Proposal {pid} ({kind} '{target}' via {model}) is pending approval for ${price:.3f}. "
-                f"Ask the user in terminal: 'Approve {kind} {target} for ${price:.3f}?' "
-                f"and on confirmation call run_proposal(name='{name}', id='{pid}', confirm=true) "
-                f"or approve_proposal(name='{name}', id='{pid}', confirm=true). "
-                f"Do NOT tell the user to open the web UI."
-            )
-    override = bool(a.get("override", False))
-    return ws.execute(name, pid, override=override)
+        approval_args = {"name": name, "id": pid}
+        if a.get("code"):
+            approval_args.update({"code": a.get("code"), "code_id": a.get("code_id")})
+        approval = _approve_proposal_mcp(ws, approval_args, session=session)
+        if approval.get("approval_needed"):
+            return approval
+    return ws.execute(name, pid, override=bool(a.get("override", False)))
 
 
 TOOLS = {
@@ -122,18 +191,18 @@ TOOLS = {
     "convert_story": ("Parse Story.md and write shots.json + images.json. Free. Overwrites both.", S(name=STR), lambda ws, a: ws.convert_story(a["name"])),
     "update_shots": ("Replace shots.json (validated). Free. Changing shots needs a new estimate and human re-approval.", S(name=STR, doc={"type": "object"}), lambda ws, a: ws.put_shots(a["name"], a["doc"]) or {"ok": True}),
     "update_images": ("Replace images.json (validated). Free.", S(name=STR, doc={"type": "object"}), lambda ws, a: ws.put_images(a["name"], a["doc"]) or {"ok": True}),
-    "estimate": ("Compute budget estimate (free). Approve via approve_budget in CLI or web UI before generating.", S(name=STR, failure={"type": "number", "optional": True}), lambda ws, a: _estimate_mcp(ws, a)),
+    "estimate": ("Compute budget estimate (free). A human must approve it through MCP elicitation or the one-time fallback code before generating.", S(name=STR, failure={"type": "number", "optional": True}), lambda ws, a: _estimate_mcp(ws, a)),
     "approve_budget": (
-        "Approve the estimated budget cap for a project so video/image generation can proceed. High-impact: requires confirm=true to trigger user approval in CLI.",
-        S(name=STR, confirm={"type": "boolean", "description": "Explicit approval confirmation"}),
+        "Request human approval for the exact estimated budget. MCP elicitation is used when the client advertises it; otherwise a one-time code challenge is returned. confirm=true is not accepted.",
+        S(name=STR, code={"type": "string", "optional": True}, code_id={"type": "string", "optional": True}),
         lambda ws, a: _approve_budget_mcp(ws, a),
     ),
-    "propose": ("Propose a PAID action (nothing is spent). kind = image | clip | review; target = image id or shot id. Returns price and proposal id; approve and run via run_proposal(..., confirm=true) or approve_proposal.",
+    "propose": ("Propose a PAID action (nothing is spent). kind = image | clip | review; target = image id or shot id. A human must approve the exact proposal before it can run.",
                 S(name=STR, kind={"type": "string", "enum": ["image", "clip", "review"]}, target=STR), lambda ws, a: _propose_mcp(ws, a)),
     "get_proposal": ("Status of a proposal: pending | approved | used | rejected | expired | void.", S(name=STR, id=STR), lambda ws, a: ws.proposal_status(a["name"], a["id"])),
     "approve_proposal": (
-        "Approve a pending generation proposal (image, clip, or review). High-impact: requires confirm=true to trigger user approval popup in CLI.",
-        S(name=STR, id=STR, confirm={"type": "boolean", "description": "Explicit approval confirmation"}),
+        "Request human approval for a pending proposal. Uses MCP elicitation when available; otherwise returns a one-time code challenge. confirm=true is not accepted.",
+        S(name=STR, id=STR, code={"type": "string", "optional": True}, code_id={"type": "string", "optional": True}),
         lambda ws, a: _approve_proposal_mcp(ws, a),
     ),
     "reject_proposal": (
@@ -142,8 +211,8 @@ TOOLS = {
         lambda ws, a: ws.reject(a["name"], a["id"]) or {"ok": True, "rejected": a["id"]},
     ),
     "run_proposal": (
-        "Execute a generation proposal (spends money in real mode). If proposal is pending approval, set confirm=true to approve and execute in one step with user confirmation. Set override=true to override attempt limits (e.g. past 3 attempts) or stop-loss limits.",
-        S(name=STR, id=STR, confirm={"type": "boolean", "optional": True, "description": "Confirm approval and execute (triggers user approval popup in CLI)"},
+        "Execute a proposal only after human approval. Pending proposals use MCP elicitation or a one-time code challenge; confirm=true is not accepted. Set override=true to override attempt or stop-loss limits.",
+        S(name=STR, id=STR, code={"type": "string", "optional": True}, code_id={"type": "string", "optional": True},
           override={"type": "boolean", "optional": True, "description": "Override attempt limits (e.g. past 3 attempts) or stop-loss limits"}),
         lambda ws, a: _run_proposal_mcp(ws, a),
     ),
@@ -225,7 +294,7 @@ def tool_list():
     return [{"name": n, "description": d, "inputSchema": schema} for n, (d, schema, _) in TOOLS.items()]
 
 
-def handle(msg, ws):
+def handle(msg, ws, session=None):
     """Return a response dict, or None for notifications."""
     method, mid = msg.get("method"), msg.get("id")
     if mid is None:
@@ -233,7 +302,13 @@ def handle(msg, ws):
     ok = lambda result: {"jsonrpc": "2.0", "id": mid, "result": result}
     err = lambda code, m: {"jsonrpc": "2.0", "id": mid, "error": {"code": code, "message": m}}
     if method == "initialize":
-        return ok({"protocolVersion": PROTOCOL, "capabilities": {"tools": {}}, "serverInfo": {"name": "ai-studio", "version": "0.1.0"}})
+        caps = _client_capabilities(msg.get("params"))
+        if session is not None:
+            session.client_capabilities = caps
+        server_caps = {"tools": {}}
+        if (session and session.supports("form")) or (not session and MCPConnection(client_capabilities=caps).supports("form")):
+            server_caps["elicitation"] = {"form": {}}
+        return ok({"protocolVersion": PROTOCOL, "capabilities": server_caps, "serverInfo": {"name": "ai-studio", "version": "0.1.0"}})
     if method == "ping":
         return ok({})
     if method == "tools/list":
@@ -247,7 +322,15 @@ def handle(msg, ws):
             missing = [k for k in TOOLS[name][1]["required"] if k not in args]
             if missing:
                 raise ServiceError(f"missing arguments: {', '.join(missing)}")
-            result, is_err = TOOLS[name][2](ws, args), False
+            if name == "approve_budget":
+                result = _approve_budget_mcp(ws, args, session=session)
+            elif name == "approve_proposal":
+                result = _approve_proposal_mcp(ws, args, session=session)
+            elif name == "run_proposal":
+                result = _run_proposal_mcp(ws, args, session=session)
+            else:
+                result = TOOLS[name][2](ws, args)
+            is_err = False
         except ServiceError as e:
             result, is_err = {"error": str(e)}, True
         except Exception as e:  # provider/network problems: report, never crash the server
@@ -256,20 +339,63 @@ def handle(msg, ws):
     return err(-32601, f"method not found: {method}")
 
 
-def main():
-    home = os.environ.get("AISTUDIO_HOME") or REPO
-    ws = Workspace(home)
-    for line in sys.stdin:
+class StdioConnection(MCPConnection):
+    """Synchronous newline JSON-RPC transport supporting nested elicitation requests."""
+
+    def __init__(self, reader, writer):
+        super().__init__()
+        self.reader, self.writer, self.next_id = reader, writer, 1
+
+    def _write(self, message):
+        self.writer.write(json.dumps(message, ensure_ascii=False) + "\n")
+        self.writer.flush()
+
+    def request(self, method, params):
+        request_id = f"server-elicitation-{self.next_id}"
+        self.next_id += 1
+        self._write({"jsonrpc": "2.0", "id": request_id, "method": method, "params": params})
+        while True:
+            line = self.reader.readline()
+            if not line:
+                raise ServiceError("MCP client disconnected during human approval")
+            try:
+                incoming = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if incoming.get("id") == request_id and "method" not in incoming:
+                if "error" in incoming:
+                    raise ServiceError("MCP client returned an elicitation error")
+                return incoming.get("result") or {}
+            # Preserve the one-request-at-a-time stdio contract while still
+            # servicing notifications or a nested request from the client.
+            nested = handle(incoming, self._workspace, self)
+            if nested is not None:
+                self._write(nested)
+
+
+def serve(reader, writer, ws):
+    session = StdioConnection(reader, writer)
+    session._workspace = ws
+    while True:
+        line = reader.readline()
+        if not line:
+            break
         line = line.strip()
         if not line:
             continue
         try:
-            resp = handle(json.loads(line), ws)
+            resp = handle(json.loads(line), ws, session)
         except json.JSONDecodeError:
             resp = {"jsonrpc": "2.0", "id": None, "error": {"code": -32700, "message": "parse error"}}
+        except Exception as e:
+            resp = {"jsonrpc": "2.0", "id": None, "error": {"code": -32603, "message": str(e)}}
         if resp is not None:
-            sys.stdout.write(json.dumps(resp, ensure_ascii=False) + "\n")
-            sys.stdout.flush()
+            session._write(resp)
+
+
+def main():
+    home = os.environ.get("AISTUDIO_HOME") or REPO
+    serve(sys.stdin, sys.stdout, Workspace(home))
 
 
 if __name__ == "__main__":

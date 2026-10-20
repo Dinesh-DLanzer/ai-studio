@@ -8,8 +8,8 @@ from tests.test_story_convert import MD
 import tests._hermetic as HERM
 
 
-def call(ws, tool, **args):
-    r = M.handle({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": tool, "arguments": args}}, ws)["result"]
+def call(ws, tool, session=None, **args):
+    r = M.handle({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": tool, "arguments": args}}, ws, session=session)["result"]
     return json.loads(r["content"][0]["text"]), r["isError"]
 
 
@@ -110,9 +110,8 @@ class TestMcpExtended(unittest.TestCase):
         # 1. Propose returns CLI approval prompt
         prop, err = call(self.ws, "propose", name="demo", kind="image", target="s01")
         self.assertFalse(err)
-        self.assertIn("cli_approval_prompt", prop)
-        self.assertIn("next_step", prop)
-        self.assertIn("run_proposal", prop["next_step"])
+        self.assertIn("human_approval", prop)
+        self.assertNotIn("code", prop)
 
         pid = prop["id"]
 
@@ -122,18 +121,19 @@ class TestMcpExtended(unittest.TestCase):
         self.assertIn("budget", run_res["error"].lower())
 
         # 3. Approve budget
-        bud, err = call(self.ws, "approve_budget", name="demo", confirm=True)
+        session = M.MCPConnection(lambda method, params: {"action": "accept", "content": {"approve": True}}, {"elicitation": {}})
+        bud, err = call(self.ws, "approve_budget", session=session, name="demo")
         self.assertFalse(err)
         self.assertTrue(bud["approved"])
 
-        # 4. Running pending proposal without confirm fails with CLI prompt
+        # 4. Running pending proposal without elicitation returns a fallback challenge.
         run_res, err = call(self.ws, "run_proposal", name="demo", id=pid)
-        self.assertTrue(err)
-        self.assertIn("pending approval", run_res["error"])
-        self.assertIn("confirm=true", run_res["error"])
+        self.assertFalse(err)
+        self.assertTrue(run_res["approval_needed"])
+        self.assertNotIn("code", run_res)
 
-        # 5. Running pending proposal WITH confirm=True approves and executes
-        run_res, err = call(self.ws, "run_proposal", name="demo", id=pid, confirm=True)
+        # 5. Elicitation approves and executes in one call.
+        run_res, err = call(self.ws, "run_proposal", session=session, name="demo", id=pid)
         self.assertFalse(err)
         self.assertIn("file", run_res)
 

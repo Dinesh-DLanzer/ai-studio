@@ -14,6 +14,7 @@ R = [
     ("POST", "/api/projects/import", False, "Projects", "Create a project from a zip made by Export project. The body is the raw zip; ?name= and ?filename= are optional. Every file is checked first; approvals inside the zip are dropped.", "raw .zip bytes (up to 2 GB)", '{"name", "notes": [...], "files"} or 400 {"detail", "problems": [...]}'),
     ("GET", "/api/projects/{name}", True, "Projects", "Everything about one project: shots, images, budget, costs (used and discarded), proposals, files, reviews, and whether it is a test project.", "-", "overview object"),
     ("GET", "/api/projects/{name}/activity", True, "Projects", "What happened in the project recently (generations, approvals, edits).", "-", '{"activity": [...]}'),
+    ("GET", "/api/approval-notifications", False, "Budget, proposals and approvals", "Human-only approval code notifications from the local MCP fallback.", "-", '{"notifications": [{"id", "code", "message", "project", "expires"}]}'),
     ("GET", "/api/projects/{name}/events", False, "Projects", "Live stream of project changes (server-sent events) so an open page stays current.", "-", "text/event-stream"),
     ("POST", "/api/projects/{name}/favorite", False, "Projects", "Mark or unmark a favorite.", '{"on": true}', '{"name", "favorite"}'),
     ("POST", "/api/projects/{name}/rename", False, "Projects", "Rename the project folder.", '{"new": "better-name"}', '{"name": "better-name"}'),

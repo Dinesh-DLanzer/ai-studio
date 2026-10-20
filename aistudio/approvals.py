@@ -14,6 +14,7 @@ Honest limit: on a single-user local machine, a process with shell access to thi
 proposals.json or call reveal_code=True. This stops accidents and MCP/agent self-approval, not a hostile local user.
 """
 import hashlib
+import hmac
 import json
 import secrets
 import time
@@ -178,6 +179,55 @@ def _kind_allows(role, proposal_kind):
         "video": {"clip", "clip_extend"},
         "vision": {"review", "character_review"},
     }.get(role, {role})
+
+
+def _fallback_code(code_id, keychain_secret):
+    """Derive the six-digit fallback code from the challenge id and external secret."""
+    if not isinstance(keychain_secret, (bytes, bytearray)):
+        keychain_secret = str(keychain_secret).encode("utf-8")
+    digest = hmac.new(keychain_secret, str(code_id).encode("utf-8"), hashlib.sha256).digest()
+    return f"{int.from_bytes(digest[:8], 'big') % 10**6:06d}"
+
+
+def issue_code(pdir, reference, kind, request_hash_value, keychain_secret, ttl=600, now=None):
+    """Issue a short-lived out-of-band code without storing it in the project."""
+    now = time.time() if now is None else now
+    code_id = secrets.token_hex(16)
+    code = _fallback_code(code_id, keychain_secret)
+    f = Path(pdir) / "approval_challenges.json"
+    try:
+        items = json.loads(f.read_text(encoding="utf-8")) if f.exists() else []
+    except (OSError, ValueError):
+        items = []
+    items = [x for x in items if x.get("status") == "pending" and float(x.get("expires", 0)) > now]
+    items.append({"id": code_id, "reference": str(reference), "kind": kind, "request_hash": request_hash_value,
+                  "created": now, "expires": now + ttl, "status": "pending"})
+    f.write_text(json.dumps(items, ensure_ascii=False, indent=2), encoding="utf-8")
+    return {"id": code_id, "code": code, "expires": now + ttl}
+
+
+def redeem_code(pdir, code_id, code, reference, kind, request_hash_value, keychain_secret, now=None):
+    """Redeem exactly one fallback code, bound to the original request."""
+    now = time.time() if now is None else now
+    f = Path(pdir) / "approval_challenges.json"
+    try:
+        items = json.loads(f.read_text(encoding="utf-8")) if f.exists() else []
+    except (OSError, ValueError):
+        items = []
+    item = next((x for x in items if x.get("id") == str(code_id)), None)
+    if not item or item.get("status") != "pending":
+        raise ApprovalError("unknown or already used approval code")
+    if now > float(item.get("expires", 0)):
+        item["status"] = "expired"
+        f.write_text(json.dumps(items, ensure_ascii=False, indent=2), encoding="utf-8")
+        raise ApprovalError("approval code expired")
+    if (item.get("reference"), item.get("kind"), item.get("request_hash")) != (str(reference), kind, request_hash_value):
+        raise ApprovalError("approval code is bound to a different request")
+    if not hmac.compare_digest(str(code), _fallback_code(code_id, keychain_secret)):
+        raise ApprovalError("wrong approval code")
+    item["status"] = "used"
+    f.write_text(json.dumps(items, ensure_ascii=False, indent=2), encoding="utf-8")
+    return True
 
 
 def redeem(pdir, grant, kind):

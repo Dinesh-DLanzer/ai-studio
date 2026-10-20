@@ -1,8 +1,10 @@
+import { useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import * as Menu from "@radix-ui/react-dropdown-menu";
 import { Bell, CheckCircle2, Trash2, XCircle } from "lucide-react";
 import { Spinner } from "../Proposal";
-import { clearNotices, markAllRead, removeNotice, useNotices } from "../notify";
+import { api } from "../api";
+import { clearNotices, markAllRead, notify, removeNotice, useNotices } from "../notify";
 
 const ago = (ts: number) => {
   const s = Math.max(0, Math.round((Date.now() - ts) / 1000));
@@ -12,6 +14,25 @@ const ago = (ts: number) => {
 /** The bell: spinner while an AI process runs, a count of unread results, and the list of recent processes. */
 export default function Notifications() {
   const nav = useNavigate(); const list = useNotices();
+  const seen = useRef(new Set<string>());
+  useEffect(() => {
+    let alive = true;
+    const poll = async () => {
+      try {
+        const result = await api<{ notifications: { id: string; code: string; message: string; project: string }[] }>("GET", "/api/approval-notifications");
+        if (!alive) return;
+        for (const item of result.notifications || []) {
+          if (seen.current.has(item.id)) continue;
+          seen.current.add(item.id);
+          notify("Human approval needed", `${item.message} Code: ${item.code}`, "ok", { project: item.project, to: `/p/${encodeURIComponent(item.project)}/costs` });
+        }
+      } catch { /* unauthenticated/public pages and agent sessions simply have no notices */ }
+    };
+    void poll();
+    const timer = window.setInterval(() => void poll(), 5000);
+    return () => { alive = false; window.clearInterval(timer); };
+  }, []);
+  
   const running = list.filter((n) => n.status === "running").length; const unread = list.filter((n) => n.status !== "running" && !n.read).length;
   return (
     <Menu.Root onOpenChange={(o) => { if (!o) markAllRead(); }}>

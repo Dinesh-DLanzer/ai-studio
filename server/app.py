@@ -18,7 +18,7 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from starlette.background import BackgroundTask
 from fastapi.staticfiles import StaticFiles
 
-from aistudio import apikeys, editor as editormod, importzip as importmod
+from aistudio import apikeys, editor as editormod, importzip as importmod, notifications
 from aistudio.service import REPO, ServiceError, Workspace
 from server import api_docs
 
@@ -152,6 +152,19 @@ def create_app(root=None, token=None, rates_path=None, transport=None, static_di
     @app.get("/api/projects/{name}/activity", dependencies=[api])
     def get_activity(name: str):
         return {"activity": guard(ws.activity, name)}
+
+    @app.get("/api/approval-notifications", dependencies=[api])
+    def get_approval_notifications(request: Request):
+        if getattr(request.state, "scope", "") != "session":
+            raise HTTPException(403, "approval notifications require the human session")
+        out = []
+        for row in ws.list_projects():
+            name = row.get("name")
+            if not name:
+                continue
+            for item in notifications.read_approvals(ws.pdir(name)):
+                out.append({**item, "project": name})
+        return {"notifications": out}
 
     @app.get("/api/projects/{name}/events", dependencies=[api])
     async def project_events(name: str, request: Request):
