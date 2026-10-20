@@ -17,11 +17,12 @@ import hashlib
 import json
 import secrets
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 FILE = "proposals.json"
 MAX_TRIES = 5
+_LIVE_GRANTS = {}
 
 
 class ApprovalError(Exception):
@@ -36,6 +37,8 @@ class Grant:
     request_hash: str
     price: float
     actor: str = "local"
+    kind: str = ""
+    _capability: str = field(default="", repr=False, compare=False)
 
 
 def _canon(d):
@@ -63,14 +66,14 @@ def _find(items, pid):
     raise ApprovalError(f"unknown proposal {pid}")
 
 
-def propose(pdir, kind, shot, model, price, payload, ttl=3600, reveal_code=False, now=None, summary=None, actor="local"):
+def propose(pdir, kind, shot, model, price, payload, ttl=3600, reveal_code=False, now=None, summary=None, actor="local", options=None):
     now = time.time() if now is None else now
     if float(price) < 0:
         raise ApprovalError("negative price")
     code = f"{secrets.randbelow(10**6):06d}"
     p = {"id": secrets.token_hex(6), "kind": kind, "shot": shot, "model": model, "price": round(float(price), 6),
          "hash": request_hash(kind, shot, model, price, payload), "created": now, "expires": now + ttl,
-         "status": "pending", "tries": 0, "code_sha": hashlib.sha256(code.encode()).hexdigest(), "summary": summary or {}, "actor": actor}
+         "status": "pending", "tries": 0, "code_sha": hashlib.sha256(code.encode()).hexdigest(), "summary": summary or {}, "actor": actor, "options": options or {}}
     items = _load(pdir)
     items.append(p)
     _save(pdir, items)
@@ -164,4 +167,37 @@ def consume(pdir, pid, request_hash_value=None, *, kind=None, shot=None, model=N
         raise ApprovalError("request changed after approval; propose again")
     p["status"] = "used"
     _save(pdir, items)
-    return Grant(proposal_id=pid, request_hash=request_hash_value, price=float(p["price"]), actor=p.get("actor", "local"))
+    grant = Grant(proposal_id=pid, request_hash=request_hash_value, price=float(p["price"]), actor=p.get("actor", "local"), kind=p.get("kind", ""), _capability=secrets.token_urlsafe(32))
+    _LIVE_GRANTS[(str(Path(pdir).resolve()), pid)] = grant._capability
+    return grant
+
+
+def _kind_allows(role, proposal_kind):
+    return proposal_kind in {
+        "image": {"image", "image_edit"},
+        "video": {"clip", "clip_extend"},
+        "vision": {"review", "character_review"},
+    }.get(role, {role})
+
+
+def redeem(pdir, grant, kind):
+    """Redeem a live grant at the paid boundary; each grant can be redeemed once."""
+    if not isinstance(grant, Grant):
+        raise ApprovalError("invalid grant")
+    key = (str(Path(pdir).resolve()), grant.proposal_id)
+    if not grant._capability or _LIVE_GRANTS.get(key) != grant._capability:
+        raise ApprovalError("grant is not a live approval capability")
+    items = _load(pdir)
+    p = _find(items, grant.proposal_id)
+    if p.get("status") != "used":
+        raise ApprovalError("grant proposal is not consumed")
+    if p.get("redeemed"):
+        raise ApprovalError("grant was already redeemed")
+    if p.get("hash") != grant.request_hash or p.get("kind") != grant.kind:
+        raise ApprovalError("grant does not match the consumed request")
+    if float(p.get("price", 0)) != float(grant.price) or not _kind_allows(kind, grant.kind):
+        raise ApprovalError("grant is for a different paid role")
+    p["redeemed"] = True
+    _save(pdir, items)
+    _LIVE_GRANTS.pop(key, None)
+    return grant

@@ -94,6 +94,24 @@ class TestApprovals(unittest.TestCase):
         with self.assertRaises(A.ApprovalError):
             A.consume(self.p, r["id"], "wrong-hash")
 
+    def test_redeem_rejects_forged_grant(self):
+        r = self.prop()
+        A.approve(self.p, r["id"], r["code"])
+        consumed = A.consume(self.p, r["id"], r["hash"])
+        forged = A.Grant(consumed.proposal_id, consumed.request_hash, consumed.price, consumed.actor, consumed.kind)
+        with self.assertRaises(A.ApprovalError):
+            A.redeem(self.p, forged, "image")
+
+    def test_redeem_is_one_use_and_checks_role(self):
+        r = self.prop(kind="image")
+        A.approve(self.p, r["id"], r["code"])
+        grant = A.consume(self.p, r["id"], r["hash"])
+        with self.assertRaises(A.ApprovalError):
+            A.redeem(self.p, grant, "video")
+        self.assertIs(A.redeem(self.p, grant, "image"), grant)
+        with self.assertRaises(A.ApprovalError):
+            A.redeem(self.p, grant, "image")
+
     def test_negative_price(self):
         with self.assertRaises(A.ApprovalError):
             self.prop(price=-1)

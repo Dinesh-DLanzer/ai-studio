@@ -73,11 +73,14 @@ class RoleRunner:
         return self.fake_for(role, project_dir) if self.fake_for else self.fake_mode()
 
     def _grant(self, role, project_dir, grant):
-        """Require a Grant whenever the configured role can call a non-free card."""
-        if grant is not None and not isinstance(grant, approvals.Grant):
-            raise GrantRequired("invalid approval grant")
+        """Require and redeem a Grant whenever the configured role can call a non-free card."""
         if grant is not None:
-            return grant
+            if not isinstance(grant, approvals.Grant) or project_dir is None:
+                raise GrantRequired("invalid approval grant")
+            try:
+                return approvals.redeem(project_dir, grant, role)
+            except approvals.ApprovalError as e:
+                raise GrantRequired(str(e)) from None
         entries = self.resolve(role, project_dir)
         paid = [e for e in entries if e.get("problem") is None and not self.pricing.is_free(e.get("card"))]
         if paid:
@@ -205,7 +208,8 @@ class RoleRunner:
         cost, src = self._cost(role, out, r["card"])
         return {**out, "cost": cost, "cost_source": src, "provider": r["provider"], "attempts": r["attempts"]}
 
-    def vision(self, prompt, images, opts=None, project_dir=None, allow=None):
+    def vision(self, prompt, images, opts=None, project_dir=None, allow=None, *, grant=None):
+        grant = self._grant("vision", project_dir, grant)
         r = self.run("vision", lambda a, m: a.vision(m, prompt, images, opts), project_dir, allow)
         out = r["result"]
         cost, src = self._cost("vision", out, r["card"])
@@ -311,9 +315,8 @@ class RoleRunner:
         return {**base, "status": "done", "bytes": out["bytes"], "cost": cost, "cost_source": src}
 
     def review(self, prompt, images, opts=None, project_dir=None, *, grant=None):
-        """Run a paid review only with the grant consumed for its proposal."""
-        self._grant("vision", project_dir, grant)
-        return self.vision(prompt, images, opts, project_dir=project_dir)
+        """Compatibility alias for the grant-protected paid vision call."""
+        return self.vision(prompt, images, opts, project_dir=project_dir, grant=grant)
 
     def fetch_video(self, job, req=None):
         """Resolve a job left pending by a timeout. job = {"job_id","model","provider"}."""

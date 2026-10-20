@@ -155,52 +155,59 @@ class TestPaid(unittest.TestCase):
     REQ = {"prompt": "p", "seconds": 4, "resolution": "720p", "aspect_ratio": "9:16", "audio": False}
 
     @staticmethod
-    def grant(price):
-        return approvals.Grant("proposal", "request", price)
+    def grant(p, kind, price):
+        prop = approvals.propose(p, kind, "target", "model", price, {"prompt": "p"}, reveal_code=True)
+        approvals.approve(p, prop["id"], prop["code"])
+        return approvals.consume(p, prop["id"], prop["hash"])
 
     def test_image_requires_grant(self):
         r, _ = setup(chains={"image": ch(("g", "img"))})
         with self.assertRaises(R.GrantRequired):
             r.image("p")
 
+    def test_vision_requires_grant(self):
+        r, p = setup(chains={"vision": ch(("g", "gem"))})
+        with self.assertRaises(R.GrantRequired):
+            r.vision("review", [], project_dir=p)
+
     def test_image_price_rule(self):
-        r, _ = setup(chains={"image": ch(("g", "img"))})
-        grant = approvals.Grant("proposal", "request", 0.04)
-        out = r.image("p", grant=grant)
+        r, p = setup(chains={"image": ch(("g", "img"))})
+        grant = self.grant(p, "image", 0.04)
+        out = r.image("p", project_dir=p, grant=grant)
         self.assertEqual((out["cost"], out["cost_source"]), (0.04, "computed"))
 
     def test_unknown_price_blocks_when_approved_price_given(self):
-        r, _ = setup(chains={"image": ch(("g", "mystery"))})
+        r, p = setup(chains={"image": ch(("g", "mystery"))})
         with self.assertRaises(R.ChainError) as c:
-            r.image("p", grant=self.grant(1.0))
+            r.image("p", project_dir=p, grant=self.grant(p, "image", 1.0))
         self.assertIn("price unknown", str(c.exception))
 
     def test_video_fallback_only_if_not_dearer(self):
         # primary submit fails; chain: veo ($0.05/s), veo2 ($0.5/s, too dear), kling ($0.02/s)
-        r, _ = setup({"g": {"veo": [Rejected("HTTP 400")]}}, {"video": ch(("g", "veo"), ("r", "veo2"), ("k", "kling-v1"))})
-        out = r.video(self.REQ, grant=self.grant(0.2))
+        r, p = setup({"g": {"veo": [Rejected("HTTP 400")]}}, {"video": ch(("g", "veo"), ("r", "veo2"), ("k", "kling-v1"))})
+        out = r.video(self.REQ, project_dir=p, grant=self.grant(p, "clip", 0.2))
         self.assertEqual((out["status"], out["provider"], out["cost"]), ("done", "k", 0.08))
         self.assertNotIn(("r", "veo2", "submit"), Script.log)
 
     def test_needs_new_approval_when_only_dearer_left(self):
-        r, _ = setup({"g": {"veo": [Rejected("HTTP 400")]}}, {"video": ch(("g", "veo"), ("r", "veo2"))})
+        r, p = setup({"g": {"veo": [Rejected("HTTP 400")]}}, {"video": ch(("g", "veo"), ("r", "veo2"))})
         with self.assertRaises(R.NeedsNewApproval) as c:
-            r.video(self.REQ, grant=self.grant(0.2))
+            r.video(self.REQ, project_dir=p, grant=self.grant(p, "clip", 0.2))
         self.assertEqual(c.exception.entry["model"], "veo2")
         self.assertEqual(c.exception.price, 2.0)
 
     def test_accepted_job_that_fails_is_not_resubmitted(self):
-        r, _ = setup({"g": {"poll:veo": [{"status": "failed", "error": "policy", "cost": 0.1}]}}, {"video": ch(("g", "veo"), ("k", "kling-v1"))})
-        out = r.video(self.REQ, grant=self.grant(0.2))
+        r, p = setup({"g": {"poll:veo": [{"status": "failed", "error": "policy", "cost": 0.1}]}}, {"video": ch(("g", "veo"), ("k", "kling-v1"))})
+        out = r.video(self.REQ, project_dir=p, grant=self.grant(p, "clip", 0.2))
         self.assertEqual((out["status"], out["error"], out["provider"]), ("failed", "policy", "g"))
         self.assertEqual([a for a in Script.log if a[2] == "submit"], [("g", "veo", "submit")])
 
     def test_timeout_returns_pending_job(self):
         t = [0.0]
-        r, _ = setup({"g": {"poll:veo": [{"status": "pending", "error": None, "cost": None}]}}, {"video": ch(("g", "veo"))})
+        r, p = setup({"g": {"poll:veo": [{"status": "pending", "error": None, "cost": None}]}}, {"video": ch(("g", "veo"))})
         r.clock = lambda: (t.__setitem__(0, t[0] + 100) or t[0])
         r.sleep = lambda s: None
-        out = r.video(self.REQ, grant=self.grant(0.2), timeout=250)
+        out = r.video(self.REQ, project_dir=p, grant=self.grant(p, "clip", 0.2), timeout=250)
         self.assertEqual(out["status"], "pending")
         self.assertEqual(out["job"], {"job_id": "J-veo", "model": "veo", "provider": "g"})
 
