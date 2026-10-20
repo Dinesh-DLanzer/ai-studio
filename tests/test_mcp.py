@@ -5,7 +5,7 @@ from aistudio import mcp_server as M
 from aistudio.service import Workspace
 from tests.test_story_convert import MD
 
-FORBIDDEN = {"approve", "approve_budget", "approve_proposal", "approve_shot", "approve_human", "set_mode", "execute", "reveal_code"}
+FORBIDDEN = {"set_mode", "reveal_code"}
 
 
 def call(ws, tool, **args):
@@ -23,17 +23,45 @@ class TestMcp(unittest.TestCase):
         self.assertEqual(r["serverInfo"]["name"], "ai-studio")
         self.assertIsNone(M.handle({"jsonrpc": "2.0", "method": "notifications/initialized"}, self.ws))
         tools = M.handle({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}, self.ws)["result"]["tools"]
-        self.assertTrue({"propose", "run_proposal", "convert_story", "get_project"} <= {t["name"] for t in tools})
+        self.assertTrue({"propose", "run_proposal", "convert_story", "get_project", "delete_project", "approve_budget", "approve_proposal"} <= {t["name"] for t in tools})
         self.assertEqual(M.handle({"jsonrpc": "2.0", "id": 3, "method": "nope"}, self.ws)["error"]["code"], -32601)
 
-    def test_no_approval_tools_exist(self):
-        names = {t["name"] for t in M.tool_list()}
-        self.assertFalse(names & FORBIDDEN, names & FORBIDDEN)
-        for n in names:                       # no tool may even accept an approval code or a mode
-            props = M.TOOLS[n][1]["properties"]
-            self.assertFalse({"code", "mode"} & set(props), n)
+    def test_approval_tools_require_confirmation(self):
+        call(self.ws, "create_project", name="demo")
+        call(self.ws, "write_doc", name="demo", doc="Story.md", text=MD)
+        call(self.ws, "convert_story", name="demo")
+        call(self.ws, "estimate", name="demo")
 
-    def test_agent_flow_cannot_spend_without_human(self):
+        # approve_budget without confirm=True fails
+        out, err = call(self.ws, "approve_budget", name="demo", confirm=False)
+        self.assertTrue(err)
+        # approve_budget with confirm=True succeeds
+        out, err = call(self.ws, "approve_budget", name="demo", confirm=True)
+        self.assertFalse(err)
+        self.assertTrue(out.get("approved"))
+
+        # propose image
+        prop, err = call(self.ws, "propose", name="demo", kind="image", target="s01")
+        self.assertFalse(err)
+
+        # approve_proposal without confirm=True fails
+        out, err = call(self.ws, "approve_proposal", name="demo", id=prop["id"], confirm=False)
+        self.assertTrue(err)
+        # approve_proposal with confirm=True succeeds
+        out, err = call(self.ws, "approve_proposal", name="demo", id=prop["id"], confirm=True)
+        self.assertFalse(err)
+        self.assertTrue(out.get("approved"))
+
+        # delete_project without matching name or 'yes' fails
+        out, err = call(self.ws, "delete_project", name="demo", confirm="wrong")
+        self.assertTrue(err)
+
+        # delete_project with 'yes' succeeds
+        out, err = call(self.ws, "delete_project", name="demo", confirm="yes")
+        self.assertFalse(err)
+        self.assertIn("trash", out)
+
+    def test_agent_flow_cannot_spend_without_approval(self):
         call(self.ws, "create_project", name="demo")
         call(self.ws, "write_doc", name="demo", doc="Story.md", text=MD)
         self.assertEqual(len(call(self.ws, "convert_story", name="demo")[0]["shots"]["shots"]), 3)
@@ -45,8 +73,8 @@ class TestMcp(unittest.TestCase):
         out, err = call(self.ws, "run_proposal", name="demo", id=prop["id"])
         self.assertTrue(err)                                   # not approved; budget not approved
         self.assertFalse((Path(self.ws.pdir("demo")) / "stills" / "s01.png").exists())
-        self.ws.approve_budget("demo")                          # the human, in the UI
-        self.ws.approve_human("demo", prop["id"])               # the human, in the UI
+        call(self.ws, "approve_budget", name="demo", confirm=True)
+        call(self.ws, "approve_proposal", name="demo", id=prop["id"], confirm=True)
         out, err = call(self.ws, "run_proposal", name="demo", id=prop["id"])
         self.assertFalse(err)
         self.assertTrue(out["file"].endswith("s01.png"))

@@ -28,6 +28,24 @@ class TestCli(unittest.TestCase):
         self.run_cli(["approve", "demo", prop["id"]], "yes")
         self.assertEqual(self.ws.proposal_status("demo", prop["id"])["status"], "approved")
 
+    def test_delete_and_restore_project(self):
+        # Interactive no cancels
+        self.run_cli(["delete-project", "demo"], "no")
+        self.assertTrue((self.ws.root / "projects" / "demo").is_dir())
+
+        # Interactive yes trashes project
+        self.run_cli(["delete-project", "demo"], "yes")
+        self.assertFalse((self.ws.root / "projects" / "demo").exists())
+
+        # List trash
+        trash = self.ws.trash_list()
+        self.assertEqual(len(trash), 1)
+        tid = trash[0]["id"]
+
+        # Restore trash with -y
+        self.run_cli(["restore-trash", tid, "-y"])
+        self.assertTrue((self.ws.root / "projects" / "demo").is_dir())
+
     def test_errors(self):
         self.assertEqual(self.run_cli(["pending", "nope"]), 1)
 

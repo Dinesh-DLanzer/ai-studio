@@ -3,15 +3,18 @@ and state-changing calls are checked for a local Origin (blocks drive-by request
 
 The HUMAN channel: only this server (used by the web UI) may reveal an approval code. The MCP server never does.
 """
+import asyncio
+import contextlib
+import json
 import os
 import secrets
 import threading
 import uuid
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.concurrency import run_in_threadpool
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from starlette.background import BackgroundTask
 from fastapi.staticfiles import StaticFiles
 
@@ -19,14 +22,41 @@ from aistudio import apikeys, editor as editormod, importzip as importmod
 from aistudio.service import REPO, ServiceError, Workspace
 from server import api_docs
 
-ALLOWED_SUFFIX = {".png", ".jpg", ".jpeg", ".mp4", ".json", ".md", ".csv", ".txt", ".mp3", ".wav", ".m4a", ".aac", ".ogg"}
-SERVE_DIRS = {"stills", "clips", "checks", "audio", "exports"}
+ALLOWED_SUFFIX = {".png", ".jpg", ".jpeg", ".webp", ".svg", ".mp4", ".json", ".md", ".csv", ".txt", ".mp3", ".wav", ".m4a", ".aac", ".ogg"}
+SERVE_DIRS = {"stills", "clips", "checks", "audio", "exports", "elements"}
+
+
+def _stop_chatgpt_listener(app_state):
+    timer = getattr(app_state, "chatgpt_timer", None)
+    if timer:
+        try:
+            timer.cancel()
+        except Exception:
+            pass
+        app_state.chatgpt_timer = None
+    listener = getattr(app_state, "chatgpt_listener", None)
+    if listener:
+        app_state.chatgpt_listener = None
+        try:
+            listener.shutdown()
+        except Exception:
+            pass
+        try:
+            listener.server_close()
+        except Exception:
+            pass
 
 
 def create_app(root=None, token=None, rates_path=None, transport=None, static_dir=None, auto_verify=True, secret_store=None):
     ws = Workspace(root or os.environ.get("AISTUDIO_HOME") or REPO, rates_path=rates_path, transport=transport, auto_verify=auto_verify, secrets=secret_store)
     token = token or os.environ.get("AISTUDIO_TOKEN") or secrets.token_urlsafe(16)
-    app = FastAPI(title="AI Studio", docs_url=None, redoc_url=None, openapi_url=None)
+
+    @contextlib.asynccontextmanager
+    async def lifespan(app_instance: FastAPI):
+        yield
+        _stop_chatgpt_listener(app_instance.state)
+
+    app = FastAPI(title="AI Studio", docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
     app.state.ws, app.state.token, jobs, lock = ws, token, {}, threading.Lock()
 
     @app.middleware("http")
@@ -114,7 +144,49 @@ def create_app(root=None, token=None, rates_path=None, transport=None, static_di
 
     @app.get("/api/projects/{name}", dependencies=[api])
     def overview(name: str):
-        return guard(ws.overview, name)
+        ov = guard(ws.overview, name)
+        if isinstance(ov, dict):
+            ov["activity"] = guard(ws.activity, name)
+        return ov
+
+    @app.get("/api/projects/{name}/activity", dependencies=[api])
+    def get_activity(name: str):
+        return {"activity": guard(ws.activity, name)}
+
+    @app.get("/api/projects/{name}/events", dependencies=[api])
+    async def project_events(name: str, request: Request):
+        async def event_generator():
+            last_activity = ""
+            last_files_mtime = 0
+            while True:
+                if await request.is_disconnected():
+                    break
+                try:
+                    act = guard(ws.activity, name)
+                    act_json = json.dumps(act, sort_keys=True)
+                    if act_json != last_activity:
+                        last_activity = act_json
+                        yield f"data: {json.dumps({'type': 'activity', 'activity': act})}\n\n"
+
+                    p = ws.pdir(name)
+                    stills_dir = p / "stills"
+                    clips_dir = p / "clips"
+                    curr_mtime = max(
+                        stills_dir.stat().st_mtime if stills_dir.exists() else 0,
+                        clips_dir.stat().st_mtime if clips_dir.exists() else 0,
+                        (p / "images.json").stat().st_mtime if (p / "images.json").exists() else 0,
+                        (p / "shots.json").stat().st_mtime if (p / "shots.json").exists() else 0,
+                        (p / "cost_log.csv").stat().st_mtime if (p / "cost_log.csv").exists() else 0,
+                    )
+                    if curr_mtime > last_files_mtime:
+                        if last_files_mtime > 0:
+                            yield f"data: {json.dumps({'type': 'refresh'})}\n\n"
+                        last_files_mtime = curr_mtime
+                except Exception:
+                    pass
+                await asyncio.sleep(1.0)
+
+        return StreamingResponse(event_generator(), media_type="text/event-stream")
 
     @app.get("/api/projects/{name}/docs/{fn}", dependencies=[api])
     def get_doc(name: str, fn: str):
@@ -147,6 +219,12 @@ def create_app(root=None, token=None, rates_path=None, transport=None, static_di
             raise HTTPException(413, "file too large")
         guard(ws.add_file, name, rel, data, bool(replace))
         return {"ok": True}
+
+    @app.post("/api/projects/{name}/character/analyze", dependencies=[api])
+    async def analyze_character(name: str, request: Request):
+        b = await request.json() if (await request.body()) else {}
+        rel = b.get("rel") or b.get("file") or b.get("id") or ""
+        return guard(ws.analyze_character_image, name, rel)
 
     @app.post("/api/projects/{name}/estimate", dependencies=[api])
     async def estimate(name: str, request: Request):
@@ -214,6 +292,16 @@ def create_app(root=None, token=None, rates_path=None, transport=None, static_di
     @app.post("/api/projects/{name}/restore", dependencies=[api])
     async def restore(name: str, request: Request):
         return {"file": guard(ws.restore, name, (await request.json()).get("rel", ""))}
+
+    @app.post("/api/projects/{name}/stills/{shot_id}/edit", dependencies=[api])
+    async def still_edit(name: str, shot_id: str, request: Request):
+        b = await request.json()
+        return guard(ws.edit_still, name, shot_id, b.get("prompt", ""), b.get("edit_mode", "inpaint_insertion"), b.get("mask_mode", "MASK_MODE_BACKGROUND"))
+
+    @app.post("/api/projects/{name}/clips/{shot_id}/extend", dependencies=[api])
+    async def clip_extend(name: str, shot_id: str, request: Request):
+        b = await request.json()
+        return guard(ws.extend_clip, name, shot_id, b.get("prompt", ""), int(b.get("seconds", 5)))
 
     @app.get("/api/projects/{name}/costs", dependencies=[api])
     def costs(name: str):
@@ -344,6 +432,108 @@ def create_app(root=None, token=None, rates_path=None, transport=None, static_di
     def provider_delete(pid: str, force: int = 0):
         return guard(ws.provider_delete, pid, bool(force))
 
+    @app.get("/api/providers/chatgpt/oauth/status", dependencies=[api])
+    def chatgpt_status():
+        return guard(ws.chatgpt_status)
+
+    @app.post("/api/providers/chatgpt/oauth/import-codex", dependencies=[hdr])
+    def chatgpt_import_codex():
+        return guard(ws.chatgpt_import_codex)
+
+    def _is_chatgpt_port_free(redirect_uri=None):
+        if getattr(app.state, "chatgpt_listener", None):
+            return True
+        from aistudio.providers import chatgpt_auth
+        import socket
+        import urllib.parse
+        port = urllib.parse.urlparse(redirect_uri or chatgpt_auth.REDIRECT_URI).port or 1455
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            try:
+                s.bind(("127.0.0.1", port))
+                return True
+            except OSError:
+                return False
+
+    @app.get("/api/providers/chatgpt/oauth/port-check", dependencies=[api])
+    def chatgpt_port_check():
+        from aistudio.providers import chatgpt_auth
+        import urllib.parse
+        port = urllib.parse.urlparse(chatgpt_auth.REDIRECT_URI).port or 1455
+        free = _is_chatgpt_port_free()
+        return {"port": port, "free": free, "message": f"Port {port} is free." if free else f"Port {port} is currently occupied by another program (e.g. 'codex login')."}
+
+    @app.get("/api/providers/chatgpt/oauth/authorize", dependencies=[api])
+    def chatgpt_authorize(request: Request):
+        from aistudio.providers import chatgpt_auth
+        import urllib.parse
+        port = urllib.parse.urlparse(chatgpt_auth.REDIRECT_URI).port or 1455
+        if not _is_chatgpt_port_free(chatgpt_auth.REDIRECT_URI):
+            raise HTTPException(409, f"Port {port} is currently occupied by another program (e.g. 'codex login'). Please close it and try again.")
+        res = guard(ws.chatgpt_authorize)
+        _chatgpt_listen(res["state"], chatgpt_auth.REDIRECT_URI)
+        return res
+
+    @app.get("/api/providers/chatgpt/oauth/callback")
+    def chatgpt_callback(code: str = "", state: str = "", error: str = ""):
+        return _chatgpt_done(code, state, error)
+
+    def _chatgpt_done(code, state, error=""):
+        from fastapi.responses import HTMLResponse
+        try:
+            if error:
+                raise ServiceError(error)
+            ws.chatgpt_finish(code, state)
+            msg, ok = "ChatGPT is connected. You can close this tab and return to AI Studio.", True
+        except ServiceError as e:
+            msg, ok = f"ChatGPT sign-in failed: {e}", False
+        return HTMLResponse(f"<!doctype html><title>AI Studio</title><body style='font:16px system-ui;padding:3rem'><h2>{'Connected' if ok else 'Not connected'}</h2><p>{msg}</p>", 200 if ok else 400)
+
+    def _chatgpt_stop_listener():
+        _stop_chatgpt_listener(app.state)
+
+    def _chatgpt_listen(state, redirect_uri):
+        """OpenAI only accepts the redirect registered for its client (localhost:1455); serve that one callback, once, then stop."""
+        import http.server
+        import urllib.parse
+        if getattr(app.state, "chatgpt_listener", None):
+            return
+        class H(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *a):
+                pass
+            def do_GET(self):
+                u = urllib.parse.urlparse(self.path)
+                if u.path != urllib.parse.urlparse(redirect_uri).path:
+                    self.send_error(404)
+                    return
+                q = {k: v[0] for k, v in urllib.parse.parse_qs(u.query).items()}
+                r = _chatgpt_done(q.get("code", ""), q.get("state", ""), q.get("error", ""))
+                self.send_response(r.status_code)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.end_headers()
+                self.wfile.write(r.body)
+                threading.Thread(target=_chatgpt_stop_listener, daemon=True).start()
+        try:
+            srv = http.server.ThreadingHTTPServer(("127.0.0.1", urllib.parse.urlparse(redirect_uri).port or 1455), H)
+            srv.daemon_threads = True
+        except OSError:
+            raise ServiceError(f"Port {urllib.parse.urlparse(redirect_uri).port or 1455} is busy (e.g. 'codex login' running). Close it before signing in.")
+        app.state.chatgpt_listener = srv
+        def run():
+            try:
+                srv.serve_forever()
+            finally:
+                try:
+                    srv.server_close()
+                except Exception:
+                    pass
+                if getattr(app.state, "chatgpt_listener", None) is srv:
+                    app.state.chatgpt_listener = None
+        threading.Thread(target=run, daemon=True).start()
+        timer = threading.Timer(900, _chatgpt_stop_listener)
+        timer.daemon = True
+        timer.start()
+        app.state.chatgpt_timer = timer
+
     @app.put("/api/providers/{pid}/secret", dependencies=[hdr])
     async def provider_secret_put(pid: str, request: Request):
         return guard(ws.provider_secret_put, pid, await request.json())
@@ -391,8 +581,8 @@ def create_app(root=None, token=None, rates_path=None, transport=None, static_di
         return guard(ws.roles_put, role, b.get("chain", []), b.get("policy"), project or None)
 
     @app.post("/api/roles/{role}/test", dependencies=[api])
-    def roles_test(role: str, project: str = ""):
-        return guard(ws.roles_test, role, project or None)
+    def roles_test(role: str, project: str = "", provider: str = "", model: str = ""):
+        return guard(ws.roles_test, role, project or None, provider or None, model or None)
 
     @app.put("/api/limits", dependencies=[api])
     async def limits_put(request: Request):
@@ -451,12 +641,46 @@ def create_app(root=None, token=None, rates_path=None, transport=None, static_di
     def exports_list(name: str):
         return {"exports": guard(ws.exports, name)}
 
+    # ---- the timeline also leaves as Final Cut Pro XML, a CMX 3600 EDL, captions and a Canva / Google Vids bundle (all free)
+    @app.get("/api/projects/{name}/edit/export-fcpxml", dependencies=[api])
+    def edit_export_fcpxml(name: str):
+        return Response(guard(ws.export_fcpxml, name), media_type="application/xml",
+                        headers={"content-disposition": f'attachment; filename="{name}.fcpxml"'})
+
+    @app.get("/api/projects/{name}/edit/export-edl", dependencies=[api])
+    def edit_export_edl(name: str):
+        return Response(guard(ws.export_edl, name), media_type="text/plain",
+                        headers={"content-disposition": f'attachment; filename="{name}.edl"'})
+
+    @app.get("/api/projects/{name}/edit/export-subtitles", dependencies=[api])
+    def edit_export_subtitles(name: str, format: str = "srt"):
+        body = guard(ws.export_subtitles, name, format)
+        media = "application/x-subrip" if format == "srt" else "text/vtt"
+        return Response(body, media_type=media, headers={"content-disposition": f'attachment; filename="{name}.{format}"'})
+
+    @app.get("/api/projects/{name}/edit/export-bundle", dependencies=[api])
+    def edit_export_bundle(name: str):
+        path = guard(ws.export_bundle, name)
+        return FileResponse(path, media_type="application/zip", filename=f"{name}-edit-bundle.zip",
+                            background=BackgroundTask(Path(path).unlink, missing_ok=True))
+
     @app.post("/api/projects/{name}/audio", dependencies=[api])
     async def audio_upload(name: str, filename: str, request: Request):
         data = await request.body()
         if len(data) > 25_000_000:
             raise HTTPException(413, "file too large")
         return guard(ws.add_audio, name, filename, data)
+
+    @app.get("/api/projects/{name}/elements", dependencies=[api])
+    def elements_list(name: str):
+        return {"elements": guard(ws.list_elements, name)}
+
+    @app.post("/api/projects/{name}/elements", dependencies=[api])
+    async def element_upload(name: str, filename: str, request: Request):
+        data = await request.body()
+        if len(data) > 25_000_000:
+            raise HTTPException(413, "file too large")
+        return guard(ws.add_element, name, filename, data)
 
     @app.get("/api/projects/{name}/export-project", dependencies=[api])
     def export_project(name: str, include_discarded: int = 0):
@@ -506,6 +730,35 @@ def create_app(root=None, token=None, rates_path=None, transport=None, static_di
                 "tools": [{"name": t["name"], "description": t["description"]} for t in mcp_server.tool_list()],
                 "base_url": str(request.base_url).rstrip("/")}
 
+    @app.get("/api/agents", dependencies=[api])
+    def agents_list():
+        return {"agents": ws.list_agents()}
+
+    @app.post("/api/agents/run", dependencies=[api])
+    async def agents_run(request: Request):
+        import json
+        b = await request.json()
+        agent_id = b.get("agent_id", "")
+        prompt = b.get("prompt", "")
+        project = b.get("project")
+
+        def event_generator():
+            try:
+                for chunk in ws.run_agent_stream(agent_id, prompt, project=project):
+                    yield f"data: {json.dumps({'type': 'chunk', 'text': chunk})}\n\n"
+                yield f"data: {json.dumps({'type': 'done'})}\n\n"
+            except Exception as e:
+                yield f"data: {json.dumps({'type': 'error', 'error': str(e)})}\n\n"
+
+        return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+    @app.post("/api/agents/abort", dependencies=[api])
+    async def agents_abort(request: Request):
+        b = await request.json()
+        agent_id = b.get("agent_id", "")
+        ok = ws.abort_agent(agent_id)
+        return {"ok": ok}
+
     @app.get("/api/docs/endpoints", dependencies=[api])
     def docs_endpoints():
         return {"endpoints": api_docs.endpoints(), "groups": api_docs.GROUPS}
@@ -535,7 +788,20 @@ def main():
     print(f"\nAI Studio on http://127.0.0.1:{port}/?token={app.state.token}\n"
           f"  providers: {provs}"
           "\n  Keep the token private: it lets the page approve spending.\n", flush=True)
-    uvicorn.run(app, host="127.0.0.1", port=port, log_level="warning")
+    try:
+        uvicorn.run(
+            app,
+            host="127.0.0.1",
+            port=port,
+            log_level="warning",
+            timeout_graceful_shutdown=1.0,
+            timeout_keep_alive=3,
+        )
+    except (KeyboardInterrupt, SystemExit, asyncio.CancelledError):
+        pass
+    finally:
+        _stop_chatgpt_listener(app.state)
+        print("\nAI Studio stopped.", flush=True)
 
 
 if __name__ == "__main__":

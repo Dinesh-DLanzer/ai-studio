@@ -16,6 +16,7 @@ from pathlib import Path
 from aistudio import rates as rates_mod
 
 KEY_SEP = "|"
+FLAT_RATE = ("chatgpt", "codex_cli", "claude_cli", "agy_cli")
 
 
 def key(provider_id, model):
@@ -83,6 +84,12 @@ class Pricing:
                 return {"kind": "image", "per_image": self.image_rates[model]}
             if model.endswith(":free") or model == "openrouter/free":
                 return {"kind": "text", "free": True}
+        if ptype == "opencode_cli" and model.endswith("-free"):      # other OpenCode models bill per token: price unknown until the user sets it
+            return {"kind": "text", "free": True}
+        if ptype in FLAT_RATE:              # flat-rate plan or local CLI: no per-token or per-image fee (a price set by the user still wins above)
+            if model.startswith(("gpt-image", "dall-e")):
+                return {"kind": "image", "per_image": 0.0}
+            return {"kind": "text", "free": True}
         return None
 
     def suggest(self, model):
@@ -109,6 +116,12 @@ class Pricing:
         return float(card["per_image"]) if card and card.get("kind") == "image" else None
 
     def is_free(self, card):
+        if card and card.get("kind") == "image":
+            return card.get("per_image") == 0
+        if card and card.get("kind") == "video":
+            def zero(v):
+                return v == 0 if isinstance(v, (int, float)) else all(zero(x) for x in (v.values() if isinstance(v, dict) else [t.get("rate") for t in v]))
+            return bool(card.get("per_second")) and zero(card["per_second"])
         return bool(card and card.get("kind") == "text" and card.get("free"))
 
     def text_cost(self, card, usage):

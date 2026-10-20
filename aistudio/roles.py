@@ -11,6 +11,7 @@ is never used silently; if nothing cheaper works the runner raises NeedsNewAppro
 Video: submit -> poll -> download.  A job that was ACCEPTED and then fails is NOT retried on another model (money may be spent); a timeout
 returns {"status":"pending", "job": ...} so `sync` can finish it later.
 """
+import shutil
 import time
 
 from aistudio.providers import config as cfg
@@ -82,8 +83,11 @@ class RoleRunner:
             return "provider is disabled"
         if p["type"] == "fake":
             return None
+        binary = cfg.needs_binary(p["type"])
+        if binary:
+            return None if shutil.which(binary) else f"{binary} CLI is not installed"
         if not self.trust_transport and not self.secrets.has(p.get("secret_ref") or p["id"]) and not (p["type"] == "custom" and p.get("base_url")):
-            return "no API key"
+            return "not signed in" if cfg.PROVIDER_TYPES[p["type"]].get("auth_type") == "oauth" else "no API key"
         return None
 
     def resolve(self, role, project_dir=None, configured=False):
@@ -196,8 +200,52 @@ class RoleRunner:
         cost, src = self._cost("image", out, r["card"])
         return {**out, "cost": cost, "cost_source": src, "provider": r["provider"], "attempts": r["attempts"]}
 
+    def image_edit(self, image_path, prompt, edit_mode="inpaint_insertion", mask_mode="MASK_MODE_BACKGROUND", aspect_ratio="9:16", opts=None, project_dir=None, approved_price=None):
+        price_of = lambda e: self.pricing.image_price(e["card"])
+        r = self.run("image", lambda a, m: a.image_edit(m, image_path, prompt, edit_mode=edit_mode, mask_mode=mask_mode, opts={**(opts or {}), "aspect_ratio": aspect_ratio}), project_dir, None, approved_price, price_of)
+        out = r["result"]
+        cost, src = self._cost("image", out, r["card"])
+        return {**out, "cost": cost, "cost_source": src, "provider": r["provider"], "attempts": r["attempts"]}
+
     def video_price(self, entry, req):
         return self.pricing.video_price(entry["card"], req["seconds"], req.get("resolution", "720p"), req.get("audio", False))
+
+    def video_extend(self, video_path, prompt, seconds=5, aspect_ratio="16:9", resolution="720p", project_dir=None, approved_price=None, timeout=None):
+        req = {"seconds": seconds, "resolution": resolution, "audio": False}
+        price_of = lambda e: self.video_price(e, req)
+        pol = self.policy("video", project_dir) if not self._fake("video", project_dir) else cfg.default_policy("video")
+        limit = timeout if timeout is not None else pol.get("timeout", 1500)
+        state = {}
+
+        def call(adapter, model):
+            job = adapter.video_extend(model, video_path, prompt, seconds=seconds, aspect_ratio=aspect_ratio, resolution=resolution)
+            state["job"] = {**job, "provider": adapter.conn["id"]}
+            t0 = self.clock()
+            while True:
+                try:
+                    st = adapter.video_poll(job)
+                except Retryable:
+                    st = {"status": "pending", "error": None, "cost": None}
+                if st["status"] == "done":
+                    return {"status": "done", "bytes": adapter.video_download(job), "reported": st.get("cost"), "job": state["job"]}
+                if st["status"] == "failed":
+                    raise _Stop(st.get("error") or "extension failed")
+                if self.clock() - t0 > limit:
+                    return {"status": "pending", "job": state["job"]}
+                self.sleep(self.poll_seconds)
+
+        try:
+            r = self.run("video", call, project_dir, None, approved_price, price_of)
+        except _Stop as ex:
+            job = state.get("job") or {}
+            return {"status": "failed", "error": ex.args[0], "job": job, "cost": 0.0, "cost_source": "unknown", "provider": job.get("provider", ""),
+                    "model": job.get("model", ""), "attempts": ex.attempts}
+        out = r["result"]
+        base = {"provider": r["provider"], "model": r["model"], "attempts": r["attempts"], "job": out["job"]}
+        if out["status"] == "pending":
+            return {**base, "status": "pending", "cost": 0.0, "cost_source": "unknown"}
+        cost, src = self._cost("video", {"cost": out.get("reported")}, r["card"], extra=req)
+        return {**base, "status": "done", "bytes": out["bytes"], "cost": cost, "cost_source": src}
 
     def video(self, req, project_dir=None, approved_price=None, timeout=None):
         """-> {"status":"done","bytes",...} | {"status":"pending","job"} | {"status":"failed","error",...}. Raises ChainError/NeedsNewApproval."""

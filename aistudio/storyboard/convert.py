@@ -242,10 +242,21 @@ def to_images_doc(story, known_ids=()):
     """images.json content: character masters, then background masters, then one frame per shot image (its refs are the characters / places the
     shot uses).  known_ids = ids of assets that already exist (for example uploads) and may also be referenced."""
     images, ids = [], set()
+    known_list = list(known_ids)
     for kind, key in (("character", "characters"), ("background", "backgrounds")):
         for item in story.get(key, []):
             ids.add(item["id"])
-            images.append({"id": item["id"], "kind": kind, "out": "stills/%s.png" % item["id"], "aspect_ratio": "9:16", "refs": [],
+            refs = []
+            if kind == "character":
+                # Link matching uploaded reference images (e.g. "leema_ref_4" for character "leema" or explicit mention in prompt)
+                cid = item["id"]
+                prompt_lower = (item.get("prompt") or "").lower()
+                for kid in known_list:
+                    kl = str(kid).lower()
+                    if kl == cid or kl.startswith(f"{cid}_") or kl in prompt_lower:
+                        if kid not in refs:
+                            refs.append(kid)
+            images.append({"id": item["id"], "kind": kind, "out": "stills/%s.png" % item["id"], "aspect_ratio": "9:16", "refs": refs,
                            "prompt": item.get("prompt") or item.get("name", "")})
     allowed = ids | set(known_ids)
     seen = set()

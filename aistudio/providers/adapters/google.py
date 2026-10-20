@@ -72,9 +72,9 @@ class GoogleAdapter(Adapter):
             name = m.get("name") or ""
             mid = name[len("models/"):] if name.startswith("models/") else name
             methods = m.get("supportedGenerationMethods") or []
-            if "predictLongRunning" in methods:
+            if "predictLongRunning" in methods or "generateVideos" in methods or mid.startswith("veo"):
                 cap = "video"
-            elif "image" in mid and "generateContent" in methods:
+            elif ("image" in mid or "imagen" in mid or "generateImages" in methods) and ("generateContent" in methods or "predict" in methods):
                 cap = "image"
             elif "generateContent" in methods:
                 cap = "chat"
@@ -127,7 +127,28 @@ class GoogleAdapter(Adapter):
         return self._answer(model, body)
 
     def image(self, model, prompt, refs=(), aspect_ratio="9:16", opts=None):
-        body = {"contents": [{"role": "user", "parts": [{"text": prompt}] + self._inline(refs)}],
+        # Support up to 14 reference images (as demonstrated in google-flow-mcp)
+        clean_refs = list(refs)[:14]
+        contents_parts = [{"text": prompt}] + self._inline(clean_refs)
+        image_config = {"aspectRatio": aspect_ratio}
+        if (opts or {}).get("negative_prompt"):
+            image_config["negativePrompt"] = opts["negative_prompt"]
+        body = {"contents": [{"role": "user", "parts": contents_parts}],
+                "generationConfig": {"responseModalities": ["TEXT", "IMAGE"],
+                                     "imageConfig": image_config}}
+        data = self._generate(model, body)
+        for part in self._parts(data):
+            inline = part.get("inlineData") or {}
+            if inline.get("data"):
+                return {"bytes": base64.b64decode(inline["data"]), "usage": self._usage(data),
+                        "cost": None, "model": model}
+        raise Retryable("no image in response")
+
+    def image_edit(self, model, image_path, prompt, edit_mode="inpaint_insertion", mask_mode="MASK_MODE_BACKGROUND", opts=None):
+        """Natural language inpainting, outpainting or background swapping using Nano Banana Pro / Flash."""
+        aspect_ratio = (opts or {}).get("aspect_ratio", "9:16")
+        instruction = f"Edit mode: {edit_mode}. Mask mode: {mask_mode}. Instruction: {prompt}"
+        body = {"contents": [{"role": "user", "parts": [{"text": instruction}] + self._inline([image_path])}],
                 "generationConfig": {"responseModalities": ["TEXT", "IMAGE"],
                                      "imageConfig": {"aspectRatio": aspect_ratio}}}
         data = self._generate(model, body)
@@ -147,6 +168,18 @@ class GoogleAdapter(Adapter):
                 "parameters": {"aspectRatio": req["aspect_ratio"],
                                "durationSeconds": int(req["seconds"]),
                                "resolution": req["resolution"]}}
+        data = self.transport("POST", self.base_url + "/models/%s:predictLongRunning" % model,
+                              headers=self._headers(), body=body)
+        return {"job_id": data["name"], "model": model}
+
+    def video_extend(self, model, video_path, prompt, seconds=5, aspect_ratio="16:9", resolution="720p", opts=None):
+        """Extend a Veo video clip forward with continuation prompt."""
+        inst = {"prompt": prompt,
+                "video": {"bytesBase64Encoded": b64_of(video_path), "mimeType": mime_of(video_path) or "video/mp4"}}
+        body = {"instances": [inst],
+                "parameters": {"aspectRatio": aspect_ratio,
+                               "durationSeconds": int(seconds),
+                               "resolution": resolution}}
         data = self.transport("POST", self.base_url + "/models/%s:predictLongRunning" % model,
                               headers=self._headers(), body=body)
         return {"job_id": data["name"], "model": model}

@@ -35,8 +35,9 @@ class TestChatLogic(unittest.TestCase):
         self.assertEqual((u["brand"], u["story"], len(u["setting"])), ("Chai", "5", C.MAX_VALUE))
 
     def test_parse_turn(self):
-        t = C.parse_turn('Sure!\n```json\n{"reply": "Hi", "brief_updates": {"brand": "X", "zzz": "no"}, "todos_add": ["a", "b", "c", "d", "e", "f", "g"], "storyboard_md": null}\n```')
+        t = C.parse_turn('Sure!\n```json\n{"reply": "Hi", "brief_updates": {"brand": "X", "zzz": "no"}, "todos_add": ["a", "b", "c", "d", "e", "f", "g"], "storyboard_md": null, "action": {"type": "generate", "kind": "image", "target": "truck"}}\n```')
         self.assertEqual((t["reply"], t["brief_updates"], len(t["todos_add"]), t["storyboard_md"]), ("Hi", {"brand": "X"}, 6, None))
+        self.assertEqual(t["action"], {"type": "generate", "kind": "image", "target": "truck"})
         for bad in ("", "no json at all", "{broken", '{"nope": 1}'):
             r = C.parse_turn(bad)
             self.assertIsInstance(r["reply"], str)
@@ -199,7 +200,7 @@ class TestServiceChat(unittest.TestCase):
         self.assertIn("unavailable", str(c.exception))
 
     def test_input_limits(self):
-        for bad in ("", "   ", "x" * 3001):
+        for bad in ("", "   ", "x" * 50001):
             with self.assertRaises(ServiceError):
                 self.ws.chat_send("demo", bad)
 

@@ -1,0 +1,55 @@
+"""Typed Pydantic schemas for AI Studio domain contracts."""
+from .todos import TodoItem, AutoTodoItem, TodosDoc
+from .storyboard import (
+    Shot,
+    ShotsDoc,
+    ImageAsset,
+    ImagesDoc,
+    VClipTransition,
+    VClip,
+    TextShadow,
+    TText,
+    AClip,
+    TracksDoc,
+    EditDoc,
+)
+from .project import BriefField, BriefData, ProjectSummary, ProjectOverview
+from .pipeline import (
+    ProposalSummary,
+    Proposal,
+    BudgetShot,
+    BudgetDoc,
+    ProgressGroup,
+    NextAction,
+    QueueItem,
+    ProductionProgress,
+)
+
+__all__ = [
+    "TodoItem",
+    "AutoTodoItem",
+    "TodosDoc",
+    "Shot",
+    "ShotsDoc",
+    "ImageAsset",
+    "ImagesDoc",
+    "VClipTransition",
+    "VClip",
+    "TextShadow",
+    "TText",
+    "AClip",
+    "TracksDoc",
+    "EditDoc",
+    "BriefField",
+    "BriefData",
+    "ProjectSummary",
+    "ProjectOverview",
+    "ProposalSummary",
+    "Proposal",
+    "BudgetShot",
+    "BudgetDoc",
+    "ProgressGroup",
+    "NextAction",
+    "QueueItem",
+    "ProductionProgress",
+]

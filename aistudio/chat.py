@@ -95,18 +95,29 @@ Rules:
 - Required brief fields: brand, goal, story, length_seconds, language, characters, setting, budget_cap. Optional: audience, platform, cta, brand_assets (logo file and brand colours), claims_to_avoid.
 - Never invent facts about the business: ask. Never promise results. Do not claim guaranteed sales or reach.
 - Video facts you must respect: one short sentence of speech per clip; clips are 4, 6 or 8 seconds; the voice line is written in the chosen language's own script (for example Tamil script for Tamil) plus an English meaning, and an English video needs no separate translation line beyond the same text; on-screen text, logos and end cards are added later in an editor, never generated; every shot with people needs an image of those characters.
-- You cannot spend money, and you cannot generate, approve, upload, apply or edit anything yourself. The page has buttons for all of that, each with its own price approval. NEVER say that you generated, approved, uploaded, applied, saved or edited something unless the project state below shows it. Facts about progress come ONLY from "Current project state": if the user says they did something that the state does not show yet, say kindly that it is not done yet and point to the button.
-- Production order is fixed (the page enforces it): 1 brief, 2 storyboard (Story.md), 3 budget approval, 4 character images, 5 background images, 6 scene frames (one per shot), 7 video clips, 8 approve clips, 9 Review & Export. No clip can be made before its scene frame, and no scene frame before the characters and places it uses. When the user asks for a later step too early, explain which step comes first (the state's "next_step_for_the_user" says exactly what it is) instead of pretending to do it.
-- Budget: if budget.approved is true, NEVER ask for budget approval again. If a storyboard is applied and budget.approved is false, tell the user ONCE to press "Set the budget" (or the checklist button) and do not repeat it.
+- You are TARA, the PRODUCER in AI Studio with full authority to lead and execute the video production pipeline. You do not just discuss the project—when the user asks you to generate images (characters, backgrounds, scene frames), create video clips, run batch generation, apply the storyboard, or approve the budget, you can execute those actions directly by returning an "action" object in your JSON response!
+- Available actions:
+  - {"type": "generate", "kind": "image", "target": "<id>"}: generate a character master sheet, background, or scene frame image. Use the exact asset id from "assets" or "next_step_for_the_user".
+  - {"type": "generate", "kind": "clip", "target": "<id>"}: generate a video clip for a shot.
+  - {"type": "generate_all"}: trigger batch generation of all remaining assets in the production queue.
+  - {"type": "apply_story"}: apply the drafted storyboard to create the shots and asset list.
+  - {"type": "approve_budget"}: approve the estimated budget.
+- When the user asks you to generate an asset or proceed, respond enthusiastically and include the corresponding "action". For example, if the user asks "Now generate god_promo_truck image", reply confirming what you are creating, and set action: {"type": "generate", "kind": "image", "target": "god_promo_truck"}. NEVER say that you generated, approved, uploaded, applied, saved or edited something unless the project state below shows it or you returned an action to perform it.
+- Production order is fixed: 1 brief, 2 storyboard (Story.md), 3 budget approval, 4 character images, 5 background images, 6 scene frames (one per shot), 7 video clips, 8 approve clips, 9 Review & Export. No clip can be made before its scene frame, and no scene frame before the characters and places it uses. If the user asks for a shot or frame whose character/background references are not made yet, explain which dependency comes first or generate that dependency.
+- Budget: if budget.approved is true, NEVER ask for budget approval again. If a storyboard is applied and budget.approved is false, tell the user ONCE to press "Set the budget" (or approve it if they ask).
 - Before you draft the storyboard, make sure you asked (in your normal two-questions-per-message pace) about: who appears (characters, "none" is fine), the places (backgrounds, "none" is fine), files to use such as a logo or product photo (tell them to press the image button in the chat box; the project state lists attached files under "uploads" with their main colours) and whether the video should use their brand colours. If they say yes and "uploads" has colours, use exactly those hex colours; if they name colours, use those.
 - If the user later changes the plan (a new character, place, logo or colours, another shot) put the FULL updated storyboard in "storyboard_md" again so Story.md can be updated; do not just describe the change.
+- Character consistency rule: in professional video generation, a character's master sheet MUST include multi-angle body views (full-body front, side/profile, back turnaround views) and a grid of facial expressions/reactions (neutral, happy/smiling, confident, speaking, thoughtful, etc.). If a user uploads an image for a character that is only a single photo or face reference, explicitly state that it serves as a "Character reference image" and write the character asset prompt to generate a complete character model sheet preserving that reference identity.
+- When drafting "## Characters", every "### <Name>" block MUST be written as a full character master sheet prompt:
+  "Character master model sheet: full-body turnaround views (front view, side profile view, back view) and a facial expression grid (neutral, smiling, confident, speaking, thoughtful) showing the same consistent face, hairstyle, age, and attire from multiple angles on a clean studio background. (If reference image <ref_id> exists, specify: Consistent facial identity, features, and hairstyle matching reference image <ref_id>)."
 - When ALL required fields are filled, draft the storyboard in the exact Markdown format below and put it in "storyboard_md".
 
 Answer with ONE JSON object and nothing else:
-{"reply": "<your message to the user>", "brief_updates": {"<field>": "<value>"}, "todos_add": ["<short task>"], "storyboard_md": null}
+{"reply": "<your message to the user>", "brief_updates": {"<field>": "<value>"}, "todos_add": ["<short task>"], "storyboard_md": null, "action": null}
 - brief_updates: only fields the user just told you (use their words, tidy).
 - todos_add: at most 6 short extra tasks that are specific to THIS video (the moment you write the storyboard, add the tasks that story needs: assets to gather, voice checks, edits) (for example "Get the real shop logo file"). Do not repeat generic steps.
 - storyboard_md: null until the brief is complete, then the full storyboard.
+- action: null if just chatting, OR an action object {"type": "generate"|"generate_all"|"apply_story"|"approve_budget", "kind": "image"|"clip", "target": "<id>"} when the user asks to generate, apply, approve, or proceed.
 
 Storyboard Markdown format (follow exactly; one "## Shot NN" block per shot, 4 seconds each unless told otherwise).
 The sections before the shots become the project's assets: each "### <Name>" under Characters / Backgrounds becomes one master image to generate, "Shared style" is added to EVERY image prompt, and a shot's "**Uses**" line lists which characters, places and uploaded files its scene frame needs (use the lowercase_underscore version of the names; an uploaded file is used by its id from the state's uploads).
@@ -115,7 +126,7 @@ The sections before the shots become the project's assets: each "### <Name>" und
 <one or two sentences: the look, lighting and colour palette used in every image and clip; include the brand hex colours when the user agreed>
 ## Characters
 ### <Name>
-<age range, look, clothes, expression; one short paragraph. Leave the whole "## Characters" section out if nobody appears>
+<Character master model sheet of <Name>: full-body turnaround views (front view, side profile view, back view) and a facial expression grid (neutral, smiling, confident, speaking, thoughtful) showing the same consistent face, hairstyle, age, and attire from multiple angles on a clean studio background. (If a reference image was provided, add: Consistent facial identity and features from <ref_id>). Leave the whole "## Characters" section out if nobody appears>
 ## Backgrounds
 ### <Place name>
 <one short paragraph. Leave the whole "## Backgrounds" section out if there are no places>
@@ -174,10 +185,22 @@ def prefs_note(prefs):
 
 
 def attach_note(files):
-    """One line telling the model which images the user attached (and their main colours)."""
+    """One line telling the model which images the user attached, colours, and character sheet check."""
     if not files:
         return ""
-    bits = [f"{f['id']} (saved in Uploads" + (f"; main colours {', '.join(f['colors'])}" if f.get("colors") else "") + ")" for f in files]
+    bits = []
+    for f in files:
+        desc = f"{f['id']} (saved in Uploads"
+        if f.get("colors"):
+            desc += f"; main colours {', '.join(f['colors'])}"
+        chk = f.get("character_check")
+        if chk:
+            if chk.get("is_character_sheet"):
+                desc += "; verified character master sheet with multi-angle views and expressions"
+            else:
+                desc += "; single-angle reference/photo only, NOT a multi-angle character sheet"
+        desc += ")"
+        bits.append(desc)
     return "\n\n[The user attached image(s): " + "; ".join(bits) + ". You cannot see them, but they are saved as project assets.]"
 
 
@@ -192,7 +215,7 @@ def build_messages(history, user_text, state, test_pipeline=False, prefs=None, f
 
 _TOKEN_RE = re.compile(r"<\|[^|>]*\|>")           # special tokens some models leak, e.g. <|tool_call_start|>
 _KEYS = {"reply": "reply", "message": "reply", "brief_updates": "brief_updates", "todos_add": "todos_add", "todos": "todos_add",
-         "storyboard_md": "storyboard_md", "storyboard": "storyboard_md"}
+         "storyboard_md": "storyboard_md", "storyboard": "storyboard_md", "action": "action"}
 
 
 def _balanced(t, start):
@@ -254,9 +277,13 @@ def recover(text):
 def _turn(obj, reply=None, **extra):
     sm = obj.get("storyboard_md")
     r = reply if reply is not None else str(obj.get("reply") or "").strip()
+    act = obj.get("action")
+    action = None
+    if isinstance(act, dict) and act.get("type"):
+        action = {"type": str(act["type"]).strip(), "kind": str(act.get("kind") or "image").strip(), "target": str(act.get("target") or "").strip()}
     return {"reply": r, "brief_updates": clean_updates(obj.get("brief_updates") if isinstance(obj.get("brief_updates"), dict) else None),
             "todos_add": [str(x).strip()[:120] for x in (obj.get("todos_add") or []) if isinstance(x, (str, int)) and str(x).strip()][:6] if isinstance(obj.get("todos_add"), list) else [],
-            "storyboard_md": sm if isinstance(sm, str) and sm.strip() else None, **extra}
+            "storyboard_md": sm if isinstance(sm, str) and sm.strip() else None, "action": action, **extra}
 
 
 def parse_turn(text):
@@ -286,7 +313,7 @@ def unreadable(text):
 
 
 RETRY_NOTE = ("Your last answer could not be read. Answer again with EXACTLY ONE JSON object and nothing else: no tool calls, no code fences, no special tokens. "
-              'Keys: "reply", "brief_updates", "todos_add", "storyboard_md". If you write the storyboard, it must use the exact Markdown format from the instructions '
+              'Keys: "reply", "brief_updates", "todos_add", "storyboard_md", "action". If you write the storyboard, it must use the exact Markdown format from the instructions '
               '("## Shot 01 — 0:00–0:04" headings and **bold** labels).')
 
 
@@ -295,7 +322,7 @@ def valid_storyboard(md):
         st = story_mod.parse_story(md)
     except ValueError:
         return False
-    return 1 <= len(st["shots"]) <= 12
+    return 1 <= len(st["shots"]) <= 36
 
 
 # ---------------------------------------------------------------- test mode: deterministic scripted interviewer
@@ -323,7 +350,13 @@ def build_story_md(brief):
     lines = [f"# {brand}: AI VIDEO STORYBOARD", "", "## Concept", f"**Brand:** {brand}", f"**Language:** {brief.get('language', 'English')}", "",
              "## Shared style", style, ""]
     if has_char:
-        lines += ["## Characters", f"### {cname}", chars, ""]
+        char_desc = chars
+        if "turnaround" not in char_desc.lower() and "model sheet" not in char_desc.lower() and "front" not in char_desc.lower():
+            char_desc = (f"Character master model sheet of {cname}: {chars}. "
+                         "Full-body turnaround views (front view, side profile view, back view) and a 3x3 facial expression grid "
+                         "(neutral, smiling, confident, speaking, thoughtful, joyful) showing the same consistent face, hairstyle, "
+                         "and attire from multiple angles on a clean studio background.")
+        lines += ["## Characters", f"### {cname}", char_desc, ""]
     if has_place:
         lines += ["## Backgrounds", "### Main place", setting, ""]
     for i in range(n):

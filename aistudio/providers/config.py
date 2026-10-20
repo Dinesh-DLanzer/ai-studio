@@ -27,15 +27,26 @@ MODEL_RE = re.compile(r"^[A-Za-z0-9._~/:+@-]{1,120}$")
 # type -> adapter location, UI metadata
 PROVIDER_TYPES = {
     "openrouter": {"label": "OpenRouter", "sub": "Many models behind one key", "adapter": "openrouter.OpenRouterAdapter", "fields": ["api_key"], "base_url": False},
+    "opencode": {"label": "OpenCode", "sub": "Console inference API (mimo, kimi, glm, minimax, claude, gemini)", "adapter": "opencode.OpenCodeAdapter", "fields": ["api_key"], "base_url": False},
     "openai": {"label": "OpenAI", "sub": "GPT and image models", "adapter": "openai.OpenAIAdapter", "fields": ["api_key"], "base_url": False},
     "anthropic": {"label": "Anthropic", "sub": "Claude models for chat & vision", "adapter": "anthropic.AnthropicAdapter", "fields": ["api_key"], "base_url": False},
     "google": {"label": "Google Gemini", "sub": "Gemini chat, vision, image and Veo video", "adapter": "google.GoogleAdapter", "fields": ["api_key"], "base_url": False},
     "runway": {"label": "Runway", "sub": "Gen-3/Gen-4 video generation", "adapter": "runway.RunwayAdapter", "fields": ["api_key"], "base_url": False},
     "kling": {"label": "Kling", "sub": "Kling AI video generation", "adapter": "kling.KlingAdapter", "fields": ["access_key", "secret_key"], "base_url": False},
     "replicate": {"label": "Replicate", "sub": "Open source image and video models", "adapter": "replicate.ReplicateAdapter", "fields": ["api_key"], "base_url": False},
+    "chatgpt": {"label": "ChatGPT (Subscription)", "sub": "Use your ChatGPT Plus/Pro plan (sign-in) for chat, vision, verify and images", "adapter": "chatgpt.ChatGPTAdapter", "fields": [], "base_url": False, "auth_type": "oauth"},
+    "codex_cli": {"label": "Codex CLI", "sub": "Your signed-in Codex terminal agent (chat, vision). Runs on your plan", "adapter": "cli_agent.CodexCLIAdapter", "fields": [], "base_url": False, "auth_type": "local", "binary": "codex"},
+    "opencode_cli": {"label": "OpenCode CLI", "sub": "Your OpenCode terminal agent and its models (chat, vision)", "adapter": "cli_agent.OpenCodeCLIAdapter", "fields": [], "base_url": False, "auth_type": "local", "binary": "opencode"},
+    "claude_cli": {"label": "Claude Code CLI", "sub": "Your signed-in Claude Code terminal agent (chat, vision). Runs on your plan", "adapter": "cli_agent.ClaudeCLIAdapter", "fields": [], "base_url": False, "auth_type": "local", "binary": "claude"},
+    "agy_cli": {"label": "Antigravity CLI", "sub": "Your signed-in Antigravity terminal agent: Gemini, Claude and more (chat)", "adapter": "cli_agent.AntigravityCLIAdapter", "fields": [], "base_url": False, "auth_type": "local", "binary": "agy"},
     "custom": {"label": "Custom (OpenAI-compatible)", "sub": "Any server with /chat/completions", "adapter": "openai.OpenAIAdapter", "fields": ["api_key"], "base_url": True},
     "fake": {"label": "Built-in test", "sub": "Free, offline, for trying things out", "adapter": "fake.FakeAdapter", "fields": [], "base_url": False},
 }
+
+
+def needs_binary(ptype):
+    """The terminal program a local-agent provider type needs, else None."""
+    return PROVIDER_TYPES[ptype].get("binary")
 
 
 def adapter_class(ptype):
@@ -48,14 +59,18 @@ def capabilities_of(ptype):
 
 
 def provider_types():
-    return [{"type": t, "label": m["label"], "sub": m["sub"], "fields": m["fields"], "base_url": m["base_url"], "capabilities": capabilities_of(t)}
+    return [{"type": t, "label": m["label"], "sub": m["sub"], "fields": m["fields"], "base_url": m["base_url"], "capabilities": capabilities_of(t),
+             "auth_type": m.get("auth_type", "api_key")}
             for t, m in PROVIDER_TYPES.items()]
 
 
 def build_adapter(provider, secrets, transport=None):
     """provider = one entry of providers.json; secrets = a SecretStore. Returns a ready adapter."""
+    ref = provider.get("secret_ref") or provider["id"]
     conn = {"id": provider["id"], "type": provider["type"], "base_url": provider.get("base_url") or "",
-            "secret": secrets.get(provider.get("secret_ref") or provider["id"]) if provider["type"] != "fake" else {}}
+            "secret": secrets.get(ref) if provider["type"] != "fake" else {}}
+    if PROVIDER_TYPES[provider["type"]].get("auth_type") == "oauth":
+        conn["on_secret"] = lambda fresh: secrets.set(ref, fresh)      # a refreshed OAuth session is saved back
     return adapter_class(provider["type"])(conn, transport=transport) if transport else adapter_class(provider["type"])(conn)
 
 

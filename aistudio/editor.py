@@ -1,22 +1,33 @@
-"""Review & Export: the edit list (edit.json) and the ffmpeg renderer.  No paid call happens here.
+"""Review & Export: the edit list (edit.json), the ffmpeg renderer and the NLE / caption exporters.  No paid call happens here.
 
-edit.json (one per project) = {"version": 1, "aspect": "9:16", "fps": 24, "tracks": {"video": [...], "text": [...], "audio": [...]}}
-  video item: {id, src "clips/..", in, out, volume, transition {type, dur}}   (the transition is the one INTO this clip from the previous one)
-  text item : {id, text (<=100 chars), start, end, x, y (centre, 0..1), font, weight, size, color, bg|null, align, bold, italic, underline, caps,
-               opacity, shadow {on, color, blur}}
-  audio item: {id, src "audio/..", start, in, out, volume, fadeIn, fadeOut}
+edit.json (one per project) = {"version": 1, "aspect": "9:16", "fps": 24, "filter", "effect", "background",
+  "tracks": {"video": [...], "text": [...], "audio": [...], "elements": [...], "subtitles": {...}}}
+  video item   : {id, src "clips/..", in, out, volume, transition {type, dur}}   (the transition is the one INTO this clip from the previous one)
+  text item    : {id, text (<=100 chars), start, end, x, y (centre, 0..1), font, weight, size, color, bg|null, align, bold, italic, underline,
+                  caps, opacity, shadow {on, color, blur}}
+  audio item   : {id, src "audio/..", start, in, out, volume, fadeIn, fadeOut}
+  filter       : {id (one of FILTERS), intensity 0..1}                       colour grading look, applied to the joined timeline
+  effect       : {id (one of EFFECTS), intensity 0..1, speed}                picture effect, applied after the grade
+  background   : {type "black" | "blur" | "color" | "gradient", color, blurRadius, gradient {from, to}}   what sits behind letterboxed media
+  subtitles    : {cues [{id, start, end, text (<=200 chars)}], style, font, size, color, bg|null, y}      burned in on export, srt/vtt sidecars
 
-Text is drawn to a transparent PNG with Pillow and laid over the video with ffmpeg's `overlay` (no libfreetype / drawtext needed, and the
-bubble, blur shadow and underline look like the preview).  Paths are checked like discard.py: relative, no '..', never inside _discarded.
-Standard library + Pillow (only to render text) + the ffmpeg / ffprobe programs.
+Text and subtitles are drawn to a transparent PNG with Pillow and laid over the video with ffmpeg's `overlay` (no libfreetype / drawtext
+needed, and the bubble, blur shadow and underline look like the preview).  Paths are checked like discard.py: relative, no '..', never inside
+_discarded.  Standard library + Pillow (only to render text) + the ffmpeg / ffprobe programs.
+
+The same edit also leaves the app as Final Cut Pro XML (`export_fcpxml`), a CMX 3600 EDL (`export_edl`), SubRip / WebVTT captions
+(`export_srt` / `export_vtt`) and a zip bundle for Canva and Google Vids (`export_bundle`).
 """
 import json
+import os
 import re
 import shutil
 import subprocess
 import tempfile
+import zipfile
 from datetime import datetime
 from pathlib import Path
+from xml.sax.saxutils import escape as xml_escape
 
 REPO = Path(__file__).resolve().parent.parent
 FONT_DIR = REPO / "assets" / "fonts"
@@ -28,7 +39,7 @@ FPS_OK = (24, 25, 30)
 TRANSITIONS = {
     "cut": None,
     # dissolves and fades
-    "crossfade": "fade", "dissolve": "dissolve", "fade": "fadeblack", "fadewhite": "fadewhite", "fadegrays": "fadegrays", "fadefast": "fadefast", "fadeslow": "fadeslow",
+    "crossfade": "fade", "dissolve": "fade", "fade": "fadeblack", "fadewhite": "fadewhite", "fadegrays": "fadegrays", "fadefast": "fadefast", "fadeslow": "fadeslow", "dither": "dissolve",
     # wipes
     "wipe": "wipeleft", "wiperight": "wiperight", "wipeup": "wipeup", "wipedown": "wipedown", "wipetl": "wipetl",
     # slides and pushes
@@ -43,9 +54,16 @@ TRANSITIONS = {
 ALIGNS = ("left", "center", "right", "justify")
 AUDIO_SUFFIX = (".mp3", ".wav", ".m4a", ".aac", ".ogg")
 VIDEO_SUFFIX = (".mp4", ".mov", ".m4v", ".webm")
+IMAGE_SUFFIX = (".png", ".jpg", ".jpeg", ".webp", ".svg")
 ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 HEX_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
-MAX_CLIPS, MAX_TEXTS, MAX_AUDIO, MAX_TEXT_CHARS = 100, 200, 20, 100
+MAX_CLIPS, MAX_TEXTS, MAX_AUDIO, MAX_ELEMENTS, MAX_TEXT_CHARS = 100, 200, 20, 100, 100
+# colour grading looks and picture effects (the ids the inspector shows).  "none" is a real value: it renders the original picture.
+FILTERS = {"cinema", "teal_orange", "vintage", "noir", "vibrant", "cyberpunk", "warm", "none"}
+EFFECTS = {"vignette", "grain", "shake", "zoompulse", "glitch", "blur", "none"}
+BACKGROUNDS = ("black", "blur", "color", "gradient")
+SUBTITLE_STYLES = {"tiktok", "classic", "minimal", "karaoke"}
+MAX_CUES, MAX_CUE_CHARS = 500, 200
 
 # family -> {weight: file}, italic files exist for 400 and 700 of Poppins only (other weights show a synthetic slant in the preview only)
 FONTS = {
@@ -82,14 +100,15 @@ def tools():
 def safe_rel(rel, folder, suffixes):
     """Project-relative path 'folder/name.ext' with no '..', not absolute, not inside _discarded.  Returns the posix string."""
     if not isinstance(rel, str) or not rel:
-        raise EditError("a clip or sound has no file")
+        raise EditError("a clip, sound or element has no file")
     p = Path(rel)
     if p.is_absolute() or ".." in p.parts or "\\" in rel:
         raise EditError(f"invalid path: {rel}")
     if "_discarded" in p.parts:
         raise EditError(f"{rel} is in Discarded; restore it first")
-    if p.parts[0] != folder or len(p.parts) != 2 or p.suffix.lower() not in suffixes:
-        raise EditError(f"{rel} must be {folder}/<file>{'|'.join(suffixes)}")
+    allowed = (folder,) if isinstance(folder, str) else tuple(folder)
+    if not p.parts or p.parts[0] not in allowed or len(p.parts) != 2 or p.suffix.lower() not in suffixes:
+        raise EditError(f"{rel} must be {'/'.join(allowed)}/<file>{'|'.join(suffixes)}")
     return p.as_posix()
 
 
@@ -118,6 +137,105 @@ def _color(v, what, allow_none=False):
     return v.lower()
 
 
+def _optnum(d, key, lo, hi, default, what):
+    """A number that may be absent (or null): only a value that is there is range-checked."""
+    if d.get(key) is None:
+        return float(default)
+    return _num(d, key, lo, hi, default, what)
+
+
+def _as_dict(v, what):
+    """Accept {"id": ...} or a bare id string; reject anything else."""
+    if isinstance(v, str):
+        return {"id": v}
+    if not isinstance(v, dict):
+        raise EditError(f"{what} must be an object")
+    return v
+
+
+def clean_filter(v):
+    """Normalise the grading look: {id: one of FILTERS, intensity: 0..1}.  Absent = no grading."""
+    d = _as_dict(v, "filter") if v is not None else {}
+    fid = d.get("id", "none")
+    if fid not in FILTERS:
+        raise EditError(f"filter must be one of {', '.join(sorted(FILTERS))}")
+    return {"id": fid, "intensity": _optnum(d, "intensity", 0, 1, 1, "filter")}
+
+
+def clean_effect(v):
+    """Normalise the picture effect: {id: one of EFFECTS, intensity: 0..1, speed: 0.1..4}.  Absent = no effect."""
+    d = _as_dict(v, "effect") if v is not None else {}
+    eid = d.get("id", "none")
+    if eid not in EFFECTS:
+        raise EditError(f"effect must be one of {', '.join(sorted(EFFECTS))}")
+    out = {"id": eid, "intensity": _optnum(d, "intensity", 0, 1, 1, "effect")}
+    if d.get("speed") is not None:
+        out["speed"] = _num(d, "speed", 0.1, 4, 1, "effect")
+    return out
+
+
+def clean_background(v):
+    """Normalise what sits behind letterboxed media: {type: black | blur | color | gradient, color, blurRadius, gradient {from, to}}."""
+    d = _as_dict(v, "background") if v is not None else {}
+    kind = d.get("type", "black")
+    if kind not in BACKGROUNDS:
+        raise EditError(f"background must be one of {', '.join(BACKGROUNDS)}")
+    if kind == "color":
+        return {"type": kind, "color": _color(d.get("color", "#0b0c16"), "background colour")}
+    if kind == "gradient":
+        g = d.get("gradient")
+        if not isinstance(g, dict):
+            raise EditError("background gradient must be an object with from and to colours")
+        return {"type": kind, "gradient": {"from": _color(g.get("from"), "gradient from"), "to": _color(g.get("to"), "gradient to")}}
+    if kind == "blur":
+        return {"type": kind, "blurRadius": _optnum(d, "blurRadius", 0, 100, 25, "background")}
+    return {"type": kind}
+
+
+def clean_subtitles(v):
+    """Normalise the subtitle track: {cues [{id, start, end, text}], style, font, size, color, bg, y}.  A bare list is taken as the cues."""
+    if v is None:
+        d = {}
+    elif isinstance(v, dict):
+        d = v
+    elif isinstance(v, list):
+        d = {"cues": v}                     # a bare list of cues (an older edit.json) still works
+    else:
+        raise EditError("subtitles must be an object")
+    style = d.get("style", "classic")
+    if style not in SUBTITLE_STYLES:
+        raise EditError(f"subtitle style must be one of {', '.join(sorted(SUBTITLE_STYLES))}")
+    family = d.get("font", "Poppins")
+    if family not in FONTS:
+        raise EditError(f"subtitle font must be one of {', '.join(FONTS)}")
+    cues, seen = d.get("cues") or [], set()
+    if not isinstance(cues, list) or len(cues) > MAX_CUES:
+        raise EditError(f"subtitles must be a list of at most {MAX_CUES} cues")
+    out_cues = []
+    for n, c in enumerate(cues):
+        w = f"subtitle {n + 1}"
+        if not isinstance(c, dict):
+            raise EditError(f"{w} must be an object")
+        i = c.get("id") or f"cue{n + 1}"
+        if not isinstance(i, str) or not ID_RE.match(i):
+            raise EditError(f"{w}: invalid id {i!r}")
+        if i in seen:
+            raise EditError(f"{w}: duplicate id {i}")
+        seen.add(i)
+        text = c.get("text", "")
+        if not isinstance(text, str) or not text.strip() or len(text) > MAX_CUE_CHARS:
+            raise EditError(f"{w}: text must be 1 to {MAX_CUE_CHARS} characters")
+        s, e = _num(c, "start", 0, 36000, 0, w), _num(c, "end", 0, 36000, 0, w)
+        if e - s < 0.05:
+            raise EditError(f"{w}: end must be at least 0.05 s after start")
+        out_cues.append({"id": i, "start": s, "end": e, "text": text.strip()})
+    return {"cues": out_cues, "style": style, "font": family,
+            "size": _optnum(d, "size", 8, 300, 46, "subtitles"),
+            "color": _color(d.get("color", "#ffffff"), "subtitle colour"),
+            "bg": _color(d.get("bg"), "subtitle background", True),
+            "y": _optnum(d, "y", 0, 1, 0.86, "subtitles")}
+
+
 def clean(doc):
     """Validate and normalise an edit list (fills defaults).  Raises EditError with the first problem."""
     if not isinstance(doc, dict):
@@ -131,7 +249,10 @@ def clean(doc):
     tracks = doc.get("tracks") or {}
     if not isinstance(tracks, dict):
         raise EditError("tracks must be an object")
-    out = {"version": 1, "aspect": aspect, "fps": fps, "tracks": {"video": [], "text": [], "audio": []}}
+    out = {"version": 1, "aspect": aspect, "fps": fps,
+           "filter": clean_filter(doc.get("filter")), "effect": clean_effect(doc.get("effect")),
+           "background": clean_background(doc.get("background")),
+           "tracks": {"video": [], "text": [], "audio": [], "elements": [], "subtitles": clean_subtitles(tracks.get("subtitles"))}}
 
     vid, seen = tracks.get("video") or [], set()
     if not isinstance(vid, list) or len(vid) > MAX_CLIPS:
@@ -146,8 +267,15 @@ def clean(doc):
         tr = c.get("transition") or {"type": "cut", "dur": 0.5}
         if not isinstance(tr, dict) or tr.get("type", "cut") not in TRANSITIONS:
             raise EditError(f"{w}: transition type must be one of {', '.join(TRANSITIONS)}")
+        tr_clean = {"type": tr.get("type", "cut"), "dur": _num(tr, "dur", 0.1, 5, 0.5, w + " transition")}
+        if "direction" in tr and tr["direction"] in ("left", "right", "up", "down", "tl"):
+            tr_clean["direction"] = tr["direction"]
+        if "color" in tr and tr["color"] in ("black", "white", "gray"):
+            tr_clean["color"] = tr["color"]
+        if "curve" in tr and tr["curve"] in ("linear", "smooth", "fast", "slow"):
+            tr_clean["curve"] = tr["curve"]
         item = {"id": i, "src": safe_rel(c.get("src"), "clips", VIDEO_SUFFIX), "in": a, "out": b, "volume": _num(c, "volume", 0, 2, 1, w),
-                "transition": {"type": tr.get("type", "cut"), "dur": _num(tr, "dur", 0.1, 2, 0.5, w + " transition")}}
+                "transition": tr_clean}
         out["tracks"]["video"].append(item)
 
     txt, seen = tracks.get("text") or [], set()
@@ -197,6 +325,26 @@ def clean(doc):
         out["tracks"]["audio"].append({"id": i, "src": safe_rel(a.get("src"), "audio", AUDIO_SUFFIX), "start": _num(a, "start", 0, 36000, 0, w), "in": lo, "out": hi,
                                        "volume": _num(a, "volume", 0, 2, 0.6, w), "fadeIn": _num(a, "fadeIn", 0, 30, 0, w), "fadeOut": _num(a, "fadeOut", 0, 30, 0, w),
                                        "name": str(a.get("name") or Path(a["src"]).stem)[:60]})
+
+    elem, seen = tracks.get("elements") or [], set()
+    if not isinstance(elem, list) or len(elem) > MAX_ELEMENTS:
+        raise EditError(f"elements must be a list of at most {MAX_ELEMENTS} items")
+    for n, el in enumerate(elem):
+        w = f"element {n + 1}"
+        if not isinstance(el, dict):
+            raise EditError(f"{w} must be an object")
+        i = _id(el, seen, w)
+        s, e = _num(el, "start", 0, 36000, 0, w), _num(el, "end", 0, 36000, 0, w)
+        if e - s < 0.2:
+            raise EditError(f"{w}: end must be at least 0.2 s after start")
+        src = safe_rel(el.get("src"), ("elements", "stills", "assets"), IMAGE_SUFFIX)
+        out["tracks"]["elements"].append({
+            "id": i, "src": src, "start": s, "end": e,
+            "x": _num(el, "x", 0, 1, 0.5, w), "y": _num(el, "y", 0, 1, 0.5, w),
+            "scale": _num(el, "scale", 0.05, 3.0, 0.3, w),
+            "opacity": _num(el, "opacity", 0, 1, 1.0, w),
+            "name": str(el.get("name") or Path(src).stem)[:60],
+        })
     return out
 
 
@@ -220,14 +368,22 @@ def _td(clip, cur_len, d):
 
 # ---------------------------------------------------------------- defaults
 def probe(path):
-    """{'duration', 'audio'} from ffprobe, or None when ffprobe is missing or the file is unreadable."""
+    """{'duration', 'audio', 'width', 'height'} from ffprobe, or None when ffprobe is missing or the file is unreadable.
+    width/height are 0 for audio-only files (the NLE exporters need them for the media format)."""
     if not shutil.which("ffprobe"):
         return None
     try:
-        r = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration:stream=codec_type", "-of", "json", str(path)],
+        r = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration:stream=codec_type,width,height", "-of", "json", str(path)],
                            capture_output=True, text=True, timeout=30)
         j = json.loads(r.stdout or "{}")
-        return {"duration": float(j["format"]["duration"]), "audio": any(s.get("codec_type") == "audio" for s in j.get("streams", []))}
+        streams = j.get("streams", [])
+        vid = next((s for s in streams if s.get("codec_type") == "video"), {})
+        try:
+            w, h = int(vid.get("width") or 0), int(vid.get("height") or 0)
+        except (TypeError, ValueError):
+            w, h = 0, 0
+        return {"duration": float(j["format"]["duration"]), "audio": any(s.get("codec_type") == "audio" for s in streams),
+                "width": w, "height": h}
     except (OSError, subprocess.SubprocessError, KeyError, ValueError):
         return None
 
@@ -252,7 +408,7 @@ def default_edit(pdir, shots_doc):
         dur = round(pr["duration"], 2) if pr else float(shot.get("seconds") or 4)
         video.append({"id": re.sub(r"[^A-Za-z0-9_-]", "_", shot["id"])[:60], "src": rel, "in": 0.0, "out": max(dur, 0.3), "volume": 1.0, "transition": {"type": "cut", "dur": 0.5}})
     aspect = (shots_doc or {}).get("aspect_ratio")
-    return {"version": 1, "aspect": aspect if aspect in ASPECTS else "9:16", "fps": 24, "tracks": {"video": video, "text": [], "audio": []}}
+    return {"version": 1, "aspect": aspect if aspect in ASPECTS else "9:16", "fps": 24, "tracks": {"video": video, "text": [], "audio": [], "elements": []}}
 
 
 # ---------------------------------------------------------------- text -> PNG
@@ -310,13 +466,111 @@ def render_text_png(t, out_w, path):
     return cw, ch
 
 
+def subtitle_item(cue, cfg):
+    """Shape one subtitle cue like a text item so it renders through render_text_png (same look, still no libfreetype needed).
+    The style only fills in what the config left out: tiktok/karaoke get a pill and a heavy weight, classic a drop shadow, minimal neither."""
+    style = cfg.get("style", "classic")
+    family = cfg.get("font", "Poppins")
+    if family not in FONTS:
+        family = "Poppins"
+    want = 800 if style in ("tiktok", "karaoke") else (400 if style == "minimal" else 700)
+    weights = FONTS[family]["weights"]
+    weight = want if want in weights else (400 if 400 in weights else next(iter(weights)))
+    bg = cfg.get("bg")
+    if bg is None:
+        bg = {"tiktok": "#000000", "karaoke": "#000000", "minimal": "#0b0c16"}.get(style)
+    return {"id": cue["id"], "text": cue["text"], "start": cue["start"], "end": cue["end"],
+            "x": 0.5, "y": float(cfg.get("y", 0.86)), "font": family, "weight": weight,
+            "size": float(cfg.get("size", 46)), "color": cfg.get("color") or "#ffffff", "bg": bg,
+            "align": "center", "bold": weight >= 600, "italic": False, "underline": False, "caps": False,
+            "opacity": 1.0, "shadow": {"on": style != "minimal", "color": "#000000", "blur": 14}}
+
+
 # ---------------------------------------------------------------- ffmpeg command (pure)
-def plan(edit, files, probes, text_pngs):
+def _filter_chain(f):
+    """Colour grading look -> ffmpeg chain (eq / colorbalance, mixed towards the original by `intensity`).  '' = nothing to do."""
+    fid = (f or {}).get("id", "none")
+    k = float((f or {}).get("intensity", 1) or 0)
+    if fid == "none" or k <= 0:
+        return ""
+    k = min(k, 1.0)
+    q = lambda v: f"{max(0.0, v):.4f}"                     # keeps the chain readable and deterministic
+    if fid == "cinema":
+        return f"eq=contrast={q(1 + 0.12 * k)}:saturation={q(1 + 0.18 * k)},colorbalance=rs={q(0.05 * k)}:bs={q(-0.05 * k)}"
+    if fid == "teal_orange":
+        return (f"colorbalance=rs={q(0.15 * k)}:gs={q(-0.05 * k)}:bs={q(-0.10 * k)}:rh={q(-0.10 * k)}:bh={q(0.15 * k)},"
+                f"eq=saturation={q(1 + 0.10 * k)}")
+    if fid == "vintage":
+        return (f"eq=contrast={q(1 - 0.10 * k)}:saturation={q(1 - 0.25 * k)}:gamma={q(1 + 0.06 * k)},"
+                f"colorbalance=rs={q(0.12 * k)}:gs={q(0.04 * k)}:bs={q(-0.12 * k)}")
+    if fid == "noir":
+        return f"eq=saturation={q(1 - k)}:contrast={q(1 + 0.25 * k)}"
+    if fid == "vibrant":
+        return f"eq=saturation={q(1 + 0.40 * k)}:contrast={q(1 + 0.05 * k)}"
+    if fid == "cyberpunk":
+        return (f"colorbalance=rs={q(0.10 * k)}:gs={q(0.05 * k)}:bs={q(0.15 * k)}:rh={q(0.20 * k)}:gh={q(-0.10 * k)}:bh={q(0.15 * k)},"
+                f"eq=saturation={q(1 + 0.25 * k)}")
+    if fid == "warm":
+        return f"colorbalance=rs={q(0.10 * k)}:gs={q(0.03 * k)}:bs={q(-0.10 * k)},eq=brightness={q(0.03 * k)}:saturation={q(1 + 0.10 * k)}"
+    return ""
+
+
+def _effect_chain(e, W, H, fps):
+    """Picture effect -> ffmpeg chain, sized for the output frame.  '' = nothing to do."""
+    eid = (e or {}).get("id", "none")
+    k = float((e or {}).get("intensity", 1) or 0)
+    if eid == "none" or k <= 0:
+        return ""
+    k = min(k, 1.0)
+    speed = float((e or {}).get("speed", 1) or 1)
+    if eid == "vignette":
+        return f"vignette=angle={0.7854 * k:.4f}"                       # PI/4 * intensity
+    if eid == "grain":
+        return f"noise=alls={max(1, round(40 * k))}:allf=t+u"
+    if eid == "shake":
+        mx = max(2, round(W * 0.015 * k))                               # a fixed crop that wanders = handheld drift
+        my = max(2, round(H * 0.015 * k))
+        return (f"crop=iw-{2 * mx}:ih-{2 * my}:x='(iw-ow)/2+{mx}*sin(t*{6.2832 * speed:.4f})':y='(ih-oh)/2+{my}*cos(t*{8.1681 * speed:.4f})',"
+                f"scale={W}:{H}")
+    if eid == "zoompulse":
+        rate = 0.0012 * k * speed                                       # ~1.35x over 30 s of push-in
+        return (f"zoompan=z='min(1+{rate:.6f}*on,1.4)':d=1:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s={W}x{H}:fps={fps}")
+    if eid == "glitch":
+        px = max(1, round(3 * k))
+        return f"rgbashift=rh={px}:bh=-{px}"
+    if eid == "blur":
+        return f"gblur=sigma={4.0 * k:.3f}"
+    return ""
+
+
+def _background_parts(bg, W, H, fps, head, out, idx):
+    """The per-clip chain that lays the trimmed clip on its background: a blurred fill of the clip itself, a flat colour, or black letterbox
+    bars.  `head` is the "[i:v]trim=...,setpts=..." start of the chain, `out` the label it produces."""
+    kind = (bg or {}).get("type", "black")
+    if kind == "blur":
+        r = max(1, min(63, int(round(float((bg or {}).get("blurRadius", 25) or 25)))))
+        return [f"{head},split=2[fgr{idx}][bgs{idx}]",
+                f"[bgs{idx}]scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},boxblur={r}:2[bgc{idx}]",
+                f"[fgr{idx}]scale={W}:{H}:force_original_aspect_ratio=decrease[fgs{idx}]",
+                f"[bgc{idx}][fgs{idx}]overlay=x=(W-w)/2:y=(H-h)/2,setsar=1,fps={fps},settb=1/{fps},format=yuv420p{out}"]
+    # a gradient fills flat with its first colour (the preview shows the full ramp; ffmpeg would need a second source input for it)
+    color = "black"
+    if kind == "color":
+        color = (bg or {}).get("color") or "#000000"
+    elif kind == "gradient":
+        color = ((bg or {}).get("gradient") or {}).get("from") or "#000000"
+    color = "0x" + color[1:] if color.startswith("#") else color   # #rrggbb is a filtergraph comment character, 0xrrggbb is not
+    return [f"{head},scale={W}:{H}:force_original_aspect_ratio=decrease,"
+            f"pad={W}:{H}:(ow-iw)/2:(oh-ih)/2:color={color},setsar=1,fps={fps},settb=1/{fps},format=yuv420p{out}"]
+
+
+def plan(edit, files, probes, text_pngs, sub_pngs=None):
     """Build the ffmpeg arguments.  edit is clean(); files = {src: absolute path}; probes = {src: {'duration','audio'}};
-    text_pngs = {text id: (png path, width, height)}.  Returns {'args': [...], 'total': seconds}."""
+    text_pngs = {text id: (png path, width, height)}; sub_pngs = {subtitle cue id: (png path, width, height)}.
+    Returns {'args': [...], 'total': seconds}."""
     W, H = ASPECTS[edit["aspect"]]
     fps = edit["fps"]
-    video, texts, audio = edit["tracks"]["video"], edit["tracks"]["text"], edit["tracks"]["audio"]
+    video, texts, audio, elements = edit["tracks"]["video"], edit["tracks"]["text"], edit["tracks"]["audio"], edit["tracks"].get("elements", [])
     if not video:
         raise EditError("Add at least one video clip before exporting")
     args, parts = [], []
@@ -325,8 +579,8 @@ def plan(edit, files, probes, text_pngs):
     n_in = len(video)
     for i, c in enumerate(video):
         d = c["out"] - c["in"]
-        parts.append(f"[{i}:v]trim=start={c['in']:.3f}:end={c['out']:.3f},setpts=PTS-STARTPTS,scale={W}:{H}:force_original_aspect_ratio=decrease,"
-                     f"pad={W}:{H}:(ow-iw)/2:(oh-ih)/2:black,setsar=1,fps={fps},format=yuv420p[v{i}]")
+        head = f"[{i}:v]trim=start={c['in']:.3f}:end={c['out']:.3f},setpts=PTS-STARTPTS"
+        parts += _background_parts(edit.get("background"), W, H, fps, head, f"[v{i}]", i)
         if probes.get(c["src"], {}).get("audio"):
             parts.append(f"[{i}:a]atrim=start={c['in']:.3f}:end={c['out']:.3f},asetpts=PTS-STARTPTS,aresample=44100,"
                          f"aformat=sample_fmts=fltp:channel_layouts=stereo,volume={c['volume']:.3f}[a{i}]")
@@ -338,15 +592,66 @@ def plan(edit, files, probes, text_pngs):
         d = c["out"] - c["in"]
         td = _td(c, length, d)
         if td == 0:
-            parts.append(f"{cur_v}[v{i}]concat=n=2:v=1:a=0[cv{i}]")
+            parts.append(f"{cur_v}[v{i}]concat=n=2:v=1:a=0,settb=1/{fps}[cv{i}]")
             parts.append(f"{cur_a}[a{i}]concat=n=2:v=0:a=1[ca{i}]")
             length += d
         else:
-            parts.append(f"{cur_v}[v{i}]xfade=transition={TRANSITIONS[c['transition']['type']]}:duration={td:.3f}:offset={length - td:.3f}[cv{i}]")
+            tr = c["transition"]
+            tr_type = tr["type"]
+            direction = tr.get("direction")
+            color = tr.get("color")
+            if tr_type == "wipe" and direction:
+                mapped = f"wipe{direction}" if direction != "left" else "wipe"
+                if mapped in TRANSITIONS:
+                    tr_type = mapped
+            elif tr_type.startswith("slide") and direction:
+                mapped = f"slide{direction}"
+                if mapped in TRANSITIONS:
+                    tr_type = mapped
+            elif tr_type.startswith("smooth") and direction in ("left", "right"):
+                mapped = f"smooth{direction}"
+                if mapped in TRANSITIONS:
+                    tr_type = mapped
+            elif tr_type.startswith("cover") and direction in ("left", "right", "up", "down"):
+                mapped = f"cover{direction}"
+                if mapped in TRANSITIONS:
+                    tr_type = mapped
+            elif tr_type.startswith("reveal") and direction in ("left", "right", "up", "down"):
+                mapped = f"reveal{direction}"
+                if mapped in TRANSITIONS:
+                    tr_type = mapped
+            elif tr_type == "fade" and color:
+                if color == "white":
+                    tr_type = "fadewhite"
+                elif color == "gray":
+                    tr_type = "fadegrays"
+            xfade_name = TRANSITIONS.get(tr_type) or TRANSITIONS.get(tr["type"], "fade")
+            parts.append(f"{cur_v}[v{i}]xfade=transition={xfade_name}:duration={td:.3f}:offset={length - td:.3f},settb=1/{fps}[cv{i}]")
             parts.append(f"{cur_a}[a{i}]acrossfade=d={td:.3f}[ca{i}]")
             length += d - td
         cur_v, cur_a = f"[cv{i}]", f"[ca{i}]"
     total = length
+    stage = 0
+    for chain in (_filter_chain(edit.get("filter")), _effect_chain(edit.get("effect"), W, H, fps)):
+        if chain:                                   # graded and effected picture, but still under the text and element overlays
+            stage += 1
+            parts.append(f"{cur_v}{chain}[look{stage}]")
+            cur_v = f"[look{stage}]"
+    for el in elements:
+        if el["src"] not in files:
+            continue
+        args += ["-i", str(files[el["src"]])]
+        k = n_in
+        n_in += 1
+        target_w = max(16, int(round(W * el["scale"] / 2.0) * 2))
+        op = el.get("opacity", 1.0)
+        if op < 0.999:
+            filter_chain = f"[{k}:v]scale={target_w}:-2:force_original_aspect_ratio=decrease,format=rgba,colorchannelmixer=aa={op:.3f}[el{k}]"
+        else:
+            filter_chain = f"[{k}:v]scale={target_w}:-2:force_original_aspect_ratio=decrease,format=rgba[el{k}]"
+        parts.append(filter_chain)
+        parts.append(f"{cur_v}[el{k}]overlay=x='W*{el['x']:.4f}-w/2':y='H*{el['y']:.4f}-h/2':eof_action=repeat:enable='between(t,{el['start']:.3f},{el['end']:.3f})'[o{k}]")
+        cur_v = f"[o{k}]"
     for t in texts:
         if t["id"] not in text_pngs:
             continue
@@ -356,6 +661,18 @@ def plan(edit, files, probes, text_pngs):
         n_in += 1
         x, y = round(t["x"] * W - w / 2), round(t["y"] * H - h / 2)
         parts.append(f"{cur_v}[{k}:v]overlay=x={x}:y={y}:enable='between(t,{t['start']:.3f},{t['end']:.3f})'[o{k}]")
+        cur_v = f"[o{k}]"
+    subs = edit["tracks"].get("subtitles") or {}
+    sub_y = float(subs.get("y", 0.86))
+    for cue in subs.get("cues", []):
+        if not sub_pngs or cue["id"] not in sub_pngs:
+            continue
+        png, w, h = sub_pngs[cue["id"]]
+        args += ["-i", str(png)]
+        k = n_in
+        n_in += 1
+        x, y = round(0.5 * W - w / 2), round(sub_y * H - h / 2)
+        parts.append(f"{cur_v}[{k}:v]overlay=x={x}:y={y}:enable='between(t,{cue['start']:.3f},{cue['end']:.3f})'[o{k}]")
         cur_v = f"[o{k}]"
     mus = []
     for a in audio:
@@ -391,7 +708,7 @@ def render(pdir, edit, progress=None):
     if not tools()["ffmpeg"]:
         raise EditError("ffmpeg is not installed. Install it (macOS: brew install ffmpeg) and restart AI Studio.")
     files, probes = {}, {}
-    for it in edit["tracks"]["video"] + edit["tracks"]["audio"]:
+    for it in edit["tracks"]["video"] + edit["tracks"]["audio"] + edit["tracks"].get("elements", []):
         f = pdir / it["src"]
         if not f.is_file():
             raise EditError(f"file not found: {it['src']}")
@@ -418,12 +735,17 @@ def render(pdir, edit, progress=None):
     tmp = Path(tempfile.mkdtemp(prefix="aistudio-render-"))
     try:
         W = ASPECTS[edit["aspect"]][0]
-        pngs = {}
+        pngs, sub_pngs = {}, {}
         for t in edit["tracks"]["text"]:
             p = tmp / f"{t['id']}.png"
             w, h = render_text_png(t, W, p)
             pngs[t["id"]] = (p, w, h)
-        pl = plan(edit, files, probes, pngs)
+        subs = edit["tracks"].get("subtitles") or {}
+        for cue in subs.get("cues", []):
+            p = tmp / f"sub_{cue['id']}.png"
+            w, h = render_text_png(subtitle_item(cue, subs), W, p)
+            sub_pngs[cue["id"]] = (p, w, h)
+        pl = plan(edit, files, probes, pngs, sub_pngs)
         part = tmp / "out.mp4"
         err = tmp / "err.txt"
         cmd = ["ffmpeg", "-y", "-nostdin", "-hide_banner", "-loglevel", "error", "-progress", "pipe:1", "-nostats", *pl["args"], str(part)]
@@ -456,3 +778,240 @@ def list_exports(pdir):
             st = f.stat()
             out.append({"file": f"exports/{f.name}", "bytes": st.st_size, "when": datetime.fromtimestamp(st.st_mtime).isoformat(timespec="seconds")})
     return out
+
+
+# ---------------------------------------------------------------- NLE, captions and bundle exports
+def media(pdir, edit):
+    """What an export needs from disk: ({src: absolute path}, {video src: ffprobe result or None}).
+    The paths are built even when a file is missing: the XML/EDL still describe the timeline (the NLE shows offline media) and the bundle
+    skips what is not there."""
+    pdir, tracks = Path(pdir), edit["tracks"]
+    files = {it["src"]: pdir / it["src"] for it in tracks["video"] + tracks["audio"] + tracks.get("elements", [])}
+    probes = {c["src"]: probe(pdir / c["src"]) for c in tracks["video"]}
+    return files, probes
+
+
+def timeline_spans(video):
+    """[(src_in, src_out, record_in, record_out, transition_in)] per clip: where it sits on the timeline, transitions overlapping the previous
+    clip exactly like timeline_length() (which is the last record_out)."""
+    spans, cur = [], 0.0
+    for n, c in enumerate(video):
+        d = c["out"] - c["in"]
+        td = 0.0 if n == 0 else _td(c, cur, d)
+        ri = cur - td
+        spans.append((c["in"], c["out"], ri, ri + d, td))
+        cur = ri + d
+    return spans
+
+
+def _timecode(t, fps):
+    """HH:MM:SS:FF at the edit frame rate (EDL and the header comments)."""
+    total = int(round(max(0.0, float(t)) * fps))
+    f = total % fps
+    s = (total // fps) % 60
+    m = (total // (fps * 60)) % 60
+    h = total // (fps * 3600)
+    return f"{h:02d}:{m:02d}:{s:02d}:{f:02d}"
+
+
+def _clock(t, sep):
+    """HH:MM:SS<sep>mmm (SubRip wants ',', WebVTT '.')."""
+    ms = int(round(max(0.0, float(t)) * 1000))
+    h, ms = divmod(ms, 3600000)
+    m, ms = divmod(ms, 60000)
+    s, ms = divmod(ms, 1000)
+    return f"{h:02d}:{m:02d}:{s:02d}{sep}{ms:03d}"
+
+
+def _cue_list(cues):
+    """The cues of a subtitles config (or a bare list of cues)."""
+    return cues.get("cues", []) if isinstance(cues, dict) else list(cues or [])
+
+
+def export_srt(cues):
+    """SubRip text: numbered blocks of `start --> end` and the cue line.  Uploads to YouTube, TikTok, Canva and Google Vids."""
+    blocks = [f"{n}\n{_clock(c['start'], ',')} --> {_clock(c['end'], ',')}\n{str(c.get('text', '')).strip()}"
+              for n, c in enumerate(_cue_list(cues), 1)]
+    return "\n\n".join(blocks) + ("\n" if blocks else "")
+
+
+def export_vtt(cues):
+    """WebVTT: the same timing with '.' milliseconds and the WEBVTT header."""
+    blocks = [f"{n}\n{_clock(c['start'], '.')} --> {_clock(c['end'], '.')}\n{str(c.get('text', '')).strip()}"
+              for n, c in enumerate(_cue_list(cues), 1)]
+    return "WEBVTT\n\n" + ("\n\n".join(blocks) + "\n" if blocks else "")
+
+
+def _project_name(files):
+    """Project folder name, read from a media path (<project>/clips/x.mp4): the timeline name of the NLE exports."""
+    for f in files.values():
+        name = Path(f).parent.parent.name
+        if name:
+            return name
+    return "AI Studio"
+
+
+def _xml_time(t, fps):
+    """Frame-exact FCPXML duration: '12/24s'."""
+    return f"{max(0, int(round(float(t) * fps)))}/{fps}s"
+
+
+def export_fcpxml(edit, files, probes):
+    """Final Cut Pro XML (fcpxml): the video spine with its real record points, the dissolves, and the music in a lane below.
+    Final Cut Pro opens it directly; DaVinci Resolve through File > Import > Timeline; other tools take it through their XML importer.
+    files = {src: path}, probes = {src: probe result or None}."""
+    video, audio = edit["tracks"]["video"], edit["tracks"]["audio"]
+    if not video:
+        raise EditError("Add at least one video clip before exporting")
+    fps, W, H = edit["fps"], *ASPECTS[edit["aspect"]]
+    esc = lambda s: xml_escape(str(s), {'"': "&quot;", "'": "&apos;"})
+    project = _project_name(files)
+    order, ids = [], {}
+    for src in [c["src"] for c in video] + [a["src"] for a in audio]:
+        if src not in ids:
+            ids[src] = f"r{len(order) + 2}"               # r1 = the output format, rf* = the media formats
+            order.append(src)
+    for src in order:
+        if src not in files:
+            raise EditError(f"file not found: {src}")
+    res = [f'<format id="r1" name="FFVideoFormat{W}x{H}p{fps}" frameDuration="1/{fps}s" width="{W}" height="{H}" '
+           f'colorSpace="1-1-1 (Rec. 709)"/>']
+    fmt_ids, fmt_of = {}, {}
+    for src in order:
+        pr = probes.get(src) or {}
+        w, h = int(pr.get("width") or 0), int(pr.get("height") or 0)
+        if w <= 0 or h <= 0:
+            w, h = W, H
+        if (w, h) not in fmt_ids:
+            fid = f"rf{len(fmt_ids) + 1}"
+            fmt_ids[(w, h)] = fid
+            res.append(f'<format id="{fid}" name="FFVideoFormat{w}x{h}" frameDuration="1/{fps}s" width="{w}" height="{h}" '
+                       f'colorSpace="1-1-1 (Rec. 709)"/>')
+        fmt_of[src] = fmt_ids[(w, h)]
+    for src in order:
+        pr = probes.get(src) or {}
+        f = Path(files[src]).resolve()
+        dur = pr.get("duration")
+        fallback = max([c["out"] for c in video if c["src"] == src] + [a["out"] for a in audio if a["src"] == src] + [1.0])
+        dur = float(dur) if isinstance(dur, (int, float)) and dur > 0 else fallback
+        uid = "AIStudio-" + re.sub(r"[^A-Za-z0-9]+", "-", src).strip("-")
+        has_video = any(c["src"] == src for c in video)
+        fmt_attr = f' format="{fmt_of[src]}"' if has_video else ""
+        res.append(f'<asset id="{ids[src]}" name="{esc(f.name)}" uid="{esc(uid)}" start="0s" duration="{_xml_time(dur, fps)}" '
+                   f'hasVideo="{1 if has_video else 0}" hasAudio="{1 if (pr.get("audio") or not has_video) else 0}"{fmt_attr} '
+                   f'src="{f.as_uri()}"/>')
+    spine = []
+    for c, (si, so, ri, ro, td) in zip(video, timeline_spans(video)):
+        attrs = (f'ref="{ids[c["src"]]}" name="{esc(Path(c["src"]).name)}" offset="{_xml_time(ri, fps)}" '
+                 f'start="{_xml_time(si, fps)}" duration="{_xml_time(so - si, fps)}"')
+        if td > 0:                                       # the dissolve INTO this clip
+            label = {"fade": "Dip to Black", "fadewhite": "Dip to White", "fadegrays": "Dip to Grey"}.get(c["transition"]["type"], "Cross Dissolve")
+            inner = " " * 12
+            spine.append(f'<asset-clip {attrs}>\n{inner}<transition alignment="center" displayName="{esc(label)}" '
+                         f'outgoingDuration="{_xml_time(td, fps)}" incomingDuration="{_xml_time(td, fps)}"/>\n{inner}</asset-clip>')
+        else:
+            spine.append(f'<asset-clip {attrs}/>')
+    for a in audio:
+        spine.append(f'<asset-clip ref="{ids[a["src"]]}" name="{esc(Path(a["src"]).name)}" offset="{_xml_time(a["start"], fps)}" '
+                     f'start="{_xml_time(a["in"], fps)}" duration="{_xml_time(a["out"] - a["in"], fps)}" lane="-1" role="music"/>')
+    total = timeline_spans(video)[-1][3]
+    indent = "          "                                # spine items sit under <spine>
+    return ('<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE fcpxml>\n<fcpxml version="1.9">\n  <resources>\n'
+            + "\n".join(f"    {r}" for r in res)
+            + f'\n  </resources>\n  <library location="{Path(files[order[0]]).resolve().parent.parent.as_uri()}/">\n'
+            f'    <event name="{esc(project)}">\n      <project name="{esc(project)}">\n'
+            f'        <sequence format="r1" duration="{_xml_time(total, fps)}" tcStart="0s" tcFormat="NDF">\n          <spine>\n'
+            + "\n".join(f"{indent}{s}" for s in spine)
+            + "\n          </spine>\n        </sequence>\n      </project>\n    </event>\n  </library>\n</fcpxml>\n")
+
+
+def _reel(src):
+    """A CMX 3600 reel name: upper case letters and digits, at most 8 characters."""
+    return re.sub(r"[^A-Za-z0-9]", "", Path(src).stem).upper()[:8] or "AX"
+
+
+def export_edl(edit, files):
+    """CMX 3600 edit decision list: picture events with their source and record timecodes (dissolves overlap the previous record-out),
+    the clip audio on A1 when ffprobe can see it, and the music after that.  Reads in Premiere, Resolve, Avid and Lightworks."""
+    video, audio = edit["tracks"]["video"], edit["tracks"]["audio"]
+    if not video:
+        raise EditError("Add at least one video clip before exporting")
+    fps = edit["fps"]
+    lines = [f"TITLE: {_project_name(files)[:31]}", "FCM: NON-DROP FRAME", ""]
+
+    def event(n, src, track, kind, si, so, ri, ro):
+        # CMX 3600 columns: event, reel (8), track, transition, source in/out, record in/out
+        return f"{n:03d}  {_reel(src):<9}{track:<6}{kind:<9}{_timecode(si, fps)} {_timecode(so, fps)} " \
+               f"{_timecode(ri, fps)} {_timecode(ro, fps)}"
+
+    known, n = {}, 0
+    for c, (si, so, ri, ro, td) in zip(video, timeline_spans(video)):
+        if c["src"] not in files:
+            raise EditError(f"file not found: {c['src']}")
+        if c["src"] not in known:
+            known[c["src"]] = probe(files[c["src"]])
+        for track in ("V", "A1") if (known[c["src"]] or {}).get("audio") else ("V",):
+            n += 1
+            lines.append(event(n, c["src"], track, "D" if (td > 0 and track == "V") else "C", si, so, ri, ro))
+            lines.append(f"* FROM CLIP NAME: {Path(c['src']).name}")
+            lines.append(f"* SOURCE FILE: {c['src']}")
+            if track == "V" and td > 0:
+                lines.append(f"* TRANSITION IN: DISSOLVE DURATION {_timecode(td, fps)}")
+            lines.append("")
+    for a in audio:
+        if a["src"] not in files:
+            raise EditError(f"file not found: {a['src']}")
+        n += 1
+        lines.append(event(n, a["src"], "A1", "C", a["in"], a["out"], a["start"], a["start"] + (a["out"] - a["in"])))
+        lines.append(f"* FROM CLIP NAME: {Path(a['src']).name}")
+        lines.append(f"* SOURCE FILE: {a['src']}")
+        lines.append("")
+    return "\n".join(lines).rstrip("\n") + "\n"
+
+
+def _summary(pdir, edit, files, probes):
+    """timeline_summary.json of the bundle: the whole timeline in one readable document."""
+    video, audio, subs = edit["tracks"]["video"], edit["tracks"]["audio"], edit["tracks"].get("subtitles") or {}
+    spans = timeline_spans(video)
+    return {"project": Path(pdir).name, "aspect": edit["aspect"], "fps": edit["fps"],
+            "duration": round(spans[-1][3], 3) if spans else 0.0,
+            "filter": edit["filter"], "effect": edit["effect"], "background": edit["background"],
+            "clips": [{"id": c["id"], "src": c["src"], "file": str(files.get(c["src"], "")),
+                       "in": c["in"], "out": c["out"], "start": round(ri, 3), "end": round(ro, 3),
+                       "transition": c["transition"]} for c, (_, _, ri, ro, _) in zip(video, spans)],
+            "audio": [{"id": a["id"], "src": a["src"], "start": a["start"], "in": a["in"], "out": a["out"], "volume": a["volume"]} for a in audio],
+            "subtitles": {"style": subs.get("style", "classic"), "cues": len(subs.get("cues", []))},
+            "files": [{"src": src, "present": Path(f).is_file(), "duration": round((probes.get(src) or {}).get("duration") or 0, 3),
+                       "audio": bool((probes.get(src) or {}).get("audio"))} for src, f in sorted(files.items())],
+            "created": datetime.now().isoformat(timespec="seconds")}
+
+
+def export_bundle(pdir, edit, files):
+    """The Canva / Google Vids zip: the media the timeline uses, captions.srt and captions.vtt, the NLE timeline (fcpxml + edl),
+    timeline_summary.json and the newest rendered preview as storyboard_guide.mp4 when the project has one.
+    The clips are the project files themselves (the trims live in timeline_summary.json), so nothing is re-encoded.
+    Returns the zip path: the caller downloads it and deletes it."""
+    pdir = Path(pdir)
+    video, subs = edit["tracks"]["video"], edit["tracks"].get("subtitles") or {}
+    if not video:
+        raise EditError("Add at least one video clip before exporting")
+    probes = {c["src"]: probe(files[c["src"]]) for c in video if c["src"] in files}
+    fd, tmp = tempfile.mkstemp(prefix="aistudio-bundle-", suffix=".zip")
+    os.close(fd)
+    try:
+        with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as z:
+            for rel, f in sorted(files.items()):
+                if Path(f).is_file():
+                    z.write(f, rel)
+            z.writestr("captions.srt", export_srt(subs))
+            z.writestr("captions.vtt", export_vtt(subs))
+            z.writestr("timeline.fcpxml", export_fcpxml(edit, files, probes))
+            z.writestr("timeline.edl", export_edl(edit, files))
+            z.writestr("timeline_summary.json", json.dumps(_summary(pdir, edit, files, probes), indent=2))
+            previews = sorted((pdir / "exports").glob("*.mp4")) if (pdir / "exports").is_dir() else []
+            if previews:
+                z.write(previews[-1], "storyboard_guide.mp4")
+        return tmp
+    except Exception:
+        Path(tmp).unlink(missing_ok=True)
+        raise

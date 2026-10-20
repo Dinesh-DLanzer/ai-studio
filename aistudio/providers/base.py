@@ -27,6 +27,7 @@ import mimetypes
 import os
 import re
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -80,10 +81,14 @@ def default_transport(timeout=120, secret=None):
         if os.environ.get("AISTUDIO_NO_NETWORK") == "1":
             raise Retryable("network disabled by AISTUDIO_NO_NETWORK=1")
         hdrs = dict(headers or {})
+        hdrs.setdefault("User-Agent", "AIStudio/1.0 (Macintosh; OpenCode-Client)")
         data = None
         if body is not None:
-            data = json.dumps(body).encode()
-            hdrs.setdefault("Content-Type", "application/json")
+            if "form" in hdrs.get("Content-Type", ""):
+                data = urllib.parse.urlencode(body).encode()
+            else:
+                data = json.dumps(body).encode()
+                hdrs.setdefault("Content-Type", "application/json")
         req = urllib.request.Request(url, method=method, data=data, headers=hdrs)
         try:
             with urllib.request.urlopen(req, timeout=timeout) as r:
@@ -103,10 +108,27 @@ def default_transport(timeout=120, secret=None):
     return transport
 
 
-def data_url(path):
+def data_url(path, max_dim=1024):
     p = Path(path)
-    mime = mimetypes.guess_type(p.name)[0] or "image/png"
-    return f"data:{mime};base64," + base64.b64encode(p.read_bytes()).decode()
+    try:
+        raw = p.read_bytes()
+        if len(raw) > 200_000 and p.suffix.lower() in (".png", ".jpg", ".jpeg", ".webp"):
+            try:
+                from PIL import Image
+                import io
+                img = Image.open(io.BytesIO(raw))
+                if max(img.size) > max_dim:
+                    img.thumbnail((max_dim, max_dim))
+                buf = io.BytesIO()
+                img.convert("RGB").save(buf, format="JPEG", quality=85)
+                return "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode()
+            except Exception:
+                pass
+        mime = mimetypes.guess_type(p.name)[0] or "image/png"
+        return f"data:{mime};base64," + base64.b64encode(raw).decode()
+    except Exception:
+        mime = mimetypes.guess_type(p.name)[0] or "image/png"
+        return f"data:{mime};base64," + base64.b64encode(p.read_bytes()).decode()
 
 
 def b64_of(path):
@@ -150,8 +172,14 @@ class Adapter:
     def image(self, model, prompt, refs=(), aspect_ratio="9:16", opts=None):
         self._unsupported("image generation")
 
+    def image_edit(self, model, image_path, prompt, edit_mode="inpaint_insertion", mask_mode="MASK_MODE_BACKGROUND", opts=None):
+        self._unsupported("image editing")
+
     def video_submit(self, model, req):
         self._unsupported("video generation")
+
+    def video_extend(self, model, video_path, prompt, seconds=5, aspect_ratio="16:9", resolution="720p", opts=None):
+        self._unsupported("video extension")
 
     def video_poll(self, job):
         self._unsupported("video generation")

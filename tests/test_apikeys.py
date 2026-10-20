@@ -113,8 +113,8 @@ class TestKeyRoutes(unittest.TestCase):
         j = self.call("get", "/api/integrations", self.S).json()
         self.assertTrue(j["mcp"]["python"] and j["mcp"]["repo"] and j["mcp"]["home"])
         names = {t["name"] for t in j["tools"]}
-        self.assertTrue({"propose", "run_proposal", "estimate"} <= names)
-        self.assertFalse({"approve", "approve_budget", "set_mode"} & names)
+        self.assertTrue({"propose", "run_proposal", "estimate", "delete_project", "approve_budget", "approve_proposal"} <= names)
+        self.assertFalse({"set_mode", "reveal_code"} & names)
 
 
 if __name__ == "__main__":

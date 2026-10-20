@@ -96,6 +96,36 @@ class TestGoogle(unittest.TestCase):
         r = a.video_poll({"job_id": OP, "model": "m"})
         self.assertEqual((r["status"], r["error"]), ("failed", "no video in response"))
 
+    def test_image_with_multi_refs_and_negative_prompt(self):
+        data = base64.b64encode(b"PNGOUT").decode()
+        a, t = make({"candidates": [{"content": {"parts": [{"inlineData": {"mimeType": "image/png", "data": data}}]}}]})
+        refs = [png() for _ in range(20)]  # 20 refs, should cap at 14
+        r = a.image("gemini-3-pro-image", "a hero", refs=refs, aspect_ratio="16:9", opts={"negative_prompt": "blurry"})
+        b = t.last["body"]
+        self.assertEqual(b["generationConfig"]["imageConfig"], {"aspectRatio": "16:9", "negativePrompt": "blurry"})
+        # 1 prompt text part + 14 inlineData parts = 15 parts
+        self.assertEqual(len(b["contents"][0]["parts"]), 15)
+        self.assertEqual(r["bytes"], b"PNGOUT")
+
+    def test_image_edit(self):
+        data = base64.b64encode(b"EDITEDPNG").decode()
+        a, t = make({"candidates": [{"content": {"parts": [{"inlineData": {"mimeType": "image/png", "data": data}}]}}]})
+        r = a.image_edit("gemini-3-pro-image", png(), "replace background with mars", edit_mode="bgswap", mask_mode="MASK_MODE_BACKGROUND")
+        b = t.last["body"]
+        self.assertIn("Edit mode: bgswap", b["contents"][0]["parts"][0]["text"])
+        self.assertIn("inlineData", b["contents"][0]["parts"][1])
+        self.assertEqual(r["bytes"], b"EDITEDPNG")
+
+    def test_video_extend(self):
+        a, t = make({"name": OP})
+        job = a.video_extend("veo-3.1-generate-preview", png(), "camera pans right to reveal spaceship", seconds=6, aspect_ratio="16:9")
+        self.assertEqual(t.last["url"], BASE + "/models/veo-3.1-generate-preview:predictLongRunning")
+        b = t.last["body"]
+        self.assertEqual(b["parameters"], {"aspectRatio": "16:9", "durationSeconds": 6, "resolution": "720p"})
+        self.assertEqual(b["instances"][0]["prompt"], "camera pans right to reveal spaceship")
+        self.assertIn("bytesBase64Encoded", b["instances"][0]["video"])
+        self.assertEqual(job, {"job_id": OP, "model": "veo-3.1-generate-preview"})
+
 
 if __name__ == "__main__":
     unittest.main()

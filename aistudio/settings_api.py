@@ -3,6 +3,7 @@
 Everything here returns plain JSON-able dicts for the web API, and NEVER returns a secret (only whether it is set and its last 4 characters).
 """
 import re
+import shutil
 import time
 
 from aistudio import costlog, migrate as migrate_mod, pricing as pricing_mod
@@ -68,8 +69,12 @@ class SettingsMixin:
     def _status(self, p):
         if not p.get("enabled", True):
             return {"state": "inactive", "message": "Disabled"}
-        if p["type"] != "fake" and not self.secrets.has(self._secret_ref(p)) and not (p["type"] == "custom" and p.get("base_url")):
-            return {"state": "needs_key", "message": "Add an API key"}
+        binary = pconf.needs_binary(p["type"])
+        if binary:
+            if not shutil.which(binary):
+                return {"state": "needs_key", "message": f"Install the {binary} CLI and sign in"}
+        elif p["type"] != "fake" and not self.secrets.has(self._secret_ref(p)) and not (p["type"] == "custom" and p.get("base_url")):
+            return {"state": "needs_key", "message": "Sign in with ChatGPT" if pconf.PROVIDER_TYPES[p["type"]].get("auth_type") == "oauth" else "Add an API key"}
         bad = self._health.unhealthy(p["id"])
         if bad:
             return {"state": "error", "message": bad}
@@ -169,6 +174,63 @@ class SettingsMixin:
         self._health.clear(pid)
         return self._provider_view(self._provider(pid))
 
+    # ---------------------------------------------------------------- ChatGPT subscription sign-in
+    def chatgpt_status(self):
+        from aistudio.providers import chatgpt_auth as ca
+        p = next((x for x in self._providers_doc() if x["type"] == "chatgpt"), None)
+        sec = self.secrets.get(self._secret_ref(p)) if p else {}
+        return {"codex_detected": ca.codex_detected(), "provider_id": p["id"] if p else None, "connected": bool(sec), **ca.describe(sec)}
+
+    def _chatgpt_save(self, secret):
+        """Create the ChatGPT provider if missing and store the OAuth session under it."""
+        provs = self._providers_doc()
+        p = next((x for x in provs if x["type"] == "chatgpt"), None)
+        if p is None:
+            p = {"id": "chatgpt", "type": "chatgpt", "label": pconf.PROVIDER_TYPES["chatgpt"]["label"], "base_url": "", "enabled": True}
+            self._save_providers(provs + [p])
+        try:
+            self.secrets.set(self._secret_ref(p), secret)
+        except Exception as e:
+            raise _err(str(e)) from None
+        self._health.clear(p["id"])
+        return self._provider_view(p)
+
+    def chatgpt_import_codex(self):
+        from aistudio.providers import chatgpt_auth as ca
+        try:
+            secret, _ = ca.read_codex_session()
+        except pbase.ProviderError as e:
+            raise _err(str(e)) from None
+        return self._chatgpt_save(secret)
+
+    def chatgpt_authorize(self, redirect_uri=None):
+        """Start the browser sign-in: returns {"url"}.  The PKCE verifier stays in memory, keyed by the state value."""
+        from aistudio.providers import chatgpt_auth as ca
+        redirect_uri = redirect_uri or ca.REDIRECT_URI
+        pk = ca.new_pkce()
+        pending = self.__dict__.setdefault("_chatgpt_pending", {})
+        pending[pk["state"]] = {"verifier": pk["verifier"], "redirect_uri": redirect_uri, "at": time.time()}
+        for s in [s for s, v in pending.items() if time.time() - v["at"] > 900]:
+            del pending[s]
+        return {"url": ca.authorize_url(pk, redirect_uri), "state": pk["state"], "redirect_uri": redirect_uri}
+
+    def chatgpt_finish(self, code, state):
+        from aistudio.providers import chatgpt_auth as ca
+        pending_map = self.__dict__.get("_chatgpt_pending", {})
+        pend = pending_map.get(state or "")
+        if not pend or not code:
+            raise _err("this sign-in link is unknown or expired; start again")
+        try:
+            secret = ca.exchange_code(self._adapter_transport(), code, pend["verifier"], pend["redirect_uri"])
+        except pbase.ProviderError as e:
+            pending_map.pop(state, None)
+            raise _err(self.secrets.redact(e)[:200]) from None
+        except Exception as e:
+            pending_map.pop(state, None)
+            raise _err(str(e)) from None
+        pending_map.pop(state, None)
+        return self._chatgpt_save(secret)
+
     def provider_secret_delete(self, pid):
         p = self._provider(pid)
         self.secrets.delete(self._secret_ref(p))
@@ -202,7 +264,7 @@ class SettingsMixin:
         return {"result": res, "provider": self._provider_view(p)}
 
     def _adapter_transport(self):
-        return self.runner().transport
+        return self.runner().transport or pbase.default_transport()
 
     # ---------------------------------------------------------------- models and prices
     def _models_file(self):
@@ -305,7 +367,7 @@ class SettingsMixin:
             if prim_price is None and e["problem"] is None:
                 prim_price = price
             out.append({"provider": e["provider"]["id"], "provider_label": e["provider"].get("label") or e["provider"]["id"], "ptype": e["ptype"], "model": e["model"],
-                        "problem": e["problem"], "price": price_summary(card), "priced": card is not None, "free": pr.is_free(card),
+                        "problem": e["problem"], "price": price_summary(card), "priced": card is not None, "free": pr.is_free(card), "card": card,
                         "unhealthy": self._health.unhealthy(e["provider"]["id"]),
                         "dearer": bool(role in ("video", "image") and price is not None and prim_price is not None and price > prim_price + 1e-9)})
         return out
@@ -374,11 +436,16 @@ class SettingsMixin:
         pconf.save_roles(self.settings_dir, fresh, provs)
         return self.roles_get()
 
-    def roles_test(self, role, project=None):
-        """Free check of every model in a chain: provider usable, model known to the provider. Chat roles also get a 1-token ping when the model is free."""
+    def roles_test(self, role, project=None, provider=None, model=None):
+        """Free check of models in a chain: provider usable, model known to the provider. Chat roles also get a 1-token ping when the model is free.
+        Can test all models or one model if provider/model are specified."""
         p = self.pdir(project) if project else None
         runner, out = self.runner(), []
         for e in runner.resolve(role, p, configured=True):
+            if provider and e["provider"]["id"] != provider:
+                continue
+            if model and e["model"] != model:
+                continue
             row = {"provider": e["provider"]["id"], "model": e["model"], "ok": False, "message": ""}
             if e["problem"]:
                 row["message"] = e["problem"]

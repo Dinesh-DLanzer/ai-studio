@@ -160,6 +160,13 @@ class TestChainTest(unittest.TestCase):
         self.assertFalse(c["ok"])                                                 # text models CAN be checked, and this one does not exist
         self.assertIn("does not list", c["message"])
 
+        # test filtering by specific model
+        only_video = ws.roles_test("video", provider=p, model="google/veo-3.1-lite")["results"]
+        self.assertEqual(len(only_video), 1)
+        self.assertEqual(only_video[0]["model"], "google/veo-3.1-lite")
+        none = ws.roles_test("video", provider=p, model="nonexistent")["results"]
+        self.assertEqual(len(none), 0)
+
 
 class TestSetupGate(unittest.TestCase):
     def test_fresh_workspace_needs_setup_then_clears(self):

@@ -48,6 +48,16 @@ class SecretStore:
                 self.kr = keyring
             except Exception:
                 self.kr = None
+                try:
+                    import sys
+                    repo = Path(__file__).resolve().parent.parent
+                    for p in (repo / ".venv").glob("lib/python*/site-packages"):
+                        if p.is_dir() and str(p) not in sys.path:
+                            sys.path.insert(0, str(p))
+                    import keyring
+                    self.kr = keyring
+                except Exception:
+                    self.kr = None
 
     # -- file backend
     def _read(self):
