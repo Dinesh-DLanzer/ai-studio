@@ -12,8 +12,9 @@ export const BENEFITS: { title: string; text: string }[] = [
 ];
 
 export const SETUP: { title: string; text: ReactNode }[] = [
-  { title: "Install the three things it needs", text: <>Python 3.10 or newer, Node 18 or newer (only once, to build the screens) and <b>ffmpeg</b> (needed to export videos; on macOS run <code>brew install ffmpeg</code>).</> },
-  { title: "Start it", text: <>Run <code>./scripts/start.sh</code> (macOS/Linux) or double-click <code>scripts\start.bat</code> (Windows). It prints a link like <code>http://127.0.0.1:8765/?token=...</code>. Open that link: the token is your session key, so keep it private.</> },
+  { title: "Automated setup", text: <>Python 3.10+, Node.js, and <b>ffmpeg</b> are automatically detected and installed on first run if missing.</> },
+  { title: "Start it", text: <>Run <code>./start</code> (or <code>start.bat</code> on Windows). It prints a link like <code>http://127.0.0.1:8765/?token=...</code>. Open that link: the token is your session key, so keep it private.</> },
+
   { title: "Pick how to begin", text: <>With no provider connected you are asked: <b>Set up a provider</b> to make real videos, or <b>Try a test project</b> to explore for free. You can connect a provider later from the banner or Settings.</> },
   { title: "Connect a provider and choose models", text: <>Add OpenRouter, Google, OpenAI, Anthropic, Runway, Kling, Replicate or any OpenAI-compatible server with its API key. Then give <b>Chat</b> at least one model (required), and choose <b>Image</b> and <b>Video</b> models before you generate. Keys are write-only and stored in your OS keychain or a private file.</> },
   { title: "Create your first project", text: <>Press <b>Generate New Video</b> or use the form on the Projects page. Leave "Test project" off for a real one. You land in the chat with Tara, your producer.</> },

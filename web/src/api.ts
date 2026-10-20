@@ -44,3 +44,31 @@ export async function uploadAudio(project: string, file: File): Promise<{ src: s
   if (!r.ok) throw new ApiError(r.status, (j as any).detail || r.statusText);
   return j as any;
 }
+
+export async function uploadElement(project: string, file: File): Promise<{ src: string; name: string }> {
+  const r = await fetch(`/api/projects/${encodeURIComponent(project)}/elements?filename=${encodeURIComponent(file.name)}`, { method: "POST", headers: { "x-aistudio-token": getToken() }, body: file });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new ApiError(r.status, (j as any).detail || r.statusText);
+  return j as any;
+}
+
+export async function listElements(project: string): Promise<Array<{ src: string; name: string; kind: "uploaded" | "still" }>> {
+  const r = await api<{ elements: Array<{ src: string; name: string; kind: "uploaded" | "still" }> }>("GET", `/api/projects/${encodeURIComponent(project)}/elements`);
+  return r.elements || [];
+}
+
+export async function editStill(project: string, shotId: string, prompt: string, editMode = "inpaint_insertion", maskMode = "MASK_MODE_BACKGROUND"): Promise<{ file: string; cost: number; provider: string; model: string }> {
+  return api("POST", `/api/projects/${encodeURIComponent(project)}/stills/${encodeURIComponent(shotId)}/edit`, {
+    prompt,
+    edit_mode: editMode,
+    mask_mode: maskMode,
+  });
+}
+
+export async function extendClip(project: string, shotId: string, prompt: string, seconds = 5): Promise<{ file: string; status: string; cost: number; provider: string; model: string }> {
+  return api("POST", `/api/projects/${encodeURIComponent(project)}/clips/${encodeURIComponent(shotId)}/extend`, {
+    prompt,
+    seconds,
+  });
+}
+

@@ -4,7 +4,7 @@ import { useToast } from "../toast";
 import { settingsApi } from "./client";
 import type { Capability, ModelInfo, PriceCard } from "./types";
 
-export interface PriceTarget { provider: string; provider_label?: string; model: string; capability: Capability; suggest?: PriceCard | null; }
+export interface PriceTarget { provider: string; provider_label?: string; model: string; capability: Capability; suggest?: PriceCard | null; card?: PriceCard | null; }
 
 const num = (s: string) => (s.trim() === "" ? NaN : Number(s));
 const bad = (n: number) => !Number.isFinite(n) || n < 0;
@@ -27,13 +27,14 @@ export default function PriceDialog({ target, onClose, onSaved }: { target: Pric
   const [suggest, setSuggest] = useState<PriceCard | null>(null);
   const [perSec, setPerSec] = useState(""); const [diff, setDiff] = useState(false);
   const [withAudio, setWithAudio] = useState(""); const [noAudio, setNoAudio] = useState("");
-  const [perImage, setPerImage] = useState("");
+  const [perImage, setPerImage] = useState(""); const [imgFree, setImgFree] = useState(false); const [vidFree, setVidFree] = useState(false);
   const [free, setFree] = useState(false); const [inp, setInp] = useState(""); const [out, setOut] = useState("");
   const [err, setErr] = useState(""); const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    setPerSec(""); setDiff(false); setWithAudio(""); setNoAudio(""); setPerImage(""); setFree(false); setInp(""); setOut(""); setErr(""); setBusy(false);
+    setPerSec(""); setDiff(false); setWithAudio(""); setNoAudio(""); setPerImage(""); setImgFree(false); setVidFree(false); setFree(false); setInp(""); setOut(""); setErr(""); setBusy(false);
     setSuggest(target?.suggest ?? null);
+    if (target?.card) apply(target.card);            // editing: start from the current price
     if (!target || target.suggest !== undefined) return;
     let live = true;
     settingsApi.models(target.capability).then((r) => {
@@ -52,9 +53,11 @@ export default function PriceDialog({ target, onClose, onSaved }: { target: Pric
     if (c.kind === "video") {
       const e = Object.entries(c.per_second || {})[0];
       const v = e?.[1] as unknown;
+      if (v === 0) { setVidFree(true); return; }
+      setVidFree(false);
       if (v && typeof v === "object") { const o = v as { audio?: number; no_audio?: number }; setDiff(true); setWithAudio(String(o.audio ?? "")); setNoAudio(String(o.no_audio ?? "")); }
       else if (v !== undefined) { setDiff(false); setPerSec(String(v)); }
-    } else if (c.kind === "image") setPerImage(String(c.per_image ?? ""));
+    } else if (c.kind === "image") { const z = c.per_image === 0; setImgFree(z); setPerImage(z ? "" : String(c.per_image ?? "")); }
     else if (c.free) setFree(true);
     else { setFree(false); setInp(String(c.input_per_1m ?? "")); setOut(String(c.output_per_1m ?? "")); }
   };
@@ -62,7 +65,8 @@ export default function PriceDialog({ target, onClose, onSaved }: { target: Pric
   const save = async () => {
     let card: PriceCard;
     if (kind === "video") {
-      if (diff) {
+      if (vidFree) card = { kind: "video", per_second: { "480p": 0, "720p": 0, "1080p": 0 } };
+      else if (diff) {
         const a = num(withAudio), n = num(noAudio);
         if (bad(a) || bad(n)) return setErr("Enter both prices as numbers, 0 or more.");
         card = { kind: "video", per_second: { "720p": { audio: a, no_audio: n } } };
@@ -71,7 +75,8 @@ export default function PriceDialog({ target, onClose, onSaved }: { target: Pric
         if (bad(p)) return setErr("Enter the price per second as a number, 0 or more.");
         card = { kind: "video", per_second: { "720p": p } };
       }
-    } else if (kind === "image") {
+    } else if (kind === "image" && imgFree) card = { kind: "image", per_image: 0 };
+    else if (kind === "image") {
       const p = num(perImage);
       if (bad(p)) return setErr("Enter the price per image as a number, 0 or more.");
       card = { kind: "image", per_image: p };
@@ -88,7 +93,7 @@ export default function PriceDialog({ target, onClose, onSaved }: { target: Pric
   };
 
   return (
-    <Modal open onClose={onClose} title="Set price">
+    <Modal open onClose={onClose} title={target.card ? "Change price" : "Set price"}>
       <form className="space-y-4" onSubmit={(e) => { e.preventDefault(); void save(); }}>
         <p className="text-sm text-slate-300">Price for <span className="font-mono text-slate-100">{target.model}</span>{target.provider_label ? <> on {target.provider_label}</> : null}. Used for cost estimates and the budget.</p>
         {suggest && (
@@ -99,6 +104,11 @@ export default function PriceDialog({ target, onClose, onSaved }: { target: Pric
         )}
         {kind === "video" && (
           <div className="space-y-3">
+            <div className="flex gap-4 text-sm text-slate-300">
+              <label className="flex items-center gap-2"><input type="radio" name="vidtype" checked={vidFree} onChange={() => setVidFree(true)} /> Free</label>
+              <label className="flex items-center gap-2"><input type="radio" name="vidtype" checked={!vidFree} onChange={() => setVidFree(false)} /> Paid per second</label>
+            </div>
+            {!vidFree && <>
             <label className="flex items-center gap-2 text-sm text-slate-300"><input type="checkbox" checked={diff} onChange={(e) => setDiff(e.target.checked)} /> Price differs with audio</label>
             {diff ? (
               <div className="grid grid-cols-2 gap-3">
@@ -108,9 +118,19 @@ export default function PriceDialog({ target, onClose, onSaved }: { target: Pric
             ) : (
               <div><Label>$ per second (720p)</Label><Input aria-label="Dollars per second (720p)" type="number" min={0} step="any" value={perSec} onChange={(e) => setPerSec(e.target.value)} autoFocus /></div>
             )}
+            </>}
           </div>
         )}
-        {kind === "image" && <div><Label>$ per image</Label><Input aria-label="Dollars per image" type="number" min={0} step="any" value={perImage} onChange={(e) => setPerImage(e.target.value)} autoFocus /></div>}
+        {kind === "image" && (
+          <fieldset className="space-y-3">
+            <legend className="sr-only">Pricing type</legend>
+            <div className="flex gap-4 text-sm text-slate-300">
+              <label className="flex items-center gap-2"><input type="radio" name="imgtype" checked={imgFree} onChange={() => setImgFree(true)} /> Free</label>
+              <label className="flex items-center gap-2"><input type="radio" name="imgtype" checked={!imgFree} onChange={() => setImgFree(false)} /> Paid per image</label>
+            </div>
+            {!imgFree && <div><Label>$ per image</Label><Input aria-label="Dollars per image" type="number" min={0} step="any" value={perImage} onChange={(e) => setPerImage(e.target.value)} autoFocus /></div>}
+          </fieldset>
+        )}
         {kind === "text" && (
           <fieldset className="space-y-3">
             <legend className="sr-only">Pricing type</legend>

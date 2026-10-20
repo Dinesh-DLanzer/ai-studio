@@ -4,8 +4,9 @@ import {
   Crown, Image as ImageIcon, LayoutGrid, Maximize2, MoreHorizontal, Pencil, Plus, Sparkles, Trash2, Upload as UploadIcon, Users, X,
   ChevronLeft, ChevronRight, Wand2, Eye,
 } from "lucide-react";
-import { api, fileUrl, upload } from "../api";
-import { Badge, Button, Field, Input } from "../ui";
+import { api, fileUrl, upload, editStill } from "../api";
+import { Badge, Button, Field, Input, Modal } from "../ui";
+import { AlertCircle } from "lucide-react";
 import { Spinner, runKey } from "../Proposal";
 import { useToast } from "../toast";
 import { confirmDialog, promptDialog } from "../dialogs";
@@ -15,8 +16,8 @@ import { PageBody } from "../app/Shell";
 import { EmptyState, PageBanner, RailCard } from "../components/kit";
 import { ID_OK, ImportStills, KINDS, ReviewBadge, stem, type TabProps } from "../ProjectPage";
 import type { FoundStill, ImageSpec } from "../types";
+import { useProjectAssets, type Kind } from "../hooks/useProjectAssets";
 
-type Kind = ImageSpec["kind"];
 const KIND_ICON: Record<Kind, JSX.Element> = { character: <Users size={17} />, background: <ImageIcon size={17} />, frame: <LayoutGrid size={17} />, other: <UploadIcon size={17} /> };
 
 const norm = (t: string) => t.toLowerCase().replace(/[^a-z0-9]/g, "");
@@ -39,42 +40,42 @@ export function storyDescription(story: string, i: ImageSpec): string {
 
 export function AssetsTab({ o, name, load, start, running }: TabProps) {
   const toast = useToast();
-  const [doc, setDoc] = useState<ImageSpec[]>(o.images.images); const [style, setStyle] = useState(o.images.style || ""); const [dirty, setDirty] = useState(false);
-  const [adding, setAdding] = useState<Kind | null>(null); const [newId, setNewId] = useState(""); const [newPrompt, setNewPrompt] = useState("");
-  const [pick, setPick] = useState<string | null>(null); const [active, setActive] = useState<Kind>("character"); const [dragId, setDragId] = useState<string | null>(null);
-  const [found, setFound] = useState<FoundStill[]>([]);
-  const [story, setStory] = useState("");
-  useEffect(() => { api<{ text: string }>("GET", `/api/projects/${name}/docs/Story.md`).then((r) => setStory(r.text)).catch(() => setStory("")); }, [name, o.images]);
-  const secs = useRef<Partial<Record<Kind, HTMLElement | null>>>({});
-  useEffect(() => { setDoc(o.images.images); setStyle(o.images.style || ""); setDirty(false); }, [o.images]);
-  useEffect(() => { api<{ files: FoundStill[] }>("GET", `/api/projects/${name}/stills/unregistered`).then((r) => setFound(r.files)).catch(() => setFound([])); }, [name, o.files.stills.join("|"), o.images.images.length]);
+  const {
+    doc,
+    style,
+    setStyle,
+    dirty,
+    setDirty,
+    adding,
+    setAdding,
+    newId,
+    setNewId,
+    newPrompt,
+    setNewPrompt,
+    pick,
+    setPick,
+    active,
+    setActive,
+    dragId,
+    setDragId,
+    found,
+    story,
+    checkingChar,
+    setCheckingChar,
+    secs,
+    file,
+    url,
+    edit,
+    save,
+    open,
+    add,
+    up,
+    discard,
+    remove,
+    toggleRef,
+    convertToRefAndGenerateMaster,
+  } = useProjectAssets({ name, o, load });
 
-  const file = (id: string) => o.files.stills.find((f) => stem(f) === id);
-  const url = (id: string) => { const f = file(id); return f ? fileUrl(name, `stills/${encodeURIComponent(f)}`) : undefined; };
-  const edit = (next: ImageSpec[]) => { setDoc(next); setDirty(true); };
-  const persist = async (images: ImageSpec[], quiet = false) => { await api("PUT", `/api/projects/${name}/images`, { style, images }); if (!quiet) toast("ok", "Image list saved."); load(); };
-  const save = async () => { try { await persist(doc); } catch (e: any) { toast("error", e.message); } };
-  const open = (kind: Kind) => { setActive(kind); setAdding(kind); setNewId(""); setNewPrompt(""); secs.current[kind]?.scrollIntoView({ behavior: "smooth", block: "start" }); };
-  const add = async (kind: Kind) => {
-    const id = newId.trim().toLowerCase();
-    if (!ID_OK.test(id)) return toast("error", "Use a short id: lowercase letters, numbers, - or _ (for example ramesh_sheet).");
-    if (doc.some((i) => i.id === id)) return toast("error", `An asset called ${id} already exists.`);
-    const spec: ImageSpec = { id, kind, out: `stills/${id}.png`, prompt: newPrompt.trim() || `${kind} ${id}`, refs: [], aspect_ratio: kind === "frame" ? "9:16" : "3:2" };
-    try { await persist([...doc, spec], true); setAdding(null); setNewId(""); setNewPrompt(""); setPick(id); toast("ok", `Added ${id}. Upload your image or generate one.`); } catch (e: any) { toast("error", e.message); }
-  };
-  const up = async (id: string, f: File | undefined, replace: boolean) => {
-    if (!f) return;
-    if (!f.type.startsWith("image/") && !/\.(png|jpe?g|webp|gif|bmp|tiff?|heic|heif)$/i.test(f.name)) return toast("error", "That is not a supported image.");
-    try { await upload(name, `stills/${id}.png`, f, replace); toast("ok", replace ? `Replaced ${id}. The old image is in Discarded.` : `Uploaded ${id}.`); load(); }
-    catch (e: any) { toast("error", e.message); }
-  };
-  const discard = async (rel: string) => { const reason = await promptDialog("Why discard this image?", { title: "Discard image", ok: "Discard" }); if (reason === null) return; await api("POST", `/api/projects/${name}/discard`, { rel, reason }); load(); };
-  const remove = async (id: string) => { if (await confirmDialog(`Remove ${id} from the list? (Only possible while it has no image.)`, { title: "Remove asset", ok: "Remove", danger: true })) persist(doc.filter((i) => i.id !== id)).catch((e: any) => toast("error", e.message)); };
-  const toggleRef = (i: ImageSpec, ref: string) => {
-    const has = i.refs.includes(ref);
-    if (!has && i.refs.length >= 4) return toast("error", "At most 4 reference images.");
-    edit(doc.map((x) => x.id === i.id ? { ...x, refs: has ? x.refs.filter((r) => r !== ref) : [...x.refs, ref] } : x));
-  };
   // a plain function (not a component): a component defined inside render is re-created on every render, which destroys the file input and loses a file being chosen
   const uploadLabel = (id: string, replace: boolean, cls: string, text?: string) => (
     <label className={`${cls} cursor-pointer`}>
@@ -246,6 +247,48 @@ export function AssetsTab({ o, name, load, start, running }: TabProps) {
           </section>
         </div>
       </PageBody>
+
+      <Modal open={!!checkingChar} onClose={() => setCheckingChar(null)} title="Character Image Check">
+        {checkingChar && (
+          <div className="space-y-4 text-sm text-slate-300">
+            <div className="flex items-start gap-3 rounded-xl border border-amber-500/40 bg-amber-500/10 p-3.5">
+              <AlertCircle size={22} className="shrink-0 text-amber-400" />
+              <div>
+                <h4 className="font-bold text-amber-200">Character Reference Image Detected</h4>
+                <p className="mt-1 text-xs text-amber-300/90 leading-relaxed">
+                  {checkingChar.analysis.summary || "This image appears to be a single-angle reference photo or face image."}
+                </p>
+                <p className="mt-2 text-xs text-slate-300 leading-relaxed">
+                  For video scenes to remain consistent, an AI character master sheet needs <b>multi-angle body views</b> (front, side, back) and a <b>grid of facial expressions</b> (neutral, happy, angry, sad, etc.).
+                </p>
+              </div>
+            </div>
+
+            <div className="flex gap-4 items-center rounded-xl border border-slate-800 bg-slate-900/60 p-3">
+              <img
+                src={url(checkingChar.id)}
+                alt="Uploaded reference"
+                className="h-28 w-24 object-cover rounded-lg border border-slate-700 shrink-0"
+              />
+              <div className="space-y-1 text-xs">
+                <div><span className="text-slate-400">Asset:</span> <span className="font-mono font-bold text-slate-200">{checkingChar.id}</span></div>
+                <div><span className="text-slate-400">Multiple body angles:</span> <span className={checkingChar.analysis.has_multiple_angles ? "text-emerald-400" : "text-amber-400 font-semibold"}>{checkingChar.analysis.has_multiple_angles ? "Yes" : "No (Single view)"}</span></div>
+                <div><span className="text-slate-400">Facial reactions grid:</span> <span className={checkingChar.analysis.has_facial_expressions ? "text-emerald-400" : "text-amber-400 font-semibold"}>{checkingChar.analysis.has_facial_expressions ? "Yes" : "No (Single expression)"}</span></div>
+                <div className="pt-1 text-slate-400 italic">Recommendation: Keep as reference photo (<span className="font-mono">{checkingChar.id}_ref</span>) and generate a full multi-angle character sheet.</div>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center justify-end gap-2 pt-2">
+              <Button variant="outline" onClick={() => setCheckingChar(null)}>
+                Keep as Character Image Anyway
+              </Button>
+              <Button variant="pink" onClick={convertToRefAndGenerateMaster}>
+                Keep as Reference & Generate Full Sheet
+              </Button>
+            </div>
+          </div>
+        )}
+      </Modal>
     </div>
   );
 }
@@ -264,6 +307,22 @@ function AssetPreview({ description, renameTo, o, name, spec, file, img, urlOf, 
   const usedBy = doc.filter((i) => i.refs.includes(spec.id));
   const others = doc.filter((x) => x.id !== spec.id && !spec.refs.includes(x.id));
   const busy = !!running[runKey("image", spec.id)];
+  const handleFlowEdit = async () => {
+    if (!file) return;
+    const prompt = await promptDialog(
+      "Natural language image editing via Google Flow (Nano Banana Pro):\n\ne.g. 'Replace background with a clean studio backdrop' or 'Remove the sunglasses'.",
+      { title: "Flow Inpaint / BgSwap", ok: "Generate Edit" }
+    );
+    if (!prompt) return;
+    try {
+      toast("info", "Editing asset with Google Flow...");
+      const res = await editStill(name, spec.id, prompt);
+      toast("ok", `Asset updated: ${res.file}`);
+      reload();
+    } catch (e: any) {
+      toast("error", e.message);
+    }
+  };
   const refMenu = (trigger: React.ReactNode, label: string) => (
     <Menu.Root>
       <Menu.Trigger aria-label={label} className="rounded-xl">{trigger}</Menu.Trigger>
@@ -348,6 +407,11 @@ function AssetPreview({ description, renameTo, o, name, spec, file, img, urlOf, 
               <Button variant="pink" className="w-full" disabled={busy || dirty} title={dirty ? "Save the changes first" : ""} onClick={() => start("image", spec.id)}>
                 {busy ? <><Spinner size={14} />Working...</> : <><Wand2 size={15} />{file ? "Edit with AI" : "Generate with AI"}</>}
               </Button>
+              {file && (
+                <Button variant="outline" className="w-full" onClick={handleFlowEdit}>
+                  <Sparkles size={15} />Flow Inpaint / BgSwap
+                </Button>
+              )}
               {file && <Button variant="outline" className="w-full" disabled={!!running[runKey("review", spec.id)]} onClick={() => start("review", spec.id)}><Eye size={15} />Vision review</Button>}
               <Button variant="outline" className="w-full !border-red-400/40 !text-red-300" onClick={() => (file ? discard(`stills/${file}`) : remove(spec.id))}>
                 <Trash2 size={15} />{file ? "Delete Asset" : "Remove Asset"}

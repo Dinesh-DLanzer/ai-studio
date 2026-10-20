@@ -7,7 +7,7 @@ import { settingsApi } from "./client";
 import ChainEditor from "./ChainEditor";
 import ModelPicker from "./ModelPicker";
 import PriceDialog, { type PriceTarget } from "./PriceDialog";
-import type { ChainEntry, ChainRef, ModelInfo, Role, RoleView, RolesResponse, TestRow } from "./types";
+import type { ChainEntry, ChainRef, ModelInfo, Provider, Role, RoleView, RolesResponse, TestRow } from "./types";
 
 const ORDER: Role[] = ["chat", "vision", "image", "video", "verify"];
 const LOOK: Record<Role, { icon: LucideIcon; tone: TileTone }> = {
@@ -17,8 +17,8 @@ const LOOK: Record<Role, { icon: LucideIcon; tone: TileTone }> = {
 const refs = (c: ChainEntry[]): ChainRef[] => c.map((e) => ({ provider: e.provider, model: e.model }));
 const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, Math.round(n)));
 
-function RoleCard({ role, view, project, hasProviders, busy, onSave, onAnnounce, onReload }: {
-  role: Role; view: RoleView; project?: string; hasProviders: boolean; busy: boolean;
+function RoleCard({ role, view, allRoles, providers, project, hasProviders, busy, onSave, onAnnounce, onReload }: {
+  role: Role; view: RoleView; allRoles: Record<Role, RoleView>; providers: Provider[]; project?: string; hasProviders: boolean; busy: boolean;
   onSave: (chain: ChainRef[], policy?: { retries?: number; timeout?: number }) => void; onAnnounce: (s: string) => void; onReload: () => void;
 }) {
   const toast = useToast();
@@ -31,6 +31,52 @@ function RoleCard({ role, view, project, hasProviders, busy, onSave, onAnnounce,
   useEffect(() => { setTests(null); }, [view.chain.length]);
 
   const chain = view.chain;
+  const targetCapability = role === "verify" ? "chat" : view.capability;
+
+  const copySources = Object.entries(allRoles)
+    .filter(([r, v]) => r !== role && v.chain && v.chain.length > 0)
+    .map(([r, v]) => {
+      const compatibleCount = v.chain.filter((e) => {
+        const p = providers.find((prov) => prov.id === e.provider);
+        return !p || p.type === "fake" || p.capabilities?.includes(targetCapability);
+      }).length;
+      return { role: r as Role, title: v.title, count: compatibleCount };
+    })
+    .filter((s) => s.count > 0);
+
+  const handleCopy = async (sourceRoleKey: Role) => {
+    const sourceRole = allRoles[sourceRoleKey];
+    if (!sourceRole || sourceRole.chain.length === 0) return;
+
+    const compatible = sourceRole.chain.filter((e) => {
+      const p = providers.find((prov) => prov.id === e.provider);
+      return !p || p.type === "fake" || p.capabilities?.includes(targetCapability);
+    });
+
+    if (compatible.length === 0) {
+      toast("error", `None of the models in ${sourceRole.title} support ${view.title} (${targetCapability}).`);
+      return;
+    }
+
+    if (chain.length > 0) {
+      const confirmed = await confirmDialog(
+        `Replace current ${view.title} models with ${compatible.length} model(s) from ${sourceRole.title}?`,
+        { title: `Copy from ${sourceRole.title}`, ok: "Replace chain" }
+      );
+      if (!confirmed) return;
+    }
+
+    const skipped = sourceRole.chain.length - compatible.length;
+    onAnnounce(`Copied ${compatible.length} model(s) from ${sourceRole.title} to ${view.title}`);
+    onSave(refs(compatible));
+    toast(
+      "ok",
+      skipped > 0
+        ? `Copied ${compatible.length} model(s) from ${sourceRole.title} (${skipped} incompatible skipped)`
+        : `Copied ${compatible.length} model(s) from ${sourceRole.title} to ${view.title}`
+    );
+  };
+
   const reorder = (from: number, to: number) => {
     if (to < 0 || to >= chain.length || from === to) return;
     const next = [...chain]; const [m] = next.splice(from, 1); next.splice(to, 0, m);
@@ -51,6 +97,31 @@ function RoleCard({ role, view, project, hasProviders, busy, onSave, onAnnounce,
     catch (e) { toast("error", `Test failed: ${(e as Error).message}`); }
     finally { setTesting(false); }
   };
+  const [testingMap, setTestingMap] = useState<Record<string, boolean>>({});
+
+  const runTestOne = async (entry: ChainEntry) => {
+    const key = `${entry.provider}:${entry.model}`;
+    setTestingMap((m) => ({ ...m, [key]: true }));
+    try {
+      const res = await settingsApi.testRole(role, project, entry.provider, entry.model);
+      if (res.results.length > 0) {
+        const item = res.results[0];
+        setTests((prev) => {
+          const filtered = (prev || []).filter((x) => !(x.provider === entry.provider && x.model === entry.model));
+          return [...filtered, item];
+        });
+        if (item.ok) {
+          toast("ok", `${entry.model}: ${item.message || "Ready"}`);
+        } else {
+          toast("error", `${entry.model}: ${item.message || "Failed"}`);
+        }
+      }
+    } catch (e) {
+      toast("error", `Test failed for ${entry.model}: ${(e as Error).message}`);
+    } finally {
+      setTestingMap((m) => ({ ...m, [key]: false }));
+    }
+  };
 
   return (
     <Card className="flex flex-col" bodyClass="space-y-3">
@@ -61,13 +132,33 @@ function RoleCard({ role, view, project, hasProviders, busy, onSave, onAnnounce,
           <p className="text-xs text-slate-400">{view.sub}</p>
         </div>
         {view.overridden && <span className="tag tag-violet shrink-0">This project</span>}
+        {copySources.length > 0 && (
+          <div className="relative inline-flex items-center shrink-0">
+            <select
+              className="select text-xs py-1 px-2.5 bg-white/5 border-slate-700/60 text-slate-300 rounded-lg hover:border-slate-500 hover:text-white cursor-pointer"
+              value=""
+              disabled={busy}
+              onChange={(e) => { if (e.target.value) void handleCopy(e.target.value as Role); }}
+              aria-label={`Copy models from another process for ${view.title}`}
+              title="Copy model chain from another process"
+            >
+              <option value="" disabled>Copy from...</option>
+              {copySources.map((s) => (
+                <option key={s.role} value={s.role}>
+                  {s.title} ({s.count})
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
       </div>
       {project && view.overridden && (
         <button type="button" className="text-xs text-pink underline underline-offset-2 hover:text-white" disabled={busy}
           onClick={() => onSave([], undefined)}>Use workspace default</button>
       )}
       <ChainEditor role={role} chain={chain} hasProviders={hasProviders} disabled={busy} onReorder={reorder} onRemove={remove}
-        onAdd={() => setPick(true)} onSetPrice={(e) => setPrice({ provider: e.provider, provider_label: e.provider_label, model: e.model, capability: view.capability })} />
+        onAdd={() => setPick(true)} onSetPrice={(e) => setPrice({ provider: e.provider, provider_label: e.provider_label, model: e.model, capability: view.capability, card: e.card })}
+        onTestOne={runTestOne} testingMap={testingMap} copySources={copySources} onCopy={handleCopy} />
       <div className="flex flex-wrap items-center gap-2 border-t border-slate-800 pt-3">
         <Button variant="outline" size="sm" onClick={() => void runTest()} disabled={testing || chain.length === 0}>{testing ? "Testing..." : "Test chain"}</Button>
         <button type="button" aria-expanded={adv} onClick={() => setAdv((v) => !v)} className="ml-auto flex items-center gap-1 text-xs text-slate-300 hover:text-white">
@@ -103,6 +194,7 @@ export default function RolesSection({ reloadKey, project, onChanged }: { reload
   const toast = useToast();
   const [data, setData] = useState<RolesResponse | null>(null); const [err, setErr] = useState("");
   const [hasProviders, setHasProviders] = useState(true);
+  const [providers, setProviders] = useState<Provider[]>([]);
   const [busy, setBusy] = useState(false); const [live, setLive] = useState("");
   const seq = useRef(0);
 
@@ -112,7 +204,11 @@ export default function RolesSection({ reloadKey, project, onChanged }: { reload
     try {
       const [r, p] = await Promise.all([settingsApi.roles(project), settingsApi.providers().catch(() => null)]);
       if (my !== seq.current) return;
-      setData(r); if (p) setHasProviders(p.providers.length > 0);
+      setData(r);
+      if (p) {
+        setProviders(p.providers);
+        setHasProviders(p.providers.length > 0);
+      }
     } catch (e) { if (my === seq.current) { if (quiet) toast("error", (e as Error).message); else setErr((e as Error).message); } }
   }, [project, toast]);
 
@@ -170,7 +266,7 @@ export default function RolesSection({ reloadKey, project, onChanged }: { reload
       ) : (
         <div className="grid gap-4 md:grid-cols-2">
           {ORDER.filter((r) => data.roles[r]).map((r) => (
-            <RoleCard key={r} role={r} view={data.roles[r]} project={project} hasProviders={hasProviders} busy={busy}
+            <RoleCard key={r} role={r} view={data.roles[r]} allRoles={data.roles} providers={providers} project={project} hasProviders={hasProviders} busy={busy}
               onSave={(c, p) => void save(r, c, p)} onAnnounce={setLive} onReload={() => void load(true)} />
           ))}
         </div>

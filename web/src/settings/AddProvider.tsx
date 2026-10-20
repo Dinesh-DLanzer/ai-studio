@@ -3,6 +3,7 @@ import { Loader2 } from "lucide-react";
 import { Button, Input, Modal } from "../ui";
 import { useToast } from "../toast";
 import { settingsApi } from "./client";
+import { ChatGPTConnect } from "./ChatGPTConnect";
 import type { Provider, ProviderType } from "./types";
 
 export const FIELD_LABELS: Record<string, string> = { api_key: "API Key", access_key: "Access key", secret_key: "Secret key" };
@@ -64,6 +65,8 @@ export function AddProviderDialog({ open, onClose, types, onCreated }: {
             ))}
           </div>
         </div>
+      ) : preset.auth_type === "oauth" ? (
+        <ChatGPTConnect onBack={() => setPreset(null)} onConnected={(p) => { onCreated(p); onClose(); }} />
       ) : (
         <form onSubmit={submit} className="space-y-3">
           <p className="text-sm text-slate-400">{preset.sub}</p>

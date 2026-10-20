@@ -6,14 +6,6 @@ import { Logo } from "./components/kit";
 import { ToastProvider } from "./toast";
 import Shell from "./app/Shell";
 import ProjectLayout, { useProject } from "./app/ProjectLayout";
-import Projects from "./pages/Projects";
-import Chat from "./Chat";
-import { AssetsTab } from "./pages/Assets";
-import { ShotsTab } from "./pages/Shots";
-import { CostsTab, DiscardedTab, StoryTab } from "./ProjectPage";
-import { OverviewTab } from "./pages/Overview";
-import ReviewExport from "./pages/ReviewExport";
-import NotFound from "./pages/NotFound";
 import Setup, { type SetupStatus } from "./app/Setup";
 import Welcome from "./app/Welcome";
 import { SetupContext } from "./app/setupContext";
@@ -22,6 +14,19 @@ import { SetupContext } from "./app/setupContext";
 const Settings = lazy(() => import("./Settings"));
 const Help = lazy(() => import("./pages/Help"));
 const Kit = lazy(() => import("./pages/Kit"));
+
+// Project screens are mutually exclusive routes. Keep the initial shell small and
+// download each screen only when the user opens it.
+const Projects = lazy(() => import("./pages/Projects"));
+const Chat = lazy(() => import("./Chat"));
+const AssetsTab = lazy(() => import("./pages/Assets").then(({ AssetsTab }) => ({ default: AssetsTab })));
+const ShotsTab = lazy(() => import("./pages/Shots").then(({ ShotsTab }) => ({ default: ShotsTab })));
+const StoryTab = lazy(() => import("./pages/Story").then(({ StoryTab }) => ({ default: StoryTab })));
+const CostsTab = lazy(() => import("./pages/Costs").then(({ CostsTab }) => ({ default: CostsTab })));
+const DiscardedTab = lazy(() => import("./pages/Discarded").then(({ DiscardedTab }) => ({ default: DiscardedTab })));
+const OverviewTab = lazy(() => import("./pages/Overview").then(({ OverviewTab }) => ({ default: OverviewTab })));
+const ReviewExport = lazy(() => import("./pages/ReviewExport"));
+const NotFound = lazy(() => import("./pages/NotFound"));
 
 function TokenGate({ onOk }: { onOk: () => void }) {
   const [v, setV] = useState(""); const [err, setErr] = useState("");

@@ -4,7 +4,8 @@ export type Role = "chat" | "verify" | "vision" | "image" | "video";
 export const ROLES: Role[] = ["chat", "verify", "vision", "image", "video"];
 export type ProviderState = "active" | "inactive" | "needs_key" | "error";
 
-export interface ProviderType { type: string; label: string; sub: string; fields: string[]; base_url: boolean; capabilities: Capability[]; }
+export interface ProviderType { type: string; label: string; sub: string; fields: string[]; base_url: boolean; capabilities: Capability[]; auth_type?: "api_key" | "oauth"; }
+export interface ChatGPTStatus { codex_detected: boolean; connected: boolean; provider_id: string | null; signed_in: boolean; plan: string; expires_at: number; expired: boolean; }
 export interface Provider {
   id: string; type: string; label: string; sub: string; base_url: string; enabled: boolean; fields: string[]; capabilities: Capability[];
   secret: { set: boolean; fields: Record<string, string> }; secret_source: "stored";
@@ -19,7 +20,7 @@ export interface ModelInfo {
 }
 export interface ChainEntry {
   provider: string; provider_label: string; ptype: string; model: string; problem: string | null;
-  price: string | null; priced: boolean; free: boolean; unhealthy: string | null; dearer: boolean;
+  price: string | null; priced: boolean; free: boolean; card?: PriceCard | null; unhealthy: string | null; dearer: boolean;
 }
 export interface RoleView { title: string; sub: string; capability: Capability; chain: ChainEntry[]; policy: { retries: number; timeout: number }; overridden: boolean; }
 export interface RolesResponse { roles: Record<Role, RoleView>; allow_paid: boolean; ai_cap_usd: number; auto_verify: boolean; fake_mode: boolean; }

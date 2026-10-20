@@ -6,6 +6,19 @@ export interface ImageSpec { id: string; kind: "character" | "background" | "fra
 export interface Review { verdict: "pass" | "warn" | "fail"; findings: { frame: number; issue: string; severity: string }[]; summary: string; cost?: number; model?: string; advisory?: string; }
 export interface ProposalSummary { provider?: string | null; prompt?: string; seconds?: number | null; audio?: boolean | null; first_frame?: string | null; refs?: string[]; file?: string | null; }
 export interface Proposal { id: string; kind: string; shot: string; model: string; price: number; status: string; code?: string; expires: number; summary?: ProposalSummary; }
+export interface ActivityJob {
+  id: string;
+  kind: "image" | "clip" | "review";
+  target: string;
+  model: string;
+  price: number;
+  status: "running" | "done" | "error" | "timeout";
+  started_at: number;
+  updated_at: number;
+  source?: string;
+  result?: { file?: string; cost?: number };
+  error?: string;
+}
 export interface Overview {
   name: string; mode: "test" | "real"; test_pipeline?: boolean; is_test?: boolean;
   shots: { aspect_ratio?: string; audio?: boolean; shots: Shot[] };
@@ -17,6 +30,7 @@ export interface Overview {
   proposals: Proposal[];
   files: { stills: string[]; clips: string[] };
   reviews: Record<string, Review | null>;
+  activity?: ActivityJob[];
 }
 export interface ProjectRow { name: string; shots: number; spent: number; estimate: number | null; approved: boolean; test?: boolean; assets?: number; favorite?: boolean; }
 
@@ -42,3 +56,27 @@ export interface CatalogModel { id: string; name: string; free: boolean; prompt_
 export interface AiSettings { chat: { models: string[] }; verify: { models: string[] }; allow_paid: boolean; ai_cap_usd: number; auto_verify: boolean; }
 
 export interface FoundStill { file: string; suggested_id: string; suggested_kind: ImageSpec["kind"]; used_by_shots: boolean; }
+
+// --- Re-exports from api.ts ---
+export type {
+  TodoItem,
+  AutoTodoItem,
+  TodosDoc,
+  ShotsDoc,
+  ImageAsset,
+  ImagesDoc,
+  VClipTransition,
+  VClip,
+  TextShadow,
+  TText,
+  AClip,
+  TracksDoc,
+  EditDoc,
+  BriefData,
+  ProjectSummary,
+  ProjectOverview,
+  BudgetShot,
+  BudgetDoc,
+  NextAction,
+  ProductionProgress,
+} from "./api";

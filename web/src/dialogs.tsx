@@ -5,13 +5,15 @@ import { Button } from "./ui";
 
 /** App-styled replacements for window.confirm / window.prompt. Await them like the native ones. */
 type Req =
-  | { kind: "confirm"; text: string; title?: string; ok?: string; danger?: boolean; done: (v: boolean) => void }
+  | { kind: "confirm"; text: string; title?: string; ok?: string; cancel?: string | false; danger?: boolean; done: (v: boolean) => void }
   | { kind: "prompt"; text: string; title?: string; ok?: string; done: (v: string | null) => void };
 
 let show: (r: Req) => void = () => {};
 
-export const confirmDialog = (text: string, o: { title?: string; ok?: string; danger?: boolean } = {}) =>
+export const confirmDialog = (text: string, o: { title?: string; ok?: string; cancel?: string | false; danger?: boolean } = {}) =>
   new Promise<boolean>((done) => show({ kind: "confirm", text, ...o, done }));
+export const alertDialog = (text: string, o: { title?: string; ok?: string; danger?: boolean } = {}) =>
+  confirmDialog(text, { ...o, ok: o.ok || "Got it", cancel: false });
 export const promptDialog = (text: string, o: { title?: string; ok?: string } = {}) =>
   new Promise<string | null>((done) => show({ kind: "prompt", text, ...o, done }));
 
@@ -49,7 +51,11 @@ export function DialogHost() {
             </div>
           </div>
           <div className="mt-5 flex justify-end gap-2">
-            <Button variant="outline" onClick={() => close(false)}>Cancel</Button>
+            {req?.kind === "confirm" && req.cancel !== false && (
+              <Button variant="outline" onClick={() => close(false)}>
+                {typeof req.cancel === "string" ? req.cancel : "Cancel"}
+              </Button>
+            )}
             <Button variant={req?.kind === "confirm" && req.danger ? "danger" : "pink"} onClick={() => close(true)}>{req?.ok || "Continue"}</Button>
           </div>
         </Dialog.Content>

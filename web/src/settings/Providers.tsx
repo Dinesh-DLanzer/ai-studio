@@ -5,21 +5,28 @@ import { Button, Card, IconTile, Input, Modal } from "../ui";
 import { useToast } from "../toast";
 import { confirmDialog } from "../dialogs";
 import { settingsApi } from "./client";
+import { ChatGPTConnect } from "./ChatGPTConnect";
 import { AddProviderDialog, fieldLabel } from "./AddProvider";
 import type { Capability, Provider, ProviderType, ProvidersResponse } from "./types";
 
 const TINTS: Record<string, string> = {
   openrouter: "border-violet-400/40 bg-violet-400/15 text-violet-200",
+  opencode: "border-teal-400/40 bg-teal-400/15 text-teal-300",
   openai: "border-emerald-400/40 bg-emerald-400/15 text-emerald-300",
   anthropic: "border-amber-400/40 bg-amber-400/15 text-amber-300",
   google: "border-sky-400/40 bg-sky-400/15 text-sky-300",
   runway: "border-pink-400/40 bg-pink-400/15 text-pink-300",
   kling: "border-lime-300/40 bg-lime-300/15 text-lime-200",
   replicate: "border-slate-400/40 bg-slate-400/15 text-slate-200",
+  chatgpt: "border-emerald-500/40 bg-emerald-500/15 text-emerald-200",
+  codex_cli: "border-emerald-500/40 bg-emerald-500/15 text-emerald-200",
+  opencode_cli: "border-teal-400/40 bg-teal-400/15 text-teal-300",
+  claude_cli: "border-amber-400/40 bg-amber-400/15 text-amber-300",
+  agy_cli: "border-sky-400/40 bg-sky-400/15 text-sky-300",
   custom: "border-sky-400/40 bg-sky-400/15 text-sky-300",
   fake: "border-slate-400/40 bg-slate-400/15 text-slate-200",
 };
-const MARKS: Record<string, string> = { openrouter: "OR", openai: "AI", anthropic: "A\\", google: "G", runway: "R", kling: "K", replicate: "Rp", custom: "{}", fake: "F" };
+const MARKS: Record<string, string> = { openrouter: "OR", opencode: "OC", openai: "AI", chatgpt: "GPT", codex_cli: "Cx>", opencode_cli: "OC>", claude_cli: "A>", agy_cli: "G>", anthropic: "A\\", google: "G", runway: "R", kling: "K", replicate: "Rp", custom: "{}", fake: "F" };
 const CAPS: [Capability, string][] = [["chat", "Chat"], ["vision", "Vision"], ["image", "Image"], ["video", "Video"]];
 
 function Logo({ p }: { p: Provider }) {
@@ -30,7 +37,7 @@ function StatusBadge({ p }: { p: Provider }) {
   const s = p.status.state;
   if (!p.enabled && s !== "needs_key") return <span className="tag">Inactive</span>;
   if (s === "active") return <span className="tag tag-emerald">Active</span>;
-  if (s === "needs_key") return <span className="tag tag-amber">Needs key</span>;
+  if (s === "needs_key") return <span className="tag tag-amber">{p.type.endsWith("_cli") ? "Not ready" : "Needs key"}</span>;
   if (s === "error") return <span className="tag tag-red">Error</span>;
   return <span className="tag">Inactive</span>;
 }
@@ -115,6 +122,13 @@ function ProviderCard({ p, busy, run, reload }: { p: Provider; busy: boolean; ru
         {CAPS.filter(([c]) => p.capabilities.includes(c)).map(([c, l]) => <span key={c} className="tag">{l}</span>)}
         {p.used_in.length > 0 && <span className="text-xs text-slate-400">Used in: {p.used_in.join(", ")}</span>}
       </div>
+
+      {p.type === "chatgpt" && (p.status.state === "needs_key" || p.status.state === "error") && (
+        <details className="text-xs">
+          <summary className="cursor-pointer font-semibold text-violet-300">{p.status.state === "error" ? "Re-authenticate" : "Sign in"}</summary>
+          <div className="mt-2"><ChatGPTConnect onConnected={() => { void reload(); }} /></div>
+        </details>
+      )}
 
       {!isFake && p.fields.length > 0 && (
         <div className="space-y-2">

@@ -1,4 +1,4 @@
-import type { VClip, Edit, TText, AClip } from "./types";
+import type { VClip, Edit, TText, AClip, TElement } from "./types";
 
 export const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 export const round1 = (n: number) => Math.round(n * 10) / 10;
@@ -33,7 +33,14 @@ export function layout(video: VClip[]): { placed: Placed[]; total: number } {
   return { placed, total };
 }
 
-export const editEnd = (e: Edit) => Math.max(layout(e.tracks.video).total, ...e.tracks.text.map((t) => t.end), ...e.tracks.audio.map((a) => a.start + a.out - a.in), 0);
+export const editEnd = (e: Edit) => Math.max(
+  layout(e.tracks.video).total,
+  ...e.tracks.text.map((t) => t.end),
+  ...e.tracks.audio.map((a) => a.start + a.out - a.in),
+  ...(e.tracks.elements || []).map((el) => el.end),
+  ...(e.tracks.subtitles?.cues || []).map((s) => s.end),
+  0
+);
 
 /** Greedy lane assignment so overlapping items sit on separate rows. */
 export function lanes<T extends { s: number; e: number }>(items: T[]): { item: T; lane: number }[] {
@@ -48,5 +55,8 @@ export function lanes<T extends { s: number; e: number }>(items: T[]): { item: T
 
 export const textSpan = (t: TText) => ({ s: t.start, e: t.end });
 export const audioSpan = (a: AClip) => ({ s: a.start, e: a.start + a.out - a.in });
+export const elementSpan = (el: TElement) => ({ s: el.start, e: el.end });
+export const subtitleSpan = (s: { start: number; end: number }) => ({ s: s.start, e: s.end });
 
 export const fileName = (rel: string) => rel.split("/").pop() || rel;
+

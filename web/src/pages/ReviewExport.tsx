@@ -5,7 +5,7 @@ import * as Menu from "@radix-ui/react-dropdown-menu";
 import {
   ArrowLeft, Download, FolderArchive, Film, Image as ImageIcon, LayoutTemplate, Maximize, Music, Pause, Play, Redo2, Shapes, Sparkles, Subtitles, Trash2, Type, Undo2, Volume2, VolumeX, MoreHorizontal, Wand2, X, ChevronDown, FolderOpen, Layers, Droplets,
 } from "lucide-react";
-import { api, fileUrl, uploadAudio } from "../api";
+import { api, fileUrl, getToken, uploadAudio, uploadElement } from "../api";
 import { useProject } from "../app/ProjectLayout";
 import { useToast } from "../toast";
 import { deleteProject, downloadProjectZip } from "../projectActions";
@@ -13,7 +13,7 @@ import { useEdit } from "../editor/useEdit";
 import Preview from "../editor/Preview";
 import Timeline from "../editor/Timeline";
 import Inspector from "../editor/Inspector";
-import type { Aspect, Edit, FontInfo, Sel, TText, Tool } from "../editor/types";
+import type { Aspect, Edit, FontInfo, Sel, TText, Tool, TElement, TransitionConfig, TSubtitleCue, TSubtitlesConfig } from "../editor/types";
 import { clamp, editEnd, layout, mmss, nid, round2 } from "../editor/time";
 import { duration, knownDuration } from "../editor/media";
 import "../editor/editor.css";
@@ -24,6 +24,66 @@ const TOOLS: { id: Tool; label: string; icon: typeof Film }[] = [
   { id: "effects", label: "Effects", icon: Sparkles }, { id: "subtitles", label: "Subtitles", icon: Subtitles }, { id: "aspect", label: "Aspect Ratio", icon: LayoutTemplate },
   { id: "background", label: "Background", icon: Wand2 },
 ];
+
+function DownloadLink({
+  href,
+  label,
+  sublabel,
+  tag,
+  icon: I,
+  flush,
+}: {
+  href: string;
+  label: string;
+  sublabel?: string;
+  tag?: string;
+  icon: typeof Film;
+  flush: () => Promise<void>;
+}) {
+  const [downloading, setDownloading] = useState(false);
+  const go = async (e: React.MouseEvent) => {
+    e.preventDefault();
+    setDownloading(true);
+    try {
+      await flush();
+    } catch {
+      /* fall through and download whatever is on disk */
+    }
+    const a = document.createElement("a");
+    a.href = href;
+    a.download = "";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => setDownloading(false), 800);
+  };
+  return (
+    <a
+      className="re-chip re-chip-lg !justify-between w-full !py-2 !px-3 hover:border-violet-500/60 hover:bg-violet-950/20 transition-all text-left"
+      href={href}
+      onClick={go}
+      data-testid={`dl-${label}`}
+    >
+      <div className="flex items-center gap-2.5 min-w-0">
+        <div className="w-7 h-7 rounded-lg bg-violet-600/20 border border-violet-500/30 flex items-center justify-center shrink-0 text-violet-300">
+          <I size={15} />
+        </div>
+        <div className="min-w-0">
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <span className="text-xs font-semibold text-slate-100 truncate">{label}</span>
+            {tag && (
+              <span className="px-1.5 py-0.2 rounded text-[10px] font-bold bg-violet-500/20 text-violet-300 border border-violet-500/30">
+                {tag}
+              </span>
+            )}
+          </div>
+          {sublabel && <div className="text-[11px] text-slate-400 truncate">{sublabel}</div>}
+        </div>
+      </div>
+      <Download size={14} className={downloading ? "animate-bounce text-violet-400 shrink-0 ml-2" : "text-slate-400 shrink-0 ml-2"} />
+    </a>
+  );
+}
 
 function ExportDialog({ project, open, onClose, edit, flush, ffmpeg }: { project: string; open: boolean; onClose: () => void; edit: Edit; flush: () => Promise<void>; ffmpeg: boolean }) {
   const [state, setState] = useState<"idle" | "running" | "done" | "error">("idle"); const [pct, setPct] = useState(0); const [msg, setMsg] = useState(""); const [file, setFile] = useState("");
@@ -44,22 +104,106 @@ function ExportDialog({ project, open, onClose, edit, flush, ffmpeg }: { project
   };
   useEffect(() => { if (open) { setState("idle"); setMsg(""); } }, [open]);
   const clips = edit.tracks.video.length;
+  const base = `/api/projects/${project}/edit`;
+  const tok = getToken();
   return (
     <Dialog.Root open={open} onOpenChange={(o) => { if (!o && state !== "running") onClose(); }}>
       <Dialog.Portal>
         <Dialog.Overlay className="scrim" />
         <Dialog.Content aria-describedby={undefined} className="re-dialog">
           <div className="flex items-start justify-between gap-3">
-            <Dialog.Title className="text-lg font-bold">Export video</Dialog.Title>
+            <div>
+              <Dialog.Title className="text-lg font-bold">Export Timeline &amp; Video</Dialog.Title>
+              <p className="text-xs text-slate-400 mt-0.5">Render locally or export directly to Adobe, DaVinci, Canva, Google Vids, and Affinity.</p>
+            </div>
             <Dialog.Close className="icon-btn" aria-label="Close" disabled={state === "running"}><X size={16} /></Dialog.Close>
           </div>
           {state === "idle" && (
             <>
-              <p className="mt-2 text-sm text-slate-300">{clips} clip{clips === 1 ? "" : "s"}, {edit.tracks.text.length} text, {edit.tracks.audio.length} sound{edit.tracks.audio.length === 1 ? "" : "s"}, {edit.aspect}, about {mmss(layout(edit.tracks.video).total)}.</p>
-              <p className="mt-1 text-xs text-slate-400">The video is made on this computer with ffmpeg and saved in the project's exports folder. It is free: no AI model is used.</p>
-              {!ffmpeg && <p role="alert" className="mt-3 rounded-xl border border-red-400/40 bg-red-400/10 p-3 text-sm text-red-200">ffmpeg is not installed. Install it (macOS: brew install ffmpeg), then restart AI Studio.</p>}
-              <div className="mt-5 flex justify-end gap-2"><button type="button" className="btn btn-outline" onClick={onClose}>Cancel</button>
-                <button type="button" className="btn btn-grad" disabled={!ffmpeg || !clips} onClick={start}><Download size={15} />Start export</button></div>
+              {/* Local video rendering */}
+              <div className="mt-3 p-3 rounded-xl border border-violet-800/40 bg-violet-950/20">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-xs font-bold text-violet-300">Render Master Video (MP4)</span>
+                  <span className="text-[11px] text-slate-400">{edit.aspect} · {mmss(layout(edit.tracks.video).total)}</span>
+                </div>
+                <p className="mt-1 text-xs text-slate-300">{clips} clip{clips === 1 ? "" : "s"}, {edit.tracks.text.length} text, {edit.tracks.audio.length} audio, with all transitions &amp; filters.</p>
+                {!ffmpeg && <p role="alert" className="mt-2 rounded-lg border border-red-400/40 bg-red-400/10 p-2 text-xs text-red-200">ffmpeg is not installed. Install it (macOS: brew install ffmpeg), then restart AI Studio.</p>}
+                <div className="mt-2.5 flex justify-end">
+                  <button type="button" className="btn btn-grad text-xs !py-1.5 !px-3.5" disabled={!ffmpeg || !clips} onClick={start}>
+                    <Download size={14} />Render MP4 Video
+                  </button>
+                </div>
+              </div>
+
+              {/* Pro NLE and External tools */}
+              <div className="mt-4" data-testid="export-downloads">
+                <p className="text-xs font-bold uppercase tracking-wide text-slate-400 mb-2">Export to Editing Tools &amp; NLEs</p>
+                <div className="grid gap-2">
+                  <DownloadLink
+                    label="Adobe Premiere Pro & Final Cut Pro"
+                    sublabel="Full multi-track timeline, cuts, transitions & audio sync"
+                    tag="FCPXML"
+                    href={`${base}/export-fcpxml?token=${tok}`}
+                    icon={Layers}
+                    flush={flush}
+                  />
+                  <DownloadLink
+                    label="DaVinci Resolve & Avid Media Composer"
+                    sublabel="CMX 3600 Edit Decision List for color grading & conform"
+                    tag="EDL"
+                    href={`${base}/export-edl?token=${tok}`}
+                    icon={Film}
+                    flush={flush}
+                  />
+                  <DownloadLink
+                    label="Canva Video Editor"
+                    sublabel="Clips, synced audio tracks, subtitles & import guide"
+                    tag="Canva Bundle"
+                    href={`${base}/export-bundle?token=${tok}`}
+                    icon={FolderArchive}
+                    flush={flush}
+                  />
+                  <DownloadLink
+                    label="Google Vids & Drive"
+                    sublabel="Media pack and caption sidecars for Google Workspace"
+                    tag="Google Pack"
+                    href={`${base}/export-bundle?token=${tok}`}
+                    icon={FolderOpen}
+                    flush={flush}
+                  />
+                  <DownloadLink
+                    label="Affinity Suite & Graphic Editors"
+                    sublabel="Project stills, reference frames & graphic assets"
+                    tag="Assets .ZIP"
+                    href={`/api/projects/${encodeURIComponent(project)}/export-project?token=${tok}`}
+                    icon={Shapes}
+                    flush={flush}
+                  />
+                  <div className="grid grid-cols-2 gap-2 mt-0.5">
+                    <DownloadLink
+                      label="Subtitles (.SRT)"
+                      sublabel="YouTube & social captions"
+                      tag="SRT"
+                      href={`${base}/export-subtitles?format=srt&token=${tok}`}
+                      icon={Subtitles}
+                      flush={flush}
+                    />
+                    <DownloadLink
+                      label="WebVTT (.VTT)"
+                      sublabel="HTML5 web video captions"
+                      tag="VTT"
+                      href={`${base}/export-subtitles?format=vtt&token=${tok}`}
+                      icon={Subtitles}
+                      flush={flush}
+                    />
+                  </div>
+                </div>
+                <p className="mt-2 text-[11px] text-slate-500">All exports are generated locally from your active timeline document with zero cloud rendering costs.</p>
+              </div>
+
+              <div className="mt-4 flex justify-end gap-2">
+                <button type="button" className="btn btn-outline text-xs" onClick={onClose}>Close</button>
+              </div>
             </>
           )}
           {state === "running" && (
@@ -116,10 +260,23 @@ export default function ReviewExport() {
   useEffect(() => { if (!edit) return; [...edit.tracks.video, ...edit.tracks.audio].forEach((c) => { const u = fileUrl(name, c.src); if (knownDuration(u) === undefined) duration(u, "src" in c && c.src.startsWith("audio/") ? "audio" : "video").then(() => bump((n) => n + 1)).catch(() => {}); }); }, [edit, name]);
   const durs = useMemo(() => { const m: Record<string, number> = {}; if (edit) [...edit.tracks.video, ...edit.tracks.audio].forEach((c) => { const u = fileUrl(name, c.src); const d = knownDuration(u); if (d) m[u] = d; }); return m; }, [edit, name, tick]);
 
-  const patch = useCallback((kind: "video" | "text" | "audio", id: string, p: any, key = "") =>
-    set((e) => ({ ...e, tracks: { ...e.tracks, [kind]: (e.tracks[kind] as any[]).map((x) => (x.id === id ? { ...x, ...p } : x)) } as Edit["tracks"] }), key || `p${kind}${id}${Object.keys(p).join()}`), [set]);
+  const patch = useCallback((kind: "video" | "text" | "audio" | "elements", id: string, p: any, key = "") =>
+    set((e) => ({ ...e, tracks: { ...e.tracks, [kind]: (((e.tracks as any)[kind] || []) as any[]).map((x) => (x.id === id ? { ...x, ...p } : x)) } as Edit["tracks"] }), key || `p${kind}${id}${Object.keys(p).join()}`), [set]);
 
-  const remove = useCallback((s: NonNullable<Sel>) => { set((e) => ({ ...e, tracks: { ...e.tracks, [s.kind]: (e.tracks[s.kind] as any[]).filter((x) => x.id !== s.id) } as Edit["tracks"] })); setSel(null); }, [set]);
+  const remove = useCallback((s: NonNullable<Sel>) => {
+    if (s.kind === "subtitle") {
+      set((e) => e.tracks.subtitles ? { ...e, tracks: { ...e.tracks, subtitles: { ...e.tracks.subtitles!, cues: e.tracks.subtitles!.cues.filter((c) => c.id !== s.id) } } } : e);
+      setSel(null); return;
+    }
+    const k = s.kind === "element" ? "elements" : s.kind;
+    set((e) => ({ ...e, tracks: { ...e.tracks, [k]: (((e.tracks as any)[k] || []) as any[]).filter((x) => x.id !== s.id) } as Edit["tracks"] }));
+    setSel(null);
+  }, [set]);
+
+  // top-level edit document fields (filter / effect / background) and the subtitles config
+  const patchRoot = useCallback((p: Partial<Edit>, key = "") => set((e) => ({ ...e, ...p }), key), [set]);
+  const patchSubtitles = useCallback((cues: TSubtitleCue[], style?: TSubtitlesConfig["style"]) =>
+    set((e) => ({ ...e, tracks: { ...e.tracks, subtitles: { ...(e.tracks.subtitles || { cues: [] }), cues, ...(style ? { style } : {}) } } })), [set]);
 
   const addClip = useCallback(async (file: string) => {
     try {
@@ -139,6 +296,17 @@ export default function ReviewExport() {
     set((e) => ({ ...e, tracks: { ...e.tracks, text: [...e.tracks.text, { ...base, ...v[preset] } as TText] } })); setSel({ kind: "text", id });
   }, [set, t]);
 
+  const addElement = useCallback((src: string, elName?: string) => {
+    const id = nid("el");
+    const el: TElement = {
+      id, src, name: elName || src.split("/").pop(),
+      start: round2(t), end: round2(t + 3),
+      x: 0.5, y: 0.5, scale: 0.35, opacity: 1,
+    };
+    set((e) => ({ ...e, tracks: { ...e.tracks, elements: [...(e.tracks.elements || []), el] } }));
+    setSel({ kind: "element", id });
+  }, [set, t]);
+
   const onUploadAudio = useCallback(async (f: File) => {
     setUploading(true);
     try {
@@ -146,6 +314,30 @@ export default function ReviewExport() {
       set((e) => ({ ...e, tracks: { ...e.tracks, audio: [...e.tracks.audio, { id, src: r.src, name: r.name, start: round2(t), in: 0, out: round2(Math.max(0.3, d)), volume: 0.6, fadeIn: 0, fadeOut: 0 }] } })); setSel({ kind: "audio", id });
     } catch (e: any) { toast("error", e.message); } finally { setUploading(false); }
   }, [name, set, t, toast]);
+
+  const onUploadElement = useCallback(async (f: File) => {
+    setUploading(true);
+    try {
+      const r = await uploadElement(name, f);
+      addElement(r.src, r.name);
+      toast("ok", `Added ${r.name}`);
+    } catch (e: any) {
+      toast("error", e.message);
+    } finally {
+      setUploading(false);
+    }
+  }, [addElement, name, toast]);
+
+  const applyAllTransitions = useCallback((transition: TransitionConfig) => {
+    set((e) => ({
+      ...e,
+      tracks: {
+        ...e.tracks,
+        video: e.tracks.video.map((v, i) => i === 0 ? v : { ...v, transition: { ...transition } }),
+      },
+    }), "applyAllTransitions");
+    toast("ok", `Applied ${transition.type} (${transition.dur}s) to all cuts`);
+  }, [set, toast]);
 
   const split = useCallback(() => {
     if (!edit) return; const MIN = 0.15; let s = sel;
@@ -159,6 +351,15 @@ export default function ReviewExport() {
     } else if (s.kind === "text") {
       const x = edit.tracks.text.find((z) => z.id === s!.id); if (!x || t <= x.start + MIN || t >= x.end - MIN) { toast("info", "Put the playhead inside the text bar to split it."); return; }
       const idn = nid("t"); set((e) => ({ ...e, tracks: { ...e.tracks, text: e.tracks.text.flatMap((z) => (z.id === x.id ? [{ ...z, end: round2(t) }, { ...z, id: idn, start: round2(t) }] : [z])) } })); setSel({ kind: "text", id: idn });
+    } else if (s.kind === "element") {
+      const x = edit.tracks.elements?.find((z) => z.id === s!.id); if (!x || t <= x.start + MIN || t >= x.end - MIN) { toast("info", "Put the playhead inside the element bar to split it."); return; }
+      const idn = nid("el"); set((e) => ({ ...e, tracks: { ...e.tracks, elements: (e.tracks.elements || []).flatMap((z) => (z.id === x.id ? [{ ...z, end: round2(t) }, { ...z, id: idn, start: round2(t) }] : [z])) } })); setSel({ kind: "element", id: idn });
+    } else if (s.kind === "subtitle") {
+      const subs = edit.tracks.subtitles; const x = subs?.cues.find((z) => z.id === s!.id);
+      if (!x || t <= x.start + MIN || t >= x.end - MIN) { toast("info", "Put the playhead inside the subtitle cue to split it."); return; }
+      const idn = nid("sub");
+      set((e) => ({ ...e, tracks: { ...e.tracks, subtitles: { ...(e.tracks.subtitles || { cues: [] }), cues: (e.tracks.subtitles?.cues || []).flatMap((z) => (z.id === x.id ? [{ ...z, end: round2(t) }, { ...z, id: idn, start: round2(t) }] : [z])) } } }));
+      setSel({ kind: "subtitle", id: idn });
     } else {
       const x = edit.tracks.audio.find((z) => z.id === s!.id); const len = x ? x.out - x.in : 0; if (!x || t <= x.start + MIN || t >= x.start + len - MIN) { toast("info", "Put the playhead inside the sound bar to split it."); return; }
       const cut = round2(x.in + (t - x.start)); const ida = nid("a");
@@ -170,8 +371,11 @@ export default function ReviewExport() {
     if (!edit || !sel) return;
     if (sel.kind === "video") { const i = edit.tracks.video.findIndex((x) => x.id === sel.id); if (i < 0) return; const id = nid("v"); set((e) => { const v = [...e.tracks.video]; v.splice(i + 1, 0, { ...v[i], id, transition: { type: "cut", dur: 0.5 } }); return { ...e, tracks: { ...e.tracks, video: v } }; }); setSel({ kind: "video", id }); }
     else if (sel.kind === "text") { const x = edit.tracks.text.find((z) => z.id === sel.id); if (!x) return; const id = nid("t"); const len = x.end - x.start; set((e) => ({ ...e, tracks: { ...e.tracks, text: [...e.tracks.text, { ...x, id, start: x.end, end: round2(x.end + len) }] } })); setSel({ kind: "text", id }); }
+    else if (sel.kind === "element") { const x = edit.tracks.elements?.find((z) => z.id === sel.id); if (!x) return; const id = nid("el"); const len = x.end - x.start; set((e) => ({ ...e, tracks: { ...e.tracks, elements: [...(e.tracks.elements || []), { ...x, id, start: x.end, end: round2(x.end + len) }] } })); setSel({ kind: "element", id }); }
+    else if (sel.kind === "subtitle") { const x = edit.tracks.subtitles?.cues.find((z) => z.id === sel.id); if (!x) return; const id = nid("sub"); const len = x.end - x.start; set((e) => ({ ...e, tracks: { ...e.tracks, subtitles: { ...(e.tracks.subtitles || { cues: [] }), cues: [...(e.tracks.subtitles?.cues || []), { ...x, id, start: x.end, end: round2(x.end + len) }] } } })); setSel({ kind: "subtitle", id }); }
     else { const x = edit.tracks.audio.find((z) => z.id === sel.id); if (!x) return; const id = nid("a"); set((e) => ({ ...e, tracks: { ...e.tracks, audio: [...e.tracks.audio, { ...x, id, start: round2(x.start + x.out - x.in) }] } })); setSel({ kind: "audio", id }); }
   }, [edit, sel, set]);
+
 
   const setAspect = useCallback((a: Aspect) => set((e) => ({ ...e, aspect: a })), [set]);
 
@@ -216,7 +420,26 @@ export default function ReviewExport() {
           <Menu.Root>
             <Menu.Trigger className="re-tb" aria-label="More actions"><MoreHorizontal size={20} /></Menu.Trigger>
             <Menu.Portal>
-              <Menu.Content align="end" sideOffset={6} className="menu-surface">
+              <Menu.Content align="end" sideOffset={6} className="menu-surface min-w-[240px]">
+                <Menu.Item className="menu-item" onSelect={() => setExportOpen(true)}><Download size={14} />Export Video &amp; All Tools...</Menu.Item>
+                <Menu.Separator className="my-1 h-px bg-slate-800" />
+                <div className="px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-500">Instant Tool Exports</div>
+                <Menu.Item className="menu-item" onSelect={async () => { try { await flush(); } catch {} const a = document.createElement("a"); a.href = `/api/projects/${encodeURIComponent(name)}/edit/export-fcpxml?token=${encodeURIComponent(getToken())}`; a.download = `${name}.fcpxml`; document.body.appendChild(a); a.click(); a.remove(); }}>
+                  <Layers size={14} />Premiere / Final Cut (FCPXML)
+                </Menu.Item>
+                <Menu.Item className="menu-item" onSelect={async () => { try { await flush(); } catch {} const a = document.createElement("a"); a.href = `/api/projects/${encodeURIComponent(name)}/edit/export-edl?token=${encodeURIComponent(getToken())}`; a.download = `${name}.edl`; document.body.appendChild(a); a.click(); a.remove(); }}>
+                  <Film size={14} />DaVinci Resolve / Avid (EDL)
+                </Menu.Item>
+                <Menu.Item className="menu-item" onSelect={async () => { try { await flush(); } catch {} const a = document.createElement("a"); a.href = `/api/projects/${encodeURIComponent(name)}/edit/export-bundle?token=${encodeURIComponent(getToken())}`; a.download = `${name}-bundle.zip`; document.body.appendChild(a); a.click(); a.remove(); }}>
+                  <FolderArchive size={14} />Canva &amp; Google Vids Bundle (.zip)
+                </Menu.Item>
+                <Menu.Item className="menu-item" onSelect={async () => { try { await flush(); } catch {} const a = document.createElement("a"); a.href = `/api/projects/${encodeURIComponent(name)}/edit/export-subtitles?format=srt&token=${encodeURIComponent(getToken())}`; a.download = `${name}.srt`; document.body.appendChild(a); a.click(); a.remove(); }}>
+                  <Subtitles size={14} />Subtitles (.srt)
+                </Menu.Item>
+                <Menu.Item className="menu-item" onSelect={() => downloadProjectZip(name)}>
+                  <Shapes size={14} />Affinity Suite Assets (.zip)
+                </Menu.Item>
+                <Menu.Separator className="my-1 h-px bg-slate-800" />
                 <Menu.Item className="menu-item" onSelect={() => downloadProjectZip(name)}><FolderArchive size={14} />Export project (zip)</Menu.Item>
                 <Menu.Item className="menu-item" onSelect={() => downloadProjectZip(name, true)}><FolderArchive size={14} />Export project with discarded files</Menu.Item>
                 <Menu.Item className="menu-item" onSelect={() => nav(`/p/${name}/shots`)}><Film size={14} />Open Shots</Menu.Item>
@@ -226,7 +449,7 @@ export default function ReviewExport() {
             </Menu.Portal>
           </Menu.Root>
           <button type="button" className="re-btn-outline" onClick={() => { downloadProjectZip(name); toast("info", "Preparing the project zip. Your browser will download it."); }}><FolderOpen size={17} />Export Project</button>
-          <button type="button" className="re-btn-grad" onClick={() => setExportOpen(true)}><Download size={17} />Export Video</button>
+          <button type="button" className="re-btn-grad" onClick={() => setExportOpen(true)}><Download size={17} />Export Video &amp; Tools</button>
         </div>
       </header>
 
@@ -248,7 +471,8 @@ export default function ReviewExport() {
         <section className="re-card re-player" aria-label="Preview">
           <div ref={stage} className={`re-stagebox ${fit === "fill" ? "is-fill" : ""}`}>
             <Preview project={name} edit={edit} t={t} playing={playing} muted={muted} sel={sel} setSel={setSel} fit={fit}
-              onText={(id, p, key) => patch("text", id, p, key)} />
+              onText={(id, p, key) => patch("text", id, p, key)}
+              onElement={(id, p, key) => patch("elements", id, p, key)} />
           </div>
           <div className="re-transport">
             <button type="button" className="re-play" aria-label={playing ? "Pause" : "Play"} onClick={togglePlay} disabled={!total}>{playing ? <Pause size={22} fill="currentColor" /> : <Play size={22} fill="currentColor" />}</button>
@@ -261,8 +485,10 @@ export default function ReviewExport() {
           </div>
         </section>
 
-        <Inspector project={name} edit={edit} sel={sel} tool={tool} fonts={fonts} clips={clipFiles} durs={durs} patch={patch} remove={remove}
-          addClip={addClip} addText={addText} uploadAudio={onUploadAudio} setAspect={setAspect} uploading={uploading} />
+        <Inspector project={name} edit={edit} sel={sel} setSel={setSel} tool={tool} fonts={fonts} clips={clipFiles} durs={durs} patch={patch} remove={remove}
+          addClip={addClip} addText={addText} uploadAudio={onUploadAudio} addElement={addElement} uploadElement={onUploadElement} setAspect={setAspect} uploading={uploading}
+          applyAllTransitions={applyAllTransitions} t={t} patchRoot={patchRoot} patchSubtitles={patchSubtitles} />
+
       </div>
 
       <Timeline project={name} edit={edit} set={set} t={t} setT={seek} sel={sel} setSel={setSel} undo={undo} redo={redo} canUndo={canUndo} canRedo={canRedo}

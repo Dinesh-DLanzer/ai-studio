@@ -1,8 +1,8 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { Copy, Film, Maximize2, Music, Redo2, Scissors, Trash2, Type, Undo2, ZoomIn, ZoomOut } from "lucide-react";
+import { Copy, Film, Maximize2, Music, Redo2, Scissors, Shapes, Subtitles, Trash2, Type, Undo2, ZoomIn, ZoomOut } from "lucide-react";
 import { fileUrl } from "../api";
-import type { AClip, Edit, Sel, TText, VClip } from "./types";
-import { audioSpan, clamp, editEnd, fileName, lanes, layout, mmssd, round2, textSpan } from "./time";
+import type { AClip, Edit, Sel, TText, VClip, TElement, TSubtitleCue } from "./types";
+import { audioSpan, clamp, editEnd, fileName, lanes, layout, mmssd, round1, round2, textSpan, elementSpan, subtitleSpan } from "./time";
 import { knownDuration, peaks, thumbs } from "./media";
 
 const LABEL_W = 128, RULER_H = 34, LANE_H = 40, VIDEO_H = 58;
@@ -56,9 +56,15 @@ export default function Timeline(p: TimelineProps) {
   const { placed, total } = layout(edit.tracks.video);
   const end = editEnd(edit); const span = Math.max(30, Math.ceil(end + 2));
   const pps = ((areaW - 24) / span) * zoom; const width = Math.max(areaW - 4, span * pps + 24);
-  const tx = lanes(edit.tracks.text.map((x) => ({ ...textSpan(x), x }))); const ax = lanes(edit.tracks.audio.map((x) => ({ ...audioSpan(x), x })));
-  const textLanes = Math.max(1, ...tx.map((l) => l.lane + 1)), audioLanes = Math.max(1, ...ax.map((l) => l.lane + 1));
-  const textH = textLanes * LANE_H + 8, audioH = audioLanes * LANE_H + 8;
+  const tx = lanes(edit.tracks.text.map((x) => ({ ...textSpan(x), x })));
+  const sx = lanes((edit.tracks.subtitles?.cues || []).map((x) => ({ ...subtitleSpan(x), x })));
+  const elx = lanes((edit.tracks.elements || []).map((x) => ({ ...elementSpan(x), x })));
+  const ax = lanes(edit.tracks.audio.map((x) => ({ ...audioSpan(x), x })));
+  const textLanes = Math.max(1, ...tx.map((l) => l.lane + 1));
+  const subLanes = Math.max(1, ...sx.map((l) => l.lane + 1));
+  const elemLanes = Math.max(1, ...elx.map((l) => l.lane + 1));
+  const audioLanes = Math.max(1, ...ax.map((l) => l.lane + 1));
+  const textH = textLanes * LANE_H + 8, subH = subLanes * LANE_H + 8, elemH = elemLanes * LANE_H + 8, audioH = audioLanes * LANE_H + 8;
   const step = [0.5, 1, 2, 5, 10, 15, 30, 60].find((s) => s * pps >= 70) || 60;
 
   const seekFrom = (clientX: number) => { const r = area.current!.getBoundingClientRect(); setT(clamp((clientX - r.left + area.current!.scrollLeft - 12) / pps, 0, Math.max(total, end))); };
@@ -73,8 +79,8 @@ export default function Timeline(p: TimelineProps) {
     el.addEventListener("wheel", f, { passive: false }); return () => el.removeEventListener("wheel", f);
   }, []);
 
-  const upd = <K extends "video" | "text" | "audio">(kind: K, id: string, patch: Partial<Edit["tracks"][K][number]>, key: string) =>
-    set((e) => ({ ...e, tracks: { ...e.tracks, [kind]: (e.tracks[kind] as any[]).map((x) => (x.id === id ? { ...x, ...patch } : x)) } as Edit["tracks"] }), key);
+  const upd = <K extends "video" | "text" | "audio" | "elements">(kind: K, id: string, patch: any, key: string) =>
+    set((e) => ({ ...e, tracks: { ...e.tracks, [kind]: (((e.tracks as any)[kind] || []) as any[]).map((x) => (x.id === id ? { ...x, ...patch } : x)) } as Edit["tracks"] }), key);
 
   // ---- video clip: drag to reorder, trim with the edge handles
   const clipDrag = (e: React.PointerEvent, c: VClip, idx: number) => {
@@ -93,14 +99,51 @@ export default function Timeline(p: TimelineProps) {
       upd("video", c.id, side === "l" ? { in: round2(clamp(base.in + d, 0, base.out - 0.3)) } : { out: round2(clamp(base.out + d, base.in + 0.3, max)) }, `trim${c.id}`);
     });
   };
-  // ---- text / audio bars: move and trim
-  const moveTA = (e: React.PointerEvent, kind: "text" | "audio", id: string, s0: number, e0: number) => {
+  const trimTrans = (e: React.PointerEvent, c: VClip, maxD: number) => {
+    e.stopPropagation();
+    setSel({ kind: "transition", id: c.id });
+    const baseDur = c.transition.dur;
+    drag(e, (dx) => {
+      const d = dx / pps;
+      const newDur = round1(clamp(baseDur + d, 0.1, Math.min(3.0, maxD)));
+      upd("video", c.id, { transition: { ...c.transition, dur: newDur } }, `tdur${c.id}`);
+    });
+  };
+
+  // ---- text / element / audio bars: move and trim
+  const moveItem = (e: React.PointerEvent, kind: "text" | "audio" | "element", id: string, s0: number, e0: number) => {
     setSel({ kind, id }); const len = e0 - s0;
-    drag(e, (dx) => { const s = round2(Math.max(0, s0 + dx / pps)); upd(kind, id, kind === "text" ? { start: s, end: round2(s + len) } as Partial<TText> : { start: s } as Partial<AClip>, `mv${id}`); });
+    drag(e, (dx) => {
+      const s = round2(Math.max(0, s0 + dx / pps));
+      if (kind === "text") upd("text", id, { start: s, end: round2(s + len) }, `mv${id}`);
+      else if (kind === "audio") upd("audio", id, { start: s }, `mv${id}`);
+      else upd("elements", id, { start: s, end: round2(s + len) }, `mv${id}`);
+    });
   };
   const trimT = (e: React.PointerEvent, x: TText, side: "l" | "r") => {
     setSel({ kind: "text", id: x.id });
     drag(e, (dx) => { const d = dx / pps; upd("text", x.id, side === "l" ? { start: round2(clamp(x.start + d, 0, x.end - 0.3)) } : { end: round2(Math.max(x.start + 0.3, x.end + d)) }, `tt${x.id}`); });
+  };
+  // ---- subtitle cues live in tracks.subtitles.cues, not a flat track list
+  const updSub = (id: string, patch: Partial<TSubtitleCue>, key: string) =>
+    set((e) => {
+      const subs = e.tracks.subtitles; if (!subs) return e;
+      return { ...e, tracks: { ...e.tracks, subtitles: { ...subs, cues: subs.cues.map((c) => (c.id === id ? { ...c, ...patch } : c)) } } };
+    }, key);
+  const moveSub = (e: React.PointerEvent, cue: TSubtitleCue) => {
+    setSel({ kind: "subtitle", id: cue.id }); const len = cue.end - cue.start;
+    drag(e, (dx) => { const s = round2(Math.max(0, cue.start + dx / pps)); updSub(cue.id, { start: s, end: round2(s + len) }, `mvsub${cue.id}`); });
+  };
+  const trimSub = (e: React.PointerEvent, cue: TSubtitleCue, side: "l" | "r") => {
+    setSel({ kind: "subtitle", id: cue.id });
+    drag(e, (dx) => {
+      const d = dx / pps;
+      updSub(cue.id, side === "l" ? { start: round2(clamp(cue.start + d, 0, cue.end - 0.3)) } : { end: round2(Math.max(cue.start + 0.3, cue.end + d)) }, `tsub${cue.id}`);
+    });
+  };
+  const trimEl = (e: React.PointerEvent, el: TElement, side: "l" | "r") => {
+    setSel({ kind: "element", id: el.id });
+    drag(e, (dx) => { const d = dx / pps; upd("elements", el.id, side === "l" ? { start: round2(clamp(el.start + d, 0, el.end - 0.3)) } : { end: round2(Math.max(el.start + 0.3, el.end + d)) }, `tel${el.id}`); });
   };
   const trimA = (e: React.PointerEvent, a: AClip, side: "l" | "r") => {
     setSel({ kind: "audio", id: a.id }); const max = knownDuration(fileUrl(project, a.src)) ?? Infinity;
@@ -110,6 +153,7 @@ export default function Timeline(p: TimelineProps) {
       else upd("audio", a.id, { out: round2(clamp(a.out + d, a.in + 0.3, max)) }, `ta${a.id}`);
     });
   };
+
 
   const tools = [
     { icon: Undo2, label: "Undo", on: p.undo, dis: !p.canUndo }, { icon: Redo2, label: "Redo", on: p.redo, dis: !p.canRedo },
@@ -134,6 +178,8 @@ export default function Timeline(p: TimelineProps) {
       <div className="re-tl-body">
         <div className="re-tl-labels" style={{ width: LABEL_W, paddingTop: RULER_H }}>
           <div className="re-tl-label" style={{ height: textH }}><Type size={16} />Text</div>
+          <div className="re-tl-label" style={{ height: subH }}><Subtitles size={16} />Subtitles</div>
+          <div className="re-tl-label" style={{ height: elemH }}><Shapes size={16} />Elements</div>
           <div className="re-tl-label" style={{ height: VIDEO_H + 8 }}><Film size={16} />Video</div>
           <div className="re-tl-label" style={{ height: audioH }}><Music size={16} />Audio</div>
         </div>
@@ -150,8 +196,35 @@ export default function Timeline(p: TimelineProps) {
                 const x = item.x; const w = (x.end - x.start) * pps; const isSel = sel?.kind === "text" && sel.id === x.id;
                 return (
                   <div key={x.id} data-testid={`tbar-${x.id}`} className={`re-bar re-bar-text ${isSel ? "is-sel" : ""}`} style={{ left: x.start * pps, width: w, top: 4 + lane * LANE_H, height: LANE_H - 4 }}
-                    onPointerDown={(e) => moveTA(e, "text", x.id, x.start, x.end)}>
+                    onPointerDown={(e) => moveItem(e, "text", x.id, x.start, x.end)}>
                     <span className="re-grip l" onPointerDown={(e) => trimT(e, x, "l")} /><span className="truncate">{x.text.replace(/\n/g, " ")}</span><span className="re-grip r" onPointerDown={(e) => trimT(e, x, "r")} />
+                  </div>
+                );
+              })}
+            </div>
+            {/* Subtitles track (right under the text lane) */}
+            <div className="re-row" style={{ height: subH }} data-testid="track-subtitles">
+              {sx.map(({ item, lane }) => {
+                const x = item.x; const w = (x.end - x.start) * pps; const isSel = sel?.kind === "subtitle" && sel.id === x.id;
+                return (
+                  <div key={x.id} data-testid={`sbar-${x.id}`} className={`re-bar re-bar-subtitle ${isSel ? "is-sel" : ""}`} style={{ left: x.start * pps, width: w, top: 4 + lane * LANE_H, height: LANE_H - 4 }}
+                    onPointerDown={(e) => moveSub(e, x)} title={x.text}>
+                    <span className="re-grip l" onPointerDown={(e) => trimSub(e, x, "l")} /><span className="truncate">{x.text}</span><span className="re-grip r" onPointerDown={(e) => trimSub(e, x, "r")} />
+                  </div>
+                );
+              })}
+            </div>
+            {/* Elements track */}
+            <div className="re-row" style={{ height: elemH }} data-testid="track-elements">
+              {elx.map(({ item, lane }) => {
+                const x = item.x; const w = (x.end - x.start) * pps; const isSel = sel?.kind === "element" && sel.id === x.id;
+                return (
+                  <div key={x.id} data-testid={`elbar-${x.id}`} className={`re-bar re-bar-element ${isSel ? "is-sel" : ""}`} style={{ left: x.start * pps, width: w, top: 4 + lane * LANE_H, height: LANE_H - 4 }}
+                    onPointerDown={(e) => moveItem(e, "element", x.id, x.start, x.end)} title={x.name || fileName(x.src)}>
+                    <span className="re-grip l" onPointerDown={(e) => trimEl(e, x, "l")} />
+                    <img src={fileUrl(project, x.src)} className="re-bar-element-img" alt="" />
+                    <span className="truncate">{x.name || fileName(x.src)}</span>
+                    <span className="re-grip r" onPointerDown={(e) => trimEl(e, x, "r")} />
                   </div>
                 );
               })}
@@ -169,6 +242,31 @@ export default function Timeline(p: TimelineProps) {
                   </div>
                 );
               })}
+              {placed.slice(1).map((pl, i) => {
+                const c = pl.clip;
+                const prev = placed[i];
+                const isTransSel = sel?.kind === "transition" && sel.id === c.id;
+                const tr = c.transition;
+                const isCut = tr.type === "cut";
+                const maxD = Math.max(0.1, Math.min(prev.dur, pl.dur) - 0.05);
+                const badgeX = pl.start * pps;
+                return (
+                  <div key={`trans-badge-${c.id}`} data-testid={`trans-badge-${c.id}`}
+                    className={`re-trans-badge ${isTransSel ? "is-sel" : ""} ${isCut ? "is-cut" : "is-active"}`}
+                    style={{ left: badgeX, top: 4 + VIDEO_H / 2 }}
+                    onPointerDown={(e) => {
+                      e.stopPropagation();
+                      setSel({ kind: "transition", id: c.id });
+                    }}
+                    title={`Transition into ${fileName(c.src)}: ${tr.type} (${tr.dur}s)`}>
+                    <span className="re-trans-icon">{isCut ? "❘" : "⧖"}</span>
+                    {!isCut && <span className="re-trans-dur">{tr.dur.toFixed(1)}s</span>}
+                    {!isCut && (
+                      <span className="re-trans-trim" onPointerDown={(e) => trimTrans(e, c, maxD)} title="Drag to adjust transition duration" />
+                    )}
+                  </div>
+                );
+              })}
             </div>
             {/* Audio track */}
             <div className="re-row" style={{ height: audioH }} data-testid="track-audio">
@@ -176,7 +274,7 @@ export default function Timeline(p: TimelineProps) {
                 const a = item.x; const w = (a.out - a.in) * pps; const isSel = sel?.kind === "audio" && sel.id === a.id;
                 return (
                   <div key={a.id} data-testid={`abar-${a.id}`} className={`re-bar re-bar-audio ${isSel ? "is-sel" : ""}`} style={{ left: a.start * pps, width: w, top: 4 + lane * LANE_H, height: LANE_H - 4 }}
-                    onPointerDown={(e) => moveTA(e, "audio", a.id, a.start, a.start + a.out - a.in)}>
+                    onPointerDown={(e) => moveItem(e, "audio", a.id, a.start, a.start + a.out - a.in)}>
                     <Wave url={fileUrl(project, a.src)} from={a.in} to={a.out} w={w} h={LANE_H - 6} />
                     <span className="re-bar-label"><Music size={12} />{a.name || fileName(a.src)}</span>
                     <span className="re-grip l" onPointerDown={(e) => trimA(e, a, "l")} /><span className="re-grip r" onPointerDown={(e) => trimA(e, a, "r")} />

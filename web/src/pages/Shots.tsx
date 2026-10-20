@@ -5,7 +5,7 @@ import {
   RefreshCw, Search, Settings2, SlidersHorizontal, Trash2, Wand2,
 } from "lucide-react";
 import { Link } from "react-router-dom";
-import { api, fileUrl } from "../api";
+import { api, fileUrl, editStill, extendClip } from "../api";
 import { Badge, Button, Select } from "../ui";
 import { Spinner, runKey } from "../Proposal";
 import { useToast } from "../toast";
@@ -49,6 +49,39 @@ export function ShotsTab({ o, name, load, start, running }: TabProps) {
   const approve = async (id: string) => { try { await api("POST", `/api/projects/${name}/shots/${id}/approve`); load(); } catch (e: any) { toast("error", e.message); } };
   const discard = async (rel: string) => { const reason = await promptDialog("Why discard this clip?", { title: "Discard clip", ok: "Discard" }); if (reason === null) return; await api("POST", `/api/projects/${name}/discard`, { rel, reason }); load(); };
   const generate = async (id: string) => { if (dirty) await save(); start("clip", id); };
+
+  const handleEditStill = async (s: Shot) => {
+    const target = s.first_frame || s.id;
+    const prompt = await promptDialog(
+      "Natural language image editing via Google Flow (Nano Banana Pro):\n\ne.g. 'Replace background with a futuristic neon skyline' or 'Add dramatic cinematic lighting'.",
+      { title: "Edit Still (Flow Inpaint / BgSwap)", ok: "Generate Edit" }
+    );
+    if (!prompt) return;
+    try {
+      toast("info", "Editing still with Google Flow...");
+      const res = await editStill(name, target, prompt);
+      toast("ok", `Still updated: ${res.file}`);
+      load();
+    } catch (e: any) {
+      toast("error", e.message);
+    }
+  };
+
+  const handleExtendClip = async (s: Shot, clipRel: string) => {
+    const prompt = await promptDialog(
+      "Extend this video clip forward using Veo 3.1:\n\ne.g. 'Camera smoothly dollies out as the character turns toward the horizon'.",
+      { title: "Extend Clip (Veo 3.1)", ok: "Extend Video" }
+    );
+    if (!prompt) return;
+    try {
+      toast("info", "Submitting Veo 3.1 extension...");
+      const res = await extendClip(name, clipRel, prompt, 5);
+      toast("ok", res.status === "pending" ? "Extension submitted and processing..." : `Clip extended: ${res.file}`);
+      load();
+    } catch (e: any) {
+      toast("error", e.message);
+    }
+  };
 
   const list = useMemo(() => {
     let a = shots.filter((s) => (filter === "videos" ? clipsOf(s.id).length > 0 : filter === "audio" ? !!s.audio : true));
@@ -177,6 +210,16 @@ export function ShotsTab({ o, name, load, start, running }: TabProps) {
                   </div>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
+                  {frame(cur) && (
+                    <Button variant="outline" size="sm" onClick={() => handleEditStill(cur)} title="Inpaint, outpaint or swap background">
+                      <Wand2 size={13} />Edit Still (Flow)
+                    </Button>
+                  )}
+                  {latest && (
+                    <Button variant="outline" size="sm" onClick={() => handleExtendClip(cur, latest)} title="Extend video forward with Veo 3.1">
+                      <Film size={13} />Extend Clip (Veo)
+                    </Button>
+                  )}
                   <Button variant="outline" size="sm" disabled={!latest || !!running[runKey("review", cur.id)]} onClick={() => start("review", cur.id)}>
                     {running[runKey("review", cur.id)] ? <Spinner size={13} /> : <RefreshCw size={14} />}Re-check
                   </Button>
@@ -217,8 +260,8 @@ export function ShotsTab({ o, name, load, start, running }: TabProps) {
                   <div>
                     <div className="mb-1.5 flex items-center justify-between"><span className="text-sm font-semibold">Prompt</span>
                       <Button variant="outline" size="sm" onClick={() => promptRef.current?.focus()}><Pencil size={13} />Edit Prompt</Button></div>
-                    <textarea ref={promptRef} rows={7} className="field !text-sm" maxLength={3000} value={cur.prompt} aria-label={`Prompt for shot ${cur.id}`} onChange={(e) => upd(cur.id, { prompt: e.target.value })} />
-                    <div className="mt-1 text-right text-[0.7rem] text-slate-400">{cur.prompt.length}/3000</div>
+                    <textarea ref={promptRef} rows={7} className="field !text-sm" maxLength={10000} value={cur.prompt} aria-label={`Prompt for shot ${cur.id}`} onChange={(e) => upd(cur.id, { prompt: e.target.value })} />
+                    <div className="mt-1 text-right text-[0.7rem] text-slate-400">{cur.prompt.length}/10000</div>
                   </div>
                 )}
                 {tab === "reference" && (
