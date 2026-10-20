@@ -173,7 +173,8 @@ class ChatDomain:
             else:
                 reply += "\n\n(I drafted a storyboard but it was not in the right format, so I did not save it. Ask me to try again.)"
 
-        # Pipeline action execution
+        # Pipeline actions are suggestions only. Applying a storyboard is free and remains an in-chat convenience;
+        # every budget or paid action is handed to the human-facing UI for review instead.
         action = turn.get("action")
         if not action and not fake_chat:
             action = self._detect_action_intent(p, text)
@@ -191,74 +192,21 @@ class ChatDomain:
                         executed_info = {"type": "apply_story"}
                     except ServiceError as e:
                         reply += f"\n\n⚠️ Could not apply storyboard: {e}"
-            elif atype == "approve_budget":
-                try:
-                    self.ws.approve_budget(name)
-                    reply += "\n\n✓ Budget approved."
-                    executed_info = {"type": "approve_budget"}
-                except Exception as e:
-                    reply += f"\n\n⚠️ Could not approve budget: {e}"
-            elif atype == "generate":
-                kind = action.get("kind") or "image"
-                target = action.get("target")
-                if target == "next" or not target:
-                    nxt = self.ws.production_progress(name).get("next") or {}
-                    target = nxt.get("target") or target
-                    kind = nxt.get("kind") or kind
-                if target:
-                    already_made = False
-                    if kind == "image":
-                        for ext in (".png", ".jpg", ".webp"):
-                            if (p / "stills" / f"{target}{ext}").is_file():
-                                already_made = True
-                                assistant_attachments.append({"id": target, "file": f"{target}{ext}"})
-                                break
-                    if already_made:
-                        if re.search(r"I can'?t generate it myself|I cannot generate", reply, re.I):
-                            reply = re.sub(r"I can'?t generate it myself[^.\n]*[.]?", f"**{target}** is already generated.", reply, flags=re.I).strip()
-                        if "✓" not in reply:
-                            reply += f"\n\n✓ **{target}** is already generated."
-                        executed_info = {"type": "generate", "kind": kind, "target": target, "status": "already_done"}
-                    else:
-                        b = self.ws._read(p, "budget.json", {})
-                        if not b.get("approved") and b.get("estimate") is not None:
-                            try:
-                                self.ws.approve_budget(name)
-                            except Exception:
-                                pass
-                        try:
-                            prop = self.ws.propose(name, kind, target, reveal_code=True)
-                            self.ws.approve(name, prop["id"], prop["code"])
-                            exec_res = self.ws.execute(name, prop["id"])
-                            executed_info = {"type": "generate", "kind": kind, "target": target, "result": exec_res}
-                            if re.search(r"I can'?t generate it myself|I cannot generate", reply, re.I):
-                                reply = re.sub(r"I can'?t generate it myself[^.\n]*[.]?", f"Generating {kind} **{target}**.", reply, flags=re.I).strip()
-                            if kind == "image":
-                                out_file = None
-                                if exec_res.get("file"):
-                                    out_file = Path(exec_res["file"]).name
-                                else:
-                                    for ext in (".png", ".jpg", ".webp"):
-                                        if (p / "stills" / f"{target}{ext}").is_file():
-                                            out_file = f"{target}{ext}"
-                                            break
-                                if out_file:
-                                    assistant_attachments.append({"id": target, "file": out_file})
-                                if "✓" not in reply:
-                                    reply += f"\n\n✓ Generated image for **{target}**."
-                            elif kind == "clip":
-                                if exec_res.get("pending"):
-                                    reply += f"\n\n✓ Video clip generation for **{target}** has started."
-                                else:
-                                    reply += f"\n\n✓ Generated video clip for **{target}**."
-                        except Exception as e:
-                            if re.search(r"I can'?t generate it myself|I cannot generate", reply, re.I):
-                                reply = re.sub(r"I can'?t generate it myself[^.\n]*[.]?", "", reply, flags=re.I).strip()
-                            reply += f"\n\n⚠️ Could not generate {kind} '{target}': {e}"
-            elif atype == "generate_all":
-                executed_info = {"type": "generate_all"}
-                if "✓" not in reply:
-                    reply += "\n\n✓ Starting batch generation for all remaining assets."
+            elif atype in ("approve_budget", "generate", "generate_all"):
+                if atype == "generate":
+                    kind = action.get("kind") or "image"
+                    target = action.get("target")
+                    if target == "next" or not target:
+                        nxt = self.ws.production_progress(name).get("next") or {}
+                        if nxt.get("kind") in ("image", "clip"):
+                            target = nxt.get("target")
+                            kind = nxt.get("kind") or kind
+                    action = {**action, "kind": kind, "target": target or ""}
+                    reply += f"\n\nI prepared {kind} **{target or 'the next item'}** for your review. Nothing has been generated."
+                elif atype == "generate_all":
+                    reply += "\n\nI prepared the batch for your review. Nothing has been generated."
+                else:
+                    reply += "\n\nThe budget is ready for your review. Nothing has been approved."
 
         history += [
             {"role": "user", "text": text, "ts": now, **({"attachments": files} if files else {})},

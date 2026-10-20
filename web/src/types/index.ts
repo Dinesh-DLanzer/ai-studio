@@ -37,6 +37,7 @@ export interface ProjectRow { name: string; shots: number; spent: number; estima
 export interface BriefField { key: string; label: string; question: string; required: boolean; value: string; }
 export interface Brief { fields: BriefField[]; required_done: number; required_total: number; missing: string[]; complete: boolean; }
 export interface ChatAttachment { id: string; file: string; colors?: string[]; }
+export interface ChatAction { type: "generate" | "generate_all" | "apply_story" | "approve_budget"; kind?: "image" | "clip"; target?: string; }
 export interface ChatMsg { role: "user" | "assistant"; text: string; ts: string; model?: string; attachments?: ChatAttachment[]; }
 export interface ProgressGroup { key: string; label: string; done: number; total: number; }
 export interface NextStep { kind: "chat" | "apply-story" | "budget" | "image" | "clip" | "approve" | "export"; label: string; target?: string; }

@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ArrowRight, Check, CheckCheck, Circle, FolderOpen, Image as ImageIcon, Sliders, X } from "lucide-react";
 import { fileUrl } from "./api";
@@ -24,8 +24,6 @@ export default function Chat({ project, reloadAll, onApplied, openBudget, start,
   const [showStory, setShowStory] = useState(false);
   const [models, setModels] = useState(false);
 
-  const runAllRef = useRef<() => Promise<void>>(undefined);
-
   const {
     st,
     text,
@@ -43,9 +41,11 @@ export default function Chat({ project, reloadAll, onApplied, openBudget, start,
     send,
     attachFile,
     openAssetPicker,
+    suggestedAction,
+    setSuggestedAction,
     attachExistingAsset,
     apply,
-  } = useChatStream({ project, reloadAll, onApplied, refreshKey, onBatchGenerate: () => runAllRef.current?.() });
+  } = useChatStream({ project, reloadAll, onApplied, refreshKey });
 
   const { plan, setPlan, clicking, setClicking, batch, working, openPlan, runAll } = useBatchPipeline({
     project,
@@ -53,8 +53,6 @@ export default function Chat({ project, reloadAll, onApplied, openBudget, start,
     reloadAll,
     load,
   });
-  runAllRef.current = runAll;
-
   const act = async (n: NextStep) => {
     if (working) return;
     if (n.kind === "apply-story") void apply();
@@ -69,6 +67,27 @@ export default function Chat({ project, reloadAll, onApplied, openBudget, start,
     } else if (n.kind === "approve") nav(`/p/${project}/shots`);
     else if (n.kind === "export") nav(`/p/${project}/review`);
   };
+
+  const reviewSuggestedAction = async () => {
+    if (!suggestedAction) return;
+    setSuggestedAction(null);
+    if (suggestedAction.type === "generate" && (suggestedAction.kind === "image" || suggestedAction.kind === "clip") && suggestedAction.target) {
+      setClicking(true);
+      try {
+        await start(suggestedAction.kind, suggestedAction.target);
+      } finally {
+        setClicking(false);
+      }
+    } else if (suggestedAction.type === "generate_all") {
+      await openPlan();
+    } else if (suggestedAction.type === "approve_budget") {
+      openBudget();
+    }
+  };
+
+  const suggestionLabel = suggestedAction?.type === "generate"
+    ? `Review & approve ${suggestedAction.kind || "generation"}${suggestedAction.target ? `: ${suggestedAction.target}` : ""}`
+    : suggestedAction?.type === "generate_all" ? "Review & approve the batch plan" : "Review & approve the budget";
 
   const drop = async () => {
     await api("POST", `/api/projects/${project}/story/discard-pending`);
@@ -114,6 +133,14 @@ export default function Chat({ project, reloadAll, onApplied, openBudget, start,
           })}
           {busy && <div className="flex items-center gap-2 pl-14 text-sm text-slate-400"><span className="spin"><Spinner size={15} /></span> {AI_NAME} is thinking (free models can take up to a minute)...</div>}
         </div>
+
+        {/* Human approval action card: Tara can suggest, never approve or execute. */}
+        {suggestedAction && suggestedAction.type !== "apply_story" && (
+          <Card title="Action ready for review" className="my-2 shrink-0 !border-pink/50" right={<Badge tone="pink">human approval required</Badge>}>
+            <p className="text-xs text-slate-400">{AI_NAME} suggested this next step. Nothing has been approved or generated yet.</p>
+            <div className="mt-3 flex justify-end"><Button variant="pink" onClick={reviewSuggestedAction} disabled={working || (suggestedAction.type === "generate" && !suggestedAction.target)} data-testid="chat-action-review">{suggestionLabel}</Button></div>
+          </Card>
+        )}
 
         {/* Drafted Storyboard Card (if waiting) */}
         {st.pending_story && (

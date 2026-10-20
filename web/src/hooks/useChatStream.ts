@@ -3,8 +3,7 @@ import { api, upload } from "../api";
 import { AI_NAME } from "../brand";
 import { notifyDone, notifyStart } from "../notify";
 import { useToast } from "../toast";
-import type { ChatAttachment, ChatState, Overview } from "../types";
-
+import type { ChatAction, ChatAttachment, ChatState, Overview } from "../types";
 const slug = (n: string) =>
   n
     .replace(/\.[^.]+$/, "")
@@ -18,12 +17,11 @@ export interface UseChatStreamProps {
   reloadAll: () => void;
   onApplied: () => void;
   refreshKey?: unknown;
-  onBatchGenerate?: () => void | Promise<void>;
 }
 
-export function useChatStream({ project, reloadAll, onApplied, refreshKey, onBatchGenerate }: UseChatStreamProps) {
-  const toast = useToast();
+export function useChatStream({ project, reloadAll, onApplied, refreshKey }: UseChatStreamProps) {  const toast = useToast();
   const [st, setSt] = useState<ChatState | null>(null);
+  const [suggestedAction, setSuggestedAction] = useState<ChatAction | null>(null);
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [pending, setPending] = useState("");
@@ -70,13 +68,14 @@ export function useChatStream({ project, reloadAll, onApplied, refreshKey, onBat
     setFiles([]);
     setSt((s) => s && { ...s, messages: [...s.messages, { role: "user", text: t, ts: new Date().toISOString(), ...(sent.length ? { attachments: sent } : {}) }] });
     try {
-      const r = await api<{ applied?: boolean; action?: { type: string; kind?: string; target?: string }; executed?: { type: string; kind?: string; target?: string } }>("POST", `/api/projects/${project}/chat`, {
+      const r = await api<{ applied?: boolean; action?: ChatAction; executed?: { type: string; kind?: string; target?: string } }>("POST", `/api/projects/${project}/chat`, {
         text: t,
         prefs: { auto_storyboard: true },
         ...(sent.length ? { attachments: sent.map((f) => f.id) } : {}),
       });
       await load();
       reloadAll();
+      setSuggestedAction(r.action || null);
       if (r.applied) {
         toast("ok", "Story.md and TODO.md are ready.");
         onApplied();
@@ -87,9 +86,6 @@ export function useChatStream({ project, reloadAll, onApplied, refreshKey, onBat
         } else if (r.executed.type === "approve_budget") {
           toast("ok", "Budget approved.");
         }
-      }
-      if (r.action?.type === "generate_all" && onBatchGenerate) {
-        void onBatchGenerate();
       }
       notifyDone(nid, "ok", r.applied ? "Reply ready. Story.md and TODO.md were written from your brief." : "Reply ready.");
     } catch (e: any) {
@@ -194,6 +190,8 @@ export function useChatStream({ project, reloadAll, onApplied, refreshKey, onBat
     send,
     attachFile,
     openAssetPicker,
+    suggestedAction,
+    setSuggestedAction,
     attachExistingAsset,
     apply,
   };
