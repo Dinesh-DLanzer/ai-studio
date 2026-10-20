@@ -969,6 +969,143 @@ def export_edl(edit, files):
     return "\n".join(lines).rstrip("\n") + "\n"
 
 
+def _otio_time(value, fps):
+    return {"OTIO_SCHEMA": "RationalTime.1", "value": round(float(value) * fps), "rate": fps}
+
+
+def _otio_range(start, duration, fps):
+    return {"OTIO_SCHEMA": "TimeRange.1", "start_time": _otio_time(start, fps),
+            "duration": _otio_time(duration, fps)}
+
+
+def _otio_marker(name, start, end, notes, fps):
+    return {"OTIO_SCHEMA": "Marker.2", "name": str(name), "marked_range": _otio_range(start, end - start, fps),
+            "color": "GREEN", "metadata": {"aistudio": {"notes": str(notes)}}}
+
+
+def export_otio(edit, files, probes):
+    """OpenTimelineIO JSON for video/audio tracks, transitions and title/caption markers."""
+    video, audio = edit["tracks"]["video"], edit["tracks"]["audio"]
+    if not video:
+        raise EditError("Add at least one video clip before exporting")
+    fps = edit["fps"]
+
+    def clip(src, name, source_in, source_out):
+        if src not in files:
+            raise EditError(f"file not found: {src}")
+        path = Path(files[src]).resolve()
+        duration = max(0, round((source_out - source_in) * fps))
+        media_duration = (probes.get(src) or {}).get("duration")
+        available = float(media_duration) if isinstance(media_duration, (int, float)) and media_duration > 0 else source_out
+        return {"OTIO_SCHEMA": "Clip.2", "name": name,
+                "media_reference": {"OTIO_SCHEMA": "ExternalReference.1", "target_url": path.as_uri(),
+                                    "available_range": _otio_range(0, available, fps), "metadata": {}},
+                "source_range": _otio_range(source_in, duration / fps, fps),
+                "effects": [], "markers": [], "metadata": {}}
+
+    spans = timeline_spans(video)
+    vchildren = []
+    for index, (item, (si, so, ri, ro, td)) in enumerate(zip(video, spans)):
+        if index and spans[index][4] > 0:
+            half = round(spans[index][4] * fps) / (2 * fps)
+            vchildren.append({"OTIO_SCHEMA": "Transition.1", "name": "Dissolve", "transition_type": "SMPTE_Dissolve",
+                              "in_offset": _otio_time(half, fps), "out_offset": _otio_time(half, fps), "metadata": {}})
+        vchildren.append(clip(item["src"], Path(item["src"]).name, si, so))
+    markers = []
+    for item in edit["tracks"].get("text", []):
+        markers.append(_otio_marker(item.get("text", "Text"), item["start"], item["end"], item.get("text", ""), fps))
+    for item in _cue_list(edit["tracks"].get("subtitles") or {}):
+        markers.append(_otio_marker(item.get("text", "Caption"), item["start"], item["end"], item.get("text", ""), fps))
+    video_track = {"OTIO_SCHEMA": "Track.1", "name": "Video", "kind": "Video", "children": vchildren,
+                   "source_range": None, "effects": [], "markers": markers, "metadata": {}}
+    achildren, cursor = [], 0
+    for item in audio:
+        start_frame = round(item["start"] * fps)
+        if start_frame > cursor:
+            achildren.append({"OTIO_SCHEMA": "Gap.1", "name": "Gap", "duration": _otio_time((start_frame - cursor) / fps, fps),
+                              "effects": [], "markers": [], "metadata": {}})
+        achildren.append(clip(item["src"], Path(item["src"]).name, item["in"], item["out"]))
+        cursor = start_frame + round((item["out"] - item["in"]) * fps)
+    audio_track = {"OTIO_SCHEMA": "Track.1", "name": "Audio", "kind": "Audio", "children": achildren,
+                   "source_range": None, "effects": [], "markers": [], "metadata": {}}
+    timeline = {"OTIO_SCHEMA": "Timeline.1", "name": _project_name(files),
+                "tracks": {"OTIO_SCHEMA": "Stack.1", "name": "tracks", "children": [video_track, audio_track],
+                           "source_range": None, "effects": [], "markers": [], "metadata": {}},
+                "global_start_time": _otio_time(0, fps), "metadata": {}}
+    return json.dumps(timeline, indent=2) + "\n"
+
+
+def export_xmeml(edit, files, probes):
+    """Final Cut Pro 7 XML (xmeml version 4), with one video track, audio tracks and dissolve transition items."""
+    import xml.etree.ElementTree as ET
+    video, audio = edit["tracks"]["video"], edit["tracks"]["audio"]
+    if not video:
+        raise EditError("Add at least one video clip before exporting")
+    fps = edit["fps"]
+    root = ET.Element("xmeml", version="4")
+    seq = ET.SubElement(root, "sequence", id="sequence-1")
+    ET.SubElement(seq, "name").text = _project_name(files)
+    rate = ET.SubElement(seq, "rate")
+    ET.SubElement(rate, "timebase").text = str(fps)
+    ET.SubElement(rate, "ntsc").text = "FALSE"
+    spans = timeline_spans(video)
+    duration = round(spans[-1][3] * fps)
+    ET.SubElement(seq, "duration").text = str(duration)
+    media = ET.SubElement(seq, "media")
+
+    def file_element(parent, src, has_video):
+        if src not in files:
+            raise EditError(f"file not found: {src}")
+        fid = "file-" + re.sub(r"[^A-Za-z0-9_-]", "_", src)
+        f = ET.SubElement(parent, "file", id=fid)
+        ET.SubElement(f, "name").text = Path(src).name
+        ET.SubElement(f, "pathurl").text = Path(files[src]).resolve().as_uri()
+        fr = ET.SubElement(f, "rate")
+        ET.SubElement(fr, "timebase").text = str(fps)
+        ET.SubElement(fr, "ntsc").text = "FALSE"
+        fallback = max([c["out"] for c in video if c["src"] == src] +
+                       [a["out"] for a in audio if a["src"] == src] + [1.0])
+        source_duration = float((probes.get(src) or {}).get("duration") or fallback)
+        ET.SubElement(f, "duration").text = str(round(source_duration * fps))
+        return fid
+
+    vmedia = ET.SubElement(media, "video")
+    vtrack = ET.SubElement(vmedia, "track")
+    for index, (item, (si, so, ri, ro, td)) in enumerate(zip(video, spans), 1):
+        if index > 1 and td > 0:
+            transition = ET.SubElement(vtrack, "transitionitem")
+            ET.SubElement(transition, "start").text = str(round(ri * fps))
+            ET.SubElement(transition, "end").text = str(round((ri + td) * fps))
+            ET.SubElement(transition, "alignment").text = "center"
+            effect = ET.SubElement(transition, "effect")
+            ET.SubElement(effect, "name").text = "Cross Dissolve"
+            ET.SubElement(effect, "effectid").text = "crossdissolve"
+        ci = ET.SubElement(vtrack, "clipitem", id=f"video-{index}")
+        ET.SubElement(ci, "name").text = Path(item["src"]).name
+        ET.SubElement(ci, "duration").text = str(round((so - si) * fps))
+        cr = ET.SubElement(ci, "rate")
+        ET.SubElement(cr, "timebase").text = str(fps)
+        ET.SubElement(cr, "ntsc").text = "FALSE"
+        for tag, val in (("start", ri), ("end", ro), ("in", si), ("out", so)):
+            ET.SubElement(ci, tag).text = str(round(val * fps))
+        fid = file_element(ci, item["src"], True)
+        ET.SubElement(ci, "link")
+    amedia = ET.SubElement(media, "audio")
+    for index, item in enumerate(audio, 1):
+        track = ET.SubElement(amedia, "track")
+        ci = ET.SubElement(track, "clipitem", id=f"audio-{index}")
+        ET.SubElement(ci, "name").text = Path(item["src"]).name
+        ET.SubElement(ci, "duration").text = str(round((item["out"] - item["in"]) * fps))
+        ar = ET.SubElement(ci, "rate")
+        ET.SubElement(ar, "timebase").text = str(fps)
+        ET.SubElement(ar, "ntsc").text = "FALSE"
+        for tag, val in (("start", item["start"]), ("end", item["start"] + item["out"] - item["in"]),
+                         ("in", item["in"]), ("out", item["out"])):
+            ET.SubElement(ci, tag).text = str(round(val * fps))
+        file_element(ci, item["src"], False)
+    return ET.tostring(root, encoding="unicode", xml_declaration=True) + "\n"
+
+
 def _summary(pdir, edit, files, probes):
     """timeline_summary.json of the bundle: the whole timeline in one readable document."""
     video, audio, subs = edit["tracks"]["video"], edit["tracks"]["audio"], edit["tracks"].get("subtitles") or {}
@@ -1007,6 +1144,8 @@ def export_bundle(pdir, edit, files):
             z.writestr("captions.vtt", export_vtt(subs))
             z.writestr("timeline.fcpxml", export_fcpxml(edit, files, probes))
             z.writestr("timeline.edl", export_edl(edit, files))
+            z.writestr("timeline.otio", export_otio(edit, files, probes))
+            z.writestr("timeline.xml", export_xmeml(edit, files, probes))
             z.writestr("timeline_summary.json", json.dumps(_summary(pdir, edit, files, probes), indent=2))
             previews = sorted((pdir / "exports").glob("*.mp4")) if (pdir / "exports").is_dir() else []
             if previews:
