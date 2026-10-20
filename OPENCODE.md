@@ -24,15 +24,9 @@ For high-impact or spending operations:
 5. `delete_project` keeps `confirm=<project name>` because it is a restorable, non-spending trash move.
 6. **Never** approve a real proposal in automated work; use fake/test projects for tests.
 7. **In CLI subcommands**:
-   - For automated scripts, pass `-y` to skip terminal prompts:
-     ```bash
-     python3 -m aistudio.cli delete-project <project> -y
-     python3 -m aistudio.cli approve-budget <project> -y
-     python3 -m aistudio.cli approve <project> <proposal_id> -y
-     python3 -m aistudio.cli run <project> <proposal_id> -y
-     ```
-   - For human supervision, omit `-y` to prompt interactively.
-   - Always append `--json` when parsing programmatically.
+   - `approve-budget`, `approve`, and `approve-shot` are human-facing commands. Agents must not use `-y` as a substitute for human approval.
+   - After a human has approved the exact proposal, an agent may run it with `run <project> <proposal_id> -y`; free/status operations may also use `-y` in automated scripts.
+   - For human supervision, omit `-y` to prompt interactively. Always append `--json` when parsing programmatically.
 
 ## Domain Structure
 - `aistudio/domain/projects.py`: Filesystem, project creation, trash, asset renaming.
