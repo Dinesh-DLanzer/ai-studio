@@ -42,6 +42,7 @@ PROVIDER_TYPES = {
     "agy_cli": {"label": "Antigravity CLI", "sub": "Your signed-in Antigravity terminal agent: Gemini, Claude and more (chat)", "adapter": "cli_agent.AntigravityCLIAdapter", "fields": [], "base_url": False, "auth_type": "local", "binary": "agy"},
     "custom": {"label": "Custom (OpenAI-compatible)", "sub": "Any server with /chat/completions", "adapter": "openai.OpenAIAdapter", "fields": ["api_key"], "base_url": True},
     "fake": {"label": "Built-in test", "sub": "Free, offline, for trying things out", "adapter": "fake.FakeAdapter", "fields": [], "base_url": False},
+    "elevenlabs": {"label": "ElevenLabs", "sub": "TTS, voice clone, SFX, music, transcription (Scribe)", "adapter": "elevenlabs.ElevenLabsAdapter", "fields": ["api_key"], "base_url": False},
 }
 
 
