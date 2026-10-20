@@ -55,13 +55,15 @@ Describe your idea to **Tara**, the built-in producer. She interviews you, write
 
 ## Quick start
 
-**You need:** Python 3.10+, Node 18+ (once, to build the screens) and `ffmpeg` to export videos (macOS: `brew install ffmpeg`).
+Dependencies like Python, Node.js, and FFmpeg are automatically checked and installed on setup if missing.
 
 ```bash
 git clone https://github.com/Dinesh-DLanzer/ai-studio && cd ai-studio
-./scripts/start.sh            # macOS / Linux   (same as: python3 scripts/start.py)
-scripts\start.bat             # Windows         (same as: py scripts\start.py)
+./start
 ```
+
+*(On Windows, you can also double-click `start.bat` or run `.\start.bat`).*
+
 
 It prints `http://127.0.0.1:8765/?token=...`. Open that link. The token is your session key, so keep it private.
 

@@ -3,12 +3,12 @@
 The same material is in the app under **Help & Documentation** (with the live API reference). This file is the printable version.
 
 ## Part A. One-time setup (about 15 minutes)
-1. Start the app: `./scripts/start.sh` (macOS/Linux) or `scripts\start.bat` (Windows). Open the link it prints; it carries your session token.
+1. Start the app: `./start` (or `.\start.bat` on Windows). Prerequisites like Python, Node.js, and FFmpeg are automatically checked and installed if missing. Open the link it prints; it carries your session token.
 2. Choose **Set up a provider** (or **Try a test project** first, to learn the app for free).
 3. **Settings > AI Providers > Add Provider.** Pick OpenRouter, Google, OpenAI, Anthropic, Runway, Kling, Replicate or a custom OpenAI-compatible server and paste its API key. Create the key with a spending limit on the provider's site. Press **Test**.
 4. **Settings > Model Configuration.** Give **Chat** at least one model (free models work for chat). Choose **Image** and **Video** models and set a price on any model that has none. Add a model by id if it is not listed.
 5. **Try one cheap clip** (about $0.40 with a 4 s clip) in a throwaway real project, then compare the project's Costs page with your provider's activity page. Failed or rejected jobs may or may not be billed: write down what your provider does.
-6. Install `ffmpeg` (`brew install ffmpeg`) so Review & Export can render videos.
+
 
 ## Part B. Making a video (repeat per video)
 | Step | Do this | Gate |

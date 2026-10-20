@@ -32,3 +32,5 @@ _import_tmp/
 /__agent__/
 .claude/skills/*
 !.claude/skills/ai-studio/
+# private analysis notes: keep local
+/docs/AI_STUDIO_ANALYSIS.md
