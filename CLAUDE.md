@@ -5,10 +5,11 @@ This repository is **AI Studio**, a local-first video and commercial production 
 ---
 
 ## 1. Approval by Design
-* **All production actions are supported:**
-  - Story conversion, asset generation, proposal approval, budget approval, shot review, and project trashing/deletion are all available to Claude Code via MCP and CLI.
-  - High-impact and spending actions (`delete_project`, `approve_budget`, `approve_proposal`, `run_proposal`) require confirmation arguments (`confirm=true` or matching project name), which trigger Claude Code's interactive permission popup before execution.
-  - **CLI-First Approvals (Never Redirect to Web UI):** Terminal agents have full capability to request user confirmation and approve budget and proposals directly in the CLI. Never instruct the user to open the web UI for approvals.
+* **Agents propose; humans approve:**
+  - Story conversion, document edits, estimates, proposal creation, and already-approved execution are available to Claude Code via MCP and the HTTP API.
+  - Budget and paid proposal approval are human-only. `confirm=true` is not an approval signal and is rejected by MCP.
+  - MCP clients advertising form elicitation receive an `elicitation/create` dialog showing the exact request and price. Clients without elicitation receive a one-time code challenge; the code appears only in the local AI Studio notification and `aistudio serve` stderr, never in the MCP response or project files.
+  - **CLI-first human approval:** The terminal remains a supported human-facing approval channel. Agents must ask the human and pass the elicitation response or one-time fallback code; never claim that an agent approved anything.
 * **Non-Interactive Execution:**
   - When running `aistudio` CLI subcommands in bash, append `--json` and `-y` / `--yes` for automated script pipelines, or omit `-y` for interactive human prompts.
 
@@ -22,8 +23,8 @@ When running in Claude Code, the following tools are available via MCP (`.mcp.js
 * `delete_project`: Move project to `_trash` (restorable) with `confirm="yes"`.
 * `list_trash` / `restore_trash`: Manage and restore trashed projects.
 * `convert_story`: Parse `Story.md` and generate `shots.json` and `images.json`.
-* `estimate` / `approve_budget`: Estimate and approve project budget ceiling (`confirm=true`).
-* `propose` / `approve_proposal` / `run_proposal`: Propose, approve (`confirm=true`), and execute generation.
+* `estimate` / `approve_budget`: Estimate and request human approval of the project budget ceiling through elicitation or the one-time fallback code.
+* `propose` / `approve_proposal` / `run_proposal`: Propose, request human approval through elicitation or the fallback code, and execute only an approved proposal.
 * `approve_shot` / `discard` / `restore`: Review, approve clips, or discard with reasons.
 * `get_verification`: Check rule violations and model reviews.
 * `production_progress`: Get production checklist groups and queue items.

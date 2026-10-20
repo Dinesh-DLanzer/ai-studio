@@ -1,5 +1,5 @@
 import tests._hermetic  # noqa: F401
-import json, tempfile, unittest
+import json, tempfile, time, unittest
 from pathlib import Path
 from aistudio import apikeys
 try:
@@ -85,8 +85,27 @@ class TestKeyRoutes(unittest.TestCase):
                         ("post", "/api/projects/demo/chat", {"text": "hi"}), ("put", "/api/projects/demo/edit", {}), ("post", "/api/projects/demo/edit/export", None),
                         ("post", "/api/trash/x/restore", None), ("post", "/api/projects/demo/favorite", {"on": True})):
             r = self.call(m, u, **({"json": b} if b is not None else {}))
-            self.assertIn(r.status_code, (401, 403), f"{m} {u} -> {r.status_code}")
+            approval_route = u in {"/api/projects/demo/budget/approve", "/api/projects/demo/proposals/x/approve", "/api/projects/demo/proposals/x/approve-human", "/api/projects/demo/shots/s01/approve"}
+            if approval_route:
+                self.assertEqual(r.status_code, 403, f"{m} {u} -> {r.status_code}")
+            else:
+                self.assertIn(r.status_code, (401, 403), f"{m} {u} -> {r.status_code}")
         self.assertEqual(self.call("get", "/api/projects/demo", self.S).json()["budget"].get("approved") or False, False)
+
+    def test_agent_execute_cannot_self_approve_or_spend(self):
+        self.assertEqual(self.call("post", "/api/projects/demo/estimate", self.S, json={"failure": 0.2}).status_code, 200)
+        self.assertEqual(self.c.post("/api/projects/demo/budget/approve", headers=self.S).status_code, 200)
+        proposal = self.call("post", "/api/projects/demo/proposals", json={"kind": "image", "target": "s01"}).json()
+        response = self.call("post", f"/api/projects/demo/proposals/{proposal['id']}/execute")
+        self.assertEqual(response.status_code, 200)
+        for _ in range(50):
+            job = self.call("get", f"/api/jobs/{response.json()['job']}").json()
+            if job.get("status") != "running":
+                break
+            time.sleep(0.01)
+        self.assertEqual(job.get("status"), "error")
+        self.assertIn("pending", job.get("error", ""))
+        self.assertEqual(self.call("get", "/api/projects/demo").json()["costs"]["total"], 0)
 
     def test_a_proposal_from_an_agent_has_no_approval_code(self):
         b = self.call("post", "/api/projects/demo/proposals", json={"kind": "image", "target": "s01"})

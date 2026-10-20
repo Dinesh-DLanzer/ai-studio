@@ -33,7 +33,8 @@ python3 -m aistudio.cli progress <project_name> --json
 ```
 
 ## Safety & Approval Workflow
-- AI agents can perform all operations (story conversion, budget approvals, proposals, shot reviews, project deletion/trash).
-- High-impact and spending actions require explicit confirmations (`confirm=true` / confirm with project name), triggering interactive user approval popups in agent environments.
-- When running CLI non-interactively, use `-y` and `--json`.
+- AI agents can inspect and edit project documents, estimate, create proposals, and execute only proposals already approved by a human. Budget, proposal, and shot approval stay human-only.
+- `confirm=true` is not accepted as MCP approval. Elicitation-capable MCP clients receive an `elicitation/create` form with the exact price; other clients use a one-time HMAC challenge whose code is shown only in the local human web notification and terminal stderr.
+- Never approve or run a real proposal during agent work. Use a fake/test project and provider.
+- When running CLI non-interactively, use `-y` and `--json` only for explicitly human-approved operations.
 - Run targeted slice tests when modifying code (`python -m unittest tests/test_<domain>.py`).

@@ -47,6 +47,12 @@ This repository is optimized for high-speed, token-efficient AI agent collaborat
 
 ---
 
-## 5. Conversational Session Hygiene
+## 5. Approval and spend safety
+* Agents and Tara may inspect, edit documents, estimate, and create paid proposals, but they never approve budgets or proposals and never execute an unapproved proposal.
+* Paid runner calls require a one-use grant issued by consuming the exact human-approved proposal. Never hand-build or reuse a grant.
+* MCP approval uses `elicitation/create` when the client advertises form elicitation. Otherwise the one-time fallback code is shown only in the local human web notification and `aistudio serve` stderr; it is HMAC-derived from the challenge id and an external keychain secret and is never stored in a project.
+* Use only fake/test providers and test projects during agent work. Never call a paid provider or approve a real proposal.
+
+## 6. Conversational Session Hygiene
 * Keep agent turn counts low (<15 turns per task).
 * If a task exceeds 20 turns or the context fills with long outputs, advise the user to start a fresh chat session.

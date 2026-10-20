@@ -7,29 +7,23 @@
 - Default Model configured: `opencode/mimo-v2.6-flash-free`.
 - MCP Server: Native tools registered in `ai-studio` namespace.
 
-## Full Agent Capabilities (Approval by Design)
-Terminal agents (OpenCode, Codex, Claude Code, Antigravity CLI) can perform **ALL** production actions end-to-end:
+## Agent Capabilities (Approval by Design)
+Terminal agents (OpenCode, Codex, Claude Code, Antigravity CLI) can inspect projects, edit documents, estimate, create proposals, and execute proposals that a human has already approved. They cannot approve budgets, proposals or clips.
 - **Story & Assets**: `convert_story`, `update_shots`, `update_images`, `import_stills`, `upload_image`
-- **Budget & Proposals**: `estimate`, `approve_budget`, `propose`, `approve_proposal`, `reject_proposal`, `run_proposal`
+- **Budget & Proposals**: `estimate`, human approval requests via `approve_budget`/`approve_proposal`, `propose`, `reject_proposal`, `run_proposal`
 - **Shot Approvals**: `approve_shot`, `discard`, `restore`
 - **Project Management**: `create_project`, `delete_project` (moves to `_trash`), `list_trash`, `restore_trash`, `export_project`
 - **Timeline Editing**: `get_edit`, `update_edit`, `export_edit`
 
-### Interactive Approval Popups & Confirmations (CLI-First)
-For high-impact, spend, or destructive operations:
-1. **Budget Approvals**:
-   - When the project budget needs approval (or after calling `estimate`), prompt the user in terminal:
-     `"Approve estimated project budget of $<amount> (stop-loss: $<stop_loss>)?"`
-   - When confirmed, call `approve_budget(name="<project>", confirm=true)`.
-2. **Paid Generation Proposals**:
-   - When an image or clip proposal is generated via `propose`, prompt the user in terminal:
-     `"Approve <kind> '<target>' with <model> for $<price>?"`
-   - When confirmed, call `run_proposal(name="<project>", id="<proposal_id>", confirm=true)` to approve and execute in one step.
-   - Or call `approve_proposal(name="<project>", id="<proposal_id>", confirm=true)` followed by `run_proposal(name="<project>", id="<proposal_id>")`.
-3. **CRITICAL: NEVER Redirect the User to the Web UI**:
-   - Terminal agents have **full authority and capability** to request approval and execute actions directly in the CLI.
-   - **NEVER** instruct the user to "open the AI Studio web UI to approve". Always ask the user right here in the CLI!
-4. **In CLI Subcommands**:
+### Human approval and MCP elicitation
+For high-impact or spending operations:
+1. `estimate` and `propose` are free and only create the exact request for review.
+2. With an MCP client that advertises form elicitation, `approve_budget`, `approve_proposal`, and a pending `run_proposal` send `elicitation/create`. Continue only after the client returns `accept` with the required approval checkbox set to true.
+3. `confirm=true` is rejected; an agent-supplied boolean is not human approval.
+4. Without elicitation, the server returns a one-time challenge. The HMAC-derived code is shown only in the local web notification and `aistudio serve` stderr, never in an MCP response or project folder. Pass that code and its id back only after the human has read it.
+5. `delete_project` keeps `confirm=<project name>` because it is a restorable, non-spending trash move.
+6. **Never** approve a real proposal in automated work; use fake/test projects for tests.
+7. **In CLI subcommands**:
    - For automated scripts, pass `-y` to skip terminal prompts:
      ```bash
      python3 -m aistudio.cli delete-project <project> -y

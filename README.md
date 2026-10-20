@@ -93,17 +93,17 @@ The checklist under the chat shows exactly where you are. **Generate all** lists
 
 Spending money on AI is the risky part, so the rules live in the engine, not in a prompt.
 
-- Every paid action (image, clip, vision review) is a **proposal** with its exact price. A human approves that proposal in the page or terminal. It runs once; if the prompt, model, price or input image changes, the approval is void.
+- Every paid action (image, clip, edit, extension, character analysis or vision review) is a **proposal** with its exact price. A human approves that proposal in the page or terminal. It runs once; if the prompt, model, price or input file changes, the approval is void.
 - A budget must be approved first. A stop-loss (130%) and a 3-attempts-per-shot limit are enforced by the engine.
 - **Tara cannot generate, approve or upload anything.** She is told the project's real state every turn, and the page's checklist is the source of truth.
-- Agents and API keys can propose but never approve. Provider keys are write-only.
+- Agents and API keys can propose but never approve. Tara can suggest an action card but never approves or executes it. Provider keys are write-only.
 - The server binds to `127.0.0.1`, needs a token, and rejects foreign Host and Origin headers. See [SECURITY.md](SECURITY.md) for the honest limits.
 
 ![Waiting for your decision](docs/img/waiting-for-decision.png)
 
 ## Agents and the HTTP API
 
-- **MCP** (Claude Code, OpenCode, any client): *Settings > Integrations* and *Help > API & Integrations* show the exact command or config for your install. Tools: create and read projects, write the story and brief, convert, estimate, **propose**, run an already approved proposal, costs, discard and restore.
+- **MCP** (Claude Code, OpenCode, any client): *Settings > Integrations* and *Help > API & Integrations* show the exact command or config for your install. Tools can create/read projects, write the story and brief, convert, estimate, **propose**, request human approval, run an already approved proposal, inspect costs, discard and restore. `confirm=true` is not accepted as approval. Elicitation-capable clients receive an approval form; other clients receive a one-time challenge whose code is shown only in the local web notification and `aistudio serve` stderr.
 - **API keys**: *Settings > Integrations* creates revocable keys (shown once, stored only as a hash). A key can do what the MCP tools do and nothing more.
 - **Reference**: *Help > API & Integrations* lists every endpoint, read live from the server, and which ones a key may call.
 - **Skill** (Claude Code): `.claude/skills/ai-studio/` is the playbook for making a video through the app.
