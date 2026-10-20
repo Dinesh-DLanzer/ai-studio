@@ -1,0 +1,7 @@
+{
+  "3": {"class_type": "KSampler", "inputs": {"seed": 12345, "steps": 20, "denoise": 1.0}},
+  "10": {"class_type": "CLIPTextEncode", "inputs": {"text": "a cat", "clip": ["4", 1]}},
+  "11": {"class_type": "LoadImage", "inputs": {"image": "start.png"}},
+  "20": {"class_type": "EmptyHunyuanLatentVideo", "inputs": {"width": 832, "height": 480, "length": 81, "batch_size": 1}},
+  "30": {"class_type": "SaveVideo", "inputs": {"filename_prefix": "video", "images": ["20", 0]}}
+}
