@@ -1,0 +1,16 @@
+{
+  "id": "explainer-16x9",
+  "label": "Explainer (16:9)",
+  "aspect_ratio": "16:9",
+  "shots": 8,
+  "seconds_per_shot": 6,
+  "resolution": "1080p",
+  "audio": true,
+  "safe_area": {"top": 0.05, "bottom": 0.08, "left": 0.04, "right": 0.04},
+  "caption": {"font": "Poppins", "size": 32, "weight": 500, "y": 0.85, "bg": "#000000AA"},
+  "cta": {"text": "Learn More", "last_seconds": 4},
+  "loudness": -24,
+  "brief": {"length": "48 seconds", "purpose": "educational"},
+  "suggested_models": {"video": ["google/veo-3.1-lite", "runway/gen-3-alpha-turbo"]},
+  "notes": "Platform margins must be re-verified against current platform guidelines"
+}

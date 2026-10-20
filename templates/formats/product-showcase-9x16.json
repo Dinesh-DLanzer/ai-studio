@@ -1,0 +1,16 @@
+{
+  "id": "product-showcase-9x16",
+  "label": "Product Showcase (9:16)",
+  "aspect_ratio": "9:16",
+  "shots": 7,
+  "seconds_per_shot": 5,
+  "resolution": "1080p",
+  "audio": true,
+  "safe_area": {"top": 0.1, "bottom": 0.18, "left": 0.05, "right": 0.05},
+  "caption": {"font": "Poppins", "size": 38, "weight": 600, "y": 0.78, "bg": "#000000BB"},
+  "cta": {"text": "Learn More", "last_seconds": 3},
+  "loudness": -14,
+  "brief": {"length": "35 seconds", "purpose": "advertising"},
+  "suggested_models": {"video": ["google/veo-3.1-lite", "runway/gen-3-alpha-turbo"]},
+  "notes": "Platform margins must be re-verified against current platform guidelines"
+}

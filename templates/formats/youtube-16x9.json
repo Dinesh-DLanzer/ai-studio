@@ -1,0 +1,16 @@
+{
+  "id": "youtube-16x9",
+  "label": "YouTube Video (16:9)",
+  "aspect_ratio": "16:9",
+  "shots": 10,
+  "seconds_per_shot": 8,
+  "resolution": "1080p",
+  "audio": true,
+  "safe_area": {"top": 0.05, "bottom": 0.1, "left": 0.04, "right": 0.04},
+  "caption": {"font": "Poppins", "size": 34, "weight": 500, "y": 0.88, "bg": "#000000AA"},
+  "cta": {"text": "Subscribe", "last_seconds": 5},
+  "loudness": -24,
+  "brief": {"length": "80 seconds", "purpose": "social"},
+  "suggested_models": {"video": ["google/veo-3.1-lite", "runway/gen-3-alpha-turbo"]},
+  "notes": "Platform margins must be re-verified against current YouTube guidelines"
+}
