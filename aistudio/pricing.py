@@ -131,7 +131,9 @@ class Pricing:
             return 0.0
         if "per_call" in card:
             return float(card["per_call"])
-        u = usage or {}
+        if not usage:
+            return None
+        u = usage
         return round((u.get("input", 0) * card["input_per_1m"] + u.get("output", 0) * card["output_per_1m"]) / 1_000_000, 6)
 
     def actual_cost(self, reported, computed):

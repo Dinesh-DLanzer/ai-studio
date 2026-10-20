@@ -96,6 +96,8 @@ class TestKeyRoutes(unittest.TestCase):
         self.assertEqual(self.call("post", "/api/projects/demo/estimate", self.S, json={"failure": 0.2}).status_code, 200)
         self.assertEqual(self.c.post("/api/projects/demo/budget/approve", headers=self.S).status_code, 200)
         proposal = self.call("post", "/api/projects/demo/proposals", json={"kind": "image", "target": "s01"}).json()
+        denied_override = self.call("post", f"/api/projects/demo/proposals/{proposal['id']}/execute", json={"override": True})
+        self.assertEqual(denied_override.status_code, 403)
         response = self.call("post", f"/api/projects/demo/proposals/{proposal['id']}/execute")
         self.assertEqual(response.status_code, 200)
         for _ in range(50):

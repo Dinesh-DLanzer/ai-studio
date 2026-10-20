@@ -134,7 +134,7 @@ class RoleRunner:
         return cfg.effective_roles(self.dir, project_dir)["roles"][role]["policy"]
 
     # -------------------------------------------------------------- the generic runner
-    def run(self, role, call, project_dir=None, allow=None, approved_price=None, price_of=None, retry_after_submit=False):
+    def run(self, role, call, project_dir=None, allow=None, approved_price=None, price_of=None, retry_after_submit=False, allow_unknown_price=False):
         """call(adapter, model) -> result.  Returns {"result", "provider", "model", "card", "attempts"}."""
         entries = self.resolve(role, project_dir)
         if not entries:
@@ -154,10 +154,10 @@ class RoleRunner:
                     continue
             if approved_price is not None:
                 price = price_of(e) if price_of else None
-                if price is None:
+                if price is None and not allow_unknown_price:
                     attempts.append({"who": who, "error": "price unknown (set a price in Settings)", "skipped": True})
                     continue
-                if price > approved_price + 1e-9:
+                if price is not None and price > approved_price + 1e-9:
                     attempts.append({"who": who, "error": f"costs ${price:.3f} (more than the approved ${approved_price:.3f})", "skipped": True})
                     too_dear = too_dear or (e, price)
                     continue
@@ -208,11 +208,14 @@ class RoleRunner:
         cost, src = self._cost(role, out, r["card"])
         return {**out, "cost": cost, "cost_source": src, "provider": r["provider"], "attempts": r["attempts"]}
 
-    def vision(self, prompt, images, opts=None, project_dir=None, allow=None, *, grant=None):
+    def vision(self, prompt, images, opts=None, project_dir=None, allow=None, *, grant=None, allow_paid=False):
         grant = self._grant("vision", project_dir, grant)
+        paid_allowed = bool(allow_paid) or self._fake("vision", project_dir)
+        role_allow = allow or (lambda e: (self.pricing.is_free(e.get("card")) or paid_allowed, "paid or unknown vision model; enable Allow paid models"))
         approved_price = grant.price if grant else None
         price_of = (lambda e: self.pricing.text_cost(e.get("card"), None)) if grant else None
-        r = self.run("vision", lambda a, m: a.vision(m, prompt, images, opts), project_dir, allow, approved_price, price_of)
+        r = self.run("vision", lambda a, m: a.vision(m, prompt, images, opts), project_dir, role_allow, approved_price, price_of,
+                     allow_unknown_price=bool(grant and paid_allowed))
         out = r["result"]
         cost, src = self._cost("vision", out, r["card"])
         return {**out, "cost": cost, "cost_source": src, "provider": r["provider"], "attempts": r["attempts"]}
@@ -316,9 +319,9 @@ class RoleRunner:
         cost, src = self._cost("video", {"cost": out.get("reported")}, r["card"], extra=req)
         return {**base, "status": "done", "bytes": out["bytes"], "cost": cost, "cost_source": src}
 
-    def review(self, prompt, images, opts=None, project_dir=None, *, grant=None):
+    def review(self, prompt, images, opts=None, project_dir=None, *, grant=None, allow_paid=False):
         """Compatibility alias for the grant-protected paid vision call."""
-        return self.vision(prompt, images, opts, project_dir=project_dir, grant=grant)
+        return self.vision(prompt, images, opts, project_dir=project_dir, grant=grant, allow_paid=allow_paid)
 
     def fetch_video(self, job, req=None):
         """Resolve a job left pending by a timeout. job = {"job_id","model","provider"}."""

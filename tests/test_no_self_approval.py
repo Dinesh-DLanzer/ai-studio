@@ -37,6 +37,17 @@ class TestProposalOnlyPaidTools(unittest.TestCase):
         self.ws.estimate("demo", 0.2)
         self.ws.approve_budget("demo")
 
+    def test_human_override_is_marked_in_cost_log(self):
+        self.budget()
+        budget = json.loads((self.p / "budget.json").read_text(encoding="utf-8"))
+        budget["stop_loss"] = 0
+        (self.p / "budget.json").write_text(json.dumps(budget), encoding="utf-8")
+        (self.p / "stills" / "s01.png").unlink()
+        proposal = self.ws.propose("demo", "image", "s01", reveal_code=True)
+        self.ws.approve("demo", proposal["id"], proposal["code"])
+        self.ws.execute("demo", proposal["id"], override=True)
+        self.assertEqual(costlog.read_log(self.p)[-1]["override"], "yes")
+
     def test_edit_still_is_propose_only_then_logs_after_approval(self):
         before = costlog.read_log(self.p)
         prop = self.ws.edit_still("demo", "s01", "replace the sky")
@@ -104,6 +115,13 @@ class TestMcpCannotSelfApprove(unittest.TestCase):
         result, error = self.call(self.ws, "approve_shot", name="demo", shot_id="s01")
         self.assertTrue(error)
         self.assertIn("human-only", result["error"])
+
+    def test_mcp_cannot_override_gates(self):
+        proposal, error = self.call(self.ws, "propose", name="demo", kind="image", target="s01")
+        self.assertFalse(error)
+        result, error = self.call(self.ws, "run_proposal", name="demo", id=proposal["id"], override=True)
+        self.assertTrue(error)
+        self.assertIn("human-web-only", result["error"])
 
     def test_confirm_boolean_is_refused_for_budget_and_proposal(self):
         self.call(self.ws, "estimate", name="demo")

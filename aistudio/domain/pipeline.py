@@ -303,7 +303,7 @@ class PipelineDomain:
             except (gates.GateError, approvals.ApprovalError) as e:
                 raise ServiceError(str(e)) from None
             attempt = attempts + 1
-            log = {"shot": target, "stage": stage, "model": model, "attempt": str(attempt), "job_id": "", "seconds": "", "provider": payload.get("provider", ""), "actor": grant.actor}
+            log = {"shot": target, "stage": stage, "model": model, "attempt": str(attempt), "job_id": "", "seconds": "", "provider": payload.get("provider", ""), "actor": grant.actor, "override": "yes" if override else "no"}
         activity.record_start(p, pid, kind, target, model, price, source="mcp")
         try:
             res = self._execute_kind(p, kind, target, payload, model, price, attempt, log, grant)
@@ -389,7 +389,7 @@ class PipelineDomain:
         outdir = p / "checks" / f.stem
         outdir.mkdir(parents=True, exist_ok=True)
         if payload.get("review_type") == "character":
-            raw = self.ws.runner().review(character_check.build_character_check_prompt(), [str(f)], {"max_tokens": 1500, "temperature": 0.2}, project_dir=p, grant=grant)
+            raw = self.ws.runner().review(character_check.build_character_check_prompt(), [str(f)], {"max_tokens": 1500, "temperature": 0.2}, project_dir=p, grant=grant, allow_paid=self.ws.ai_settings()["settings"].get("allow_paid", False))
             review = {**character_check.parse_character_analysis(raw["text"]), "file": payload["file"], "model": raw["model"], "cost": raw["cost"], "when": datetime.now().isoformat(timespec="seconds")}
             log = {**log, "model": raw["model"], "provider": raw["provider"], "cost_source": raw["cost_source"]}
             project_mod.save_json(outdir, "character_review.json", review)
@@ -412,7 +412,7 @@ class PipelineDomain:
             refs = [(p / by[r]["out"]) for r in spec.get("refs", []) if r in by and (p / by[r]["out"]).exists()]
             prompt = image_checklist.build_prompt(spec, [r.name for r in refs])
             frames = [str(r) for r in refs] + [str(f)]
-        raw = self.ws.runner().review(prompt, frames, {"max_tokens": 3500, "temperature": 0.2}, project_dir=p, grant=grant)
+        raw = self.ws.runner().review(prompt, frames, {"max_tokens": 3500, "temperature": 0.2}, project_dir=p, grant=grant, allow_paid=self.ws.ai_settings()["settings"].get("allow_paid", False))
         res = {**clip_checklist.parse_review(raw["text"]), "cost": raw["cost"]}
         log = {**log, "model": raw["model"], "provider": raw["provider"], "cost_source": raw["cost_source"]}
         review = {k: res[k] for k in ("verdict", "findings", "summary")}

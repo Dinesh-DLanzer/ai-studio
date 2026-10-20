@@ -270,13 +270,16 @@ def create_app(root=None, token=None, rates_path=None, transport=None, static_di
     @app.post("/api/projects/{name}/proposals/{pid}/execute", dependencies=[api])
     async def execute(name: str, pid: str, request: Request):
         body = await request.json() if (await request.body()) else {}
+        if body.get("override") and getattr(request.state, "scope", "agent") != "session":
+            raise HTTPException(403, "override is human-session-only; agents cannot bypass stop-loss or attempt gates")
+        override = bool(body.get("override"))
         jid = uuid.uuid4().hex[:10]
         with lock:
             jobs[jid] = {"status": "running"}
 
         def work():
             try:
-                res = ws.execute(name, pid, bool(body.get("override")))
+                res = ws.execute(name, pid, override)
                 with lock:
                     jobs[jid] = {"status": "done", "result": res}
             except ServiceError as e:

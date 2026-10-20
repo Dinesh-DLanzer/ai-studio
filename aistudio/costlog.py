@@ -1,7 +1,7 @@
 """E2: cost log (cost_log.csv) and discard-aware totals.  Standard library only.
 
 Contract (tests in tests/test_costlog.py):
-  LOG_COLS = ["timestamp","shot","stage","model","resolution","seconds","attempt","job_id","cost","result","provider","cost_source","actor"]
+  LOG_COLS = ["timestamp","shot","stage","model","resolution","seconds","attempt","job_id","cost","result","provider","cost_source","actor","override"]
       (provider and cost_source were added in v2; older log files without them are still read, the values are then missing/"")
   read_log(pdir: Path) -> list[dict]        rows of pdir/cost_log.csv as dicts of strings; [] if the file is missing.
   append_log(pdir: Path, row: dict) -> None  appends one row (writes the header first if the file is new). Missing
@@ -17,7 +17,7 @@ import csv
 import json
 from pathlib import Path
 
-LOG_COLS = ["timestamp", "shot", "stage", "model", "resolution", "seconds", "attempt", "job_id", "cost", "result", "provider", "cost_source", "actor"]
+LOG_COLS = ["timestamp", "shot", "stage", "model", "resolution", "seconds", "attempt", "job_id", "cost", "result", "provider", "cost_source", "actor", "override"]
 
 
 def read_log(pdir):
@@ -38,7 +38,7 @@ def append_log(pdir, row):
         w = csv.DictWriter(f, fieldnames=LOG_COLS)
         if new:
             w.writeheader()
-        w.writerow({k: row.get(k, "local" if k == "actor" else "") for k in LOG_COLS})
+        w.writerow({k: row.get(k, "local" if k == "actor" else "no" if k == "override" else "") for k in LOG_COLS})
 
 
 def spent(pdir):

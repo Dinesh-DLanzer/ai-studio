@@ -33,6 +33,10 @@ class Script(Adapter):
         self._next(model, "image")
         return {"bytes": b"PNG", "usage": {}, "cost": None, "model": model}
 
+    def vision(self, model, prompt, images, opts=None):
+        self._next(model, "vision")
+        return {"text": "ok", "usage": {}, "cost": None, "model": model}
+
     def video_submit(self, model, req):
         self._next(model, "submit")
         return {"job_id": "J-" + model, "model": model}
@@ -170,6 +174,15 @@ class TestPaid(unittest.TestCase):
         with self.assertRaises(R.GrantRequired):
             r.vision("review", [], project_dir=p)
 
+    def test_token_priced_vision_requires_allow_paid_and_logs_unknown_cost(self):
+        r, p = setup(chains={"vision": ch(("g", "token-vision"))})
+        r.pricing.overrides[key("g", "token-vision")] = {"kind": "text", "input_per_1m": 1.0, "output_per_1m": 2.0}
+        grant = self.grant(p, "review", 0.003)
+        with self.assertRaises(R.ChainError):
+            r.vision("review", [], project_dir=p, grant=grant)
+        grant = self.grant(p, "review", 0.003)
+        out = r.vision("review", [], project_dir=p, grant=grant, allow_paid=True)
+        self.assertEqual(out["cost_source"], "unknown")
     def test_image_price_rule(self):
         r, p = setup(chains={"image": ch(("g", "img"))})
         grant = self.grant(p, "image", 0.04)

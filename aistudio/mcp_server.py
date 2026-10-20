@@ -156,6 +156,8 @@ def _human_only_shot_approval(ws, a):
 
 
 def _run_proposal_mcp(ws, a, session=None):
+    if a.get("override"):
+        raise ServiceError("override is human-web-only; MCP agents cannot bypass stop-loss or attempt gates")
     name, pid = a["name"], a["id"]
     prop = ws.proposal_status(name, pid)
     overview = ws.overview(name)
@@ -218,9 +220,8 @@ TOOLS = {
         lambda ws, a: ws.reject(a["name"], a["id"]) or {"ok": True, "rejected": a["id"]},
     ),
     "run_proposal": (
-        "Execute a proposal only after human approval. Pending proposals use MCP elicitation or a one-time code challenge; confirm=true is not accepted. Set override=true to override attempt or stop-loss limits.",
-        S(name=STR, id=STR, code={"type": "string", "optional": True}, code_id={"type": "string", "optional": True},
-          override={"type": "boolean", "optional": True, "description": "Override attempt limits (e.g. past 3 attempts) or stop-loss limits"}),
+        "Execute a proposal only after human approval. Pending proposals use MCP elicitation or a one-time code challenge; confirm=true and override=true are not accepted from agents.",
+        S(name=STR, id=STR, code={"type": "string", "optional": True}, code_id={"type": "string", "optional": True}),
         lambda ws, a: _run_proposal_mcp(ws, a),
     ),
     "set_max_attempts": (

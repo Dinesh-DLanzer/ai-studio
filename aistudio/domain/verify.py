@@ -97,7 +97,7 @@ class VerifyDomain:
             res = runner.chat(role, messages, {"max_tokens": 8192, "temperature": 0.4}, project_dir=p, allow=allow)
         except (pbase.ProviderError, roles_mod.ChainError, ValueError) as e:
             raise ServiceError(f"The {role} model is unavailable: {e}") from None
-        if res.get("cost"):
+        if paid or res.get("cost"):
             attempt = 1 + len([r for r in costlog.read_log(p) if r["stage"] == role])
             costlog.append_log(
                 p,
