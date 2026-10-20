@@ -48,6 +48,9 @@ PROVIDER_TYPES = {
     "google_cloud_tts": {"label": "Google Cloud TTS", "sub": "Neural TTS with Tamil (ta-IN) voices", "adapter": "google_cloud_tts.GoogleCloudTTSAdapter", "fields": ["api_key"], "base_url": False},
     "azure_speech": {"label": "Azure Speech", "sub": "TTS (SSML, neural voices) + fast transcription", "adapter": "azure_speech.AzureSpeechAdapter", "fields": ["api_key", "region"], "base_url": False},
     "sarvam": {"label": "Sarvam AI", "sub": "Bulbul TTS + Saaras STT (Indian languages, Tamil ta-IN)", "adapter": "sarvam.SarvamAdapter", "fields": ["api_key"], "base_url": False},
+    "stability": {"label": "Stability AI", "sub": "Stable Audio: music and sound effects", "adapter": "stability.StabilityAdapter", "fields": ["api_key"], "base_url": False},
+    "cartesia": {"label": "Cartesia", "sub": "Fast text-to-speech and voice cloning", "adapter": "cartesia.CartesiaAdapter", "fields": ["api_key"], "base_url": False},
+    "fal": {"label": "fal.ai", "sub": "One key for many hosted models: music, SFX, lip sync, speech, image, video", "adapter": "fal.FalAdapter", "fields": ["api_key"], "base_url": False},
 }
 
 
