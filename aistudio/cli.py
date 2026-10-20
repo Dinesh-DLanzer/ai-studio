@@ -203,6 +203,8 @@ def main(argv=None, ask=input, out=print):
                     out(f"{p['id']}  {p['status']:<9} {p['kind']:<7} {p['shot']:<8} ${p['price']:.3f}  {p['model']}\n    {(p.get('summary') or {}).get('prompt', '')[:160]}")
 
         elif args.cmd == "approve":
+            if getattr(args, "yes", False):
+                raise ServiceError("--yes cannot bypass human proposal approval; omit it for the interactive human prompt")
             p = ws.proposal_status(args.project, args.id)
             if not getattr(args, "yes", False):
                 out(f"{p['kind']} {p['shot']} with {p['model']} for ${p['price']:.3f}\n  {(p.get('summary') or {}).get('prompt', '')[:300]}")
@@ -234,6 +236,8 @@ def main(argv=None, ask=input, out=print):
                 out(f"Proposal {args.id} rejected.")
 
         elif args.cmd == "approve-budget":
+            if getattr(args, "yes", False):
+                raise ServiceError("--yes cannot bypass human budget approval; omit it for the interactive human prompt")
             b = ws.overview(args.project)["budget"]
             if not getattr(args, "yes", False):
                 out(f"Estimate ${b.get('estimate')} with stop-loss ${b.get('stop_loss')}")
@@ -243,6 +247,8 @@ def main(argv=None, ask=input, out=print):
             out("Budget approved.")
 
         elif args.cmd == "approve-shot":
+            if getattr(args, "yes", False):
+                raise ServiceError("--yes cannot bypass human clip approval; omit it for the interactive human prompt")
             if not getattr(args, "yes", False):
                 if ask(f"Approve video clip for shot {args.shot_id}? Type yes to confirm: ").strip().lower() != "yes":
                     return out("Not confirmed.")

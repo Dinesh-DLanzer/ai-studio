@@ -114,6 +114,7 @@ class VerifyDomain:
                     "result": "completed",
                     "provider": res.get("provider", ""),
                     "cost_source": res.get("cost_source", ""),
+                    "actor": "local",
                 },
             )
         return res

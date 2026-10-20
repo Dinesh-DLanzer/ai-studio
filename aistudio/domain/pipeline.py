@@ -2,7 +2,7 @@
 from datetime import datetime
 from pathlib import Path
 
-from aistudio import activity, approvals, chat as chat_mod, costlog, editor as editor_mod, frames as frames_mod, gates, palette as palette_mod, project as project_mod, roles as roles_mod
+from aistudio import activity, approvals, chat as chat_mod, costlog, editor as editor_mod, frames as frames_mod, gates, palette as palette_mod, project as project_mod, project_lock, roles as roles_mod
 from aistudio.domain.common import REVIEW_PRICE, ServiceError, _ident, _sha
 from aistudio.providers import base as pbase
 from aistudio import character_check
@@ -218,7 +218,22 @@ class PipelineDomain:
                 return {"review_type": "character", "target": target, "file": f.relative_to(p.resolve()).as_posix(), "file_sha": _sha(f), "provider": e["provider"]["id"]}, e["model"], REVIEW_PRICE
             f = self._review_file(p, target)
             e = self.ws._primary("vision", p)
-            return {"target": target, "file": f.relative_to(p).as_posix(), "file_sha": _sha(f), "provider": e["provider"]["id"]}, e["model"], REVIEW_PRICE
+            payload = {"target": target, "file": f.resolve().relative_to(p.resolve()).as_posix(), "file_sha": _sha(f), "provider": e["provider"]["id"]}
+            if f.suffix == ".mp4":
+                shots = self.ws._read(p, "shots.json", {"shots": []})
+                shot = next((s for s in shots["shots"] if s["id"] == target), {"id": target})
+                payload["review_prompt"] = clip_checklist.build_prompt(shot, 0)
+                payload["shot_spec"] = {k: shot.get(k) for k in ("id", "seconds", "prompt", "resolution", "audio", "first_frame")}
+                payload["first_frame_sha"] = _sha(p / shot["first_frame"]) if shot.get("first_frame") else ""
+            else:
+                imgs = self.ws._read(p, "images.json", {"images": []})
+                spec = next((i for i in imgs["images"] if i["id"] == target), {"id": target})
+                by = {i["id"]: i for i in imgs["images"]}
+                refs = [(p / by[r]["out"]) for r in spec.get("refs", []) if r in by and (p / by[r]["out"]).exists()]
+                payload["review_prompt"] = image_checklist.build_prompt(spec, [r.name for r in refs])
+                payload["image_spec"] = {k: spec.get(k) for k in ("id", "kind", "out", "prompt", "refs", "aspect_ratio")}
+                payload["refs"] = [{"path": r.relative_to(p.resolve()).as_posix(), "sha": _sha(r)} for r in refs]
+            return payload, e["model"], REVIEW_PRICE
         raise ServiceError("kind must be image, clip, image_edit, clip_extend or review")
 
     def _review_file(self, p, target):
@@ -266,24 +281,29 @@ class PipelineDomain:
 
     def execute(self, name, pid, override=False):
         p = self.ws.pdir(name)
-        try:
-            prop = approvals.get(p, pid)
-        except approvals.ApprovalError as e:
-            raise ServiceError(str(e)) from None
-        kind, target = prop["kind"], prop["shot"]
-        payload, model, price = self._payload_and_price(name, kind, target, prop.get("options"))
-        b = self.ws._read(p, "budget.json", {})
-        rows = costlog.read_log(p)
-        stage = {"clip": "final", "image": "image", "image_edit": "image_edit", "clip_extend": "clip_extend", "review": "vision"}[kind]
-        attempts = len([r for r in rows if r["shot"] == target and r["stage"] == stage])
-        try:
-            gates.check_run(b, costlog.spent(p), price, attempts if kind in ("clip", "image_edit", "clip_extend") else 0, override=override)
-            request_digest = approvals.request_hash(kind, target, model, price, payload)
-            grant = approvals.consume(p, pid, request_digest)
-        except (gates.GateError, approvals.ApprovalError) as e:
-            raise ServiceError(str(e)) from None
-        attempt = attempts + 1
-        log = {"shot": target, "stage": stage, "model": model, "attempt": str(attempt), "job_id": "", "seconds": "", "provider": payload.get("provider", "")}
+        with project_lock.lock(p):
+            try:
+                prop = approvals.get(p, pid)
+            except approvals.ApprovalError as e:
+                raise ServiceError(str(e)) from None
+            kind, target = prop["kind"], prop["shot"]
+            payload, model, price = self._payload_and_price(name, kind, target, prop.get("options"))
+            b = self.ws._read(p, "budget.json", {})
+            current_fingerprints = self.ws._costs.fingerprints(p)
+            if b.get("plan_hash") and (b.get("plan_hash") != current_fingerprints["plan_hash"] or b.get("pricing_hash") != current_fingerprints["pricing_hash"]):
+                raise ServiceError("budget approval is stale after a plan or price change; estimate again and ask the human to approve it")
+            rows = costlog.read_log(p)
+            stage = {"clip": "final", "image": "image", "image_edit": "image_edit", "clip_extend": "clip_extend", "review": "vision"}[kind]
+            attempts = len([r for r in rows if r["shot"] == target and r["stage"] == stage])
+            try:
+                gates.check_run(b, costlog.spent(p) + project_lock.reserved(p), price, attempts if kind in ("clip", "image_edit", "clip_extend") else 0, override=override)
+                request_digest = approvals.request_hash(kind, target, model, price, payload)
+                grant = approvals.consume(p, pid, request_digest)
+                project_lock.reserve(p, pid, price, actor=grant.actor)
+            except (gates.GateError, approvals.ApprovalError) as e:
+                raise ServiceError(str(e)) from None
+            attempt = attempts + 1
+            log = {"shot": target, "stage": stage, "model": model, "attempt": str(attempt), "job_id": "", "seconds": "", "provider": payload.get("provider", ""), "actor": grant.actor}
         activity.record_start(p, pid, kind, target, model, price, source="mcp")
         try:
             res = self._execute_kind(p, kind, target, payload, model, price, attempt, log, grant)
@@ -298,6 +318,9 @@ class PipelineDomain:
         except Exception as e:
             activity.record_finish(p, pid, status="error", error=str(e))
             raise
+        finally:
+            with project_lock.lock(p):
+                project_lock.release(p, pid)
 
     def _execute_kind(self, p, kind, target, payload, model, price, attempt, log, grant):
         if kind == "image_edit":

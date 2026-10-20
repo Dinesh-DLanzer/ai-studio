@@ -70,7 +70,10 @@ def _approval_secret(ws):
 def _fallback_approval(ws, name, reference, kind, request_hash_value, message):
     challenge = approvals.issue_code(ws.pdir(name), reference, kind, request_hash_value, _approval_secret(ws))
     notifications.publish_approval(ws.pdir(name), challenge["id"], challenge["code"], message)
-    print(f"[AI Studio approval] {message} Code ID: {challenge['id']}. One-time code: {challenge['code']} (expires in 10 minutes)", file=sys.stderr, flush=True)
+    # Only an interactive human terminal gets the code on stderr. A piped MCP
+    # client's stderr must not become another agent-visible approval channel.
+    if getattr(sys.stderr, "isatty", lambda: False)():
+        print(f"[AI Studio approval] {message} Code ID: {challenge['id']}. One-time code: {challenge['code']} (expires in 10 minutes)", file=sys.stderr, flush=True)
     return {"approval_needed": True, "code_id": challenge["id"], "expires": challenge["expires"],
             "message": message, "next_step": f"Have the human provide the one-time code for code_id '{challenge['id']}' and call again with code and code_id. The code is not in this response."}
 

@@ -57,10 +57,10 @@ class TestCliJson(unittest.TestCase):
         self.run_cli(["approve-budget", "demo"])
         self.assertFalse(self.ws.overview("demo")["budget"]["approved"])
 
-        # With -y, approved without asking
+        # --yes cannot impersonate a human budget approval
         code = self.run_cli(["approve-budget", "demo", "-y"])
-        self.assertEqual(code, 0)
-        self.assertTrue(self.ws.overview("demo")["budget"]["approved"])
+        self.assertEqual(code, 1)
+        self.assertFalse(self.ws.overview("demo")["budget"]["approved"])
 
     def test_agent_setup(self):
         code = self.run_cli(["agent-setup", "all"])

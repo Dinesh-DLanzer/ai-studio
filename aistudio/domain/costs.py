@@ -1,6 +1,7 @@
 """Costs, pricing, budget estimation and job sync domain."""
 import csv
 from datetime import datetime
+import hashlib
 import json
 
 from aistudio import budget as budget_mod, costlog, pricing as pricing_mod, project as project_mod, roles as roles_mod
@@ -11,6 +12,28 @@ from aistudio.providers import base as pbase
 class CostDomain:
     def __init__(self, ws):
         self.ws = ws
+
+    def fingerprints(self, p):
+        """Return hashes binding a budget approval to the current plan and price cards."""
+        raw_shots = self.ws._read(p, "shots.json", {"shots": []})
+        raw_images = self.ws._read(p, "images.json", {"images": []})
+        shot_keys = ("id", "seconds", "prompt", "resolution", "audio", "first_frame", "model")
+        image_keys = ("id", "kind", "out", "prompt", "refs", "aspect_ratio")
+        docs = {
+            "shots": {k: v for k, v in raw_shots.items() if k != "shots"} | {"shots": [{k: s.get(k) for k in shot_keys} for s in raw_shots.get("shots", [])]},
+            "images": {k: v for k, v in raw_images.items() if k != "images"} | {"images": [{k: i.get(k) for k in image_keys} for i in raw_images.get("images", [])]},
+        }
+        roles = {}
+        for role in ("image", "video", "vision"):
+            try:
+                roles[role] = [{"provider": e["provider"].get("id"), "model": e["model"], "card": e.get("card")} for e in self.ws.runner().resolve(role, p)]
+            except Exception:
+                roles[role] = []
+        canon = lambda value: json.dumps(value, sort_keys=True, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        return {
+            "plan_hash": hashlib.sha256(canon(docs)).hexdigest(),
+            "pricing_hash": hashlib.sha256(canon(roles)).hexdigest(),
+        }
 
     def rates(self):
         return json.loads(self.ws.rates_path.read_text(encoding="utf-8"))
@@ -23,7 +46,7 @@ class CostDomain:
             est = self._estimate(p, shots, images, existing, failure)
         except (KeyError, ValueError) as e:
             raise ServiceError(f"cannot estimate: {e}") from None
-        b = {**est, "approved": False, "created": datetime.now().isoformat(timespec="seconds")}
+        b = {**est, "approved": False, "created": datetime.now().isoformat(timespec="seconds"), **self.fingerprints(p)}
         project_mod.save_json(p, "budget.json", b)
         return b
 
@@ -47,6 +70,8 @@ class CostDomain:
         """Human channel only (web UI / terminal). Not exposed through MCP."""
         p = self.ws.pdir(name)
         b = self.ws._read(p, "budget.json") or (_ for _ in ()).throw(ServiceError("run estimate first"))
+        if not b.get("plan_hash") or not b.get("pricing_hash"):
+            b.update(self.fingerprints(p))
         b["approved"] = True
         project_mod.save_json(p, "budget.json", b)
         return b

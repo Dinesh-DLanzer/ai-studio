@@ -210,7 +210,9 @@ class RoleRunner:
 
     def vision(self, prompt, images, opts=None, project_dir=None, allow=None, *, grant=None):
         grant = self._grant("vision", project_dir, grant)
-        r = self.run("vision", lambda a, m: a.vision(m, prompt, images, opts), project_dir, allow)
+        approved_price = grant.price if grant else None
+        price_of = (lambda e: self.pricing.text_cost(e.get("card"), None)) if grant else None
+        r = self.run("vision", lambda a, m: a.vision(m, prompt, images, opts), project_dir, allow, approved_price, price_of)
         out = r["result"]
         cost, src = self._cost("vision", out, r["card"])
         return {**out, "cost": cost, "cost_source": src, "provider": r["provider"], "attempts": r["attempts"]}
