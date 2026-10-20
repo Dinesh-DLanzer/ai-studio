@@ -23,3 +23,12 @@ _import_tmp/
 /ai_settings.json
 # screenshots of a running app can show real projects: keep them local
 /screenshots/
+# plans directory
+/plans/
+# graphify analysis artifacts
+/graphify-out/
+# per-machine Claude Code permissions, agent scratch files, and third-party skills installed with `npx skills` (listed in skills-lock.json)
+.claude/settings.local.json
+/__agent__/
+.claude/skills/*
+!.claude/skills/ai-studio/

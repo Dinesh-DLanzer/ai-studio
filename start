@@ -1,0 +1,29 @@
+#!/usr/bin/env sh
+# Unified cross-platform entrypoint for macOS, Linux, and Windows (Git Bash/WSL/MSYS).
+# Windows CMD / PowerShell can also directly run `start.bat` or `python scripts/start.py`.
+BASE_DIR="$(cd "$(dirname "$0")" && pwd)"
+cd "$BASE_DIR"
+
+# Check if Python is available
+if command -v python3 >/dev/null 2>&1; then
+    exec python3 scripts/start.py "$@"
+elif command -v python >/dev/null 2>&1; then
+    exec python scripts/start.py "$@"
+elif command -v py >/dev/null 2>&1; then
+    exec py scripts/start.py "$@"
+fi
+
+# If Python is not installed yet, try running bootstrap / install
+if [ -f "scripts/setup.sh" ]; then
+    echo "Python not detected. Running automated bootstrap setup..."
+    sh scripts/setup.sh
+    if command -v python3 >/dev/null 2>&1; then
+        exec python3 scripts/start.py "$@"
+    elif command -v python >/dev/null 2>&1; then
+        exec python scripts/start.py "$@"
+    fi
+fi
+
+echo "Error: Python 3.10+ is required to start AI Studio."
+echo "Please install Python 3.10+ or run with administrator/sudo rights."
+exit 1

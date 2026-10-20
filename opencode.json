@@ -1,0 +1,14 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "model": "opencode/mimo-v2.6-flash-free",
+  "mcp": {
+    "ai-studio": {
+      "type": "local",
+      "command": ["./.venv/bin/python", "-m", "aistudio.mcp_server"],
+      "enabled": true,
+      "environment": {
+        "AISTUDIO_HOME": "."
+      }
+    }
+  }
+}

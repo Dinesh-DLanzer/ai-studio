@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "ai-studio": {
+      "command": "python3",
+      "args": ["-m", "aistudio.mcp_server"],
+      "env": {}
+    }
+  }
+}
