@@ -1,11 +1,15 @@
 """E1: project folders. A project is a folder of plain files. Standard library only.
 
 Contract (implement exactly; tests in tests/test_project.py):
-  create_project(root: Path, name: str) -> Path
+  create_project(root: Path, name: str, format: str | None = None) -> Path
       Creates root/name with subfolders clips/ and stills/ and files brief.md, Story.md, TODO.md (each a short
       non-empty text containing the project name), shots.json = {"aspect_ratio":"9:16","audio":false,"shots":[]},
       images.json = {"style":"","images":[]}.  Raises FileExistsError if the folder exists.  Rejects names that are
       empty, contain '/', '\\' or '..' with ValueError.  Returns the project path.
+      If format is provided (format id like "instagram-reel"), writes shots.json with that format's aspect_ratio
+      and audio, plus "format": id; pre-fills brief length/purpose if brief.md is written; seeds a Story.md
+      skeleton with N empty shot sections following templates/Story.md; seeds edit.json with aspect + caption
+      defaults only if the editor's default structure is easy to reuse. format=None must behave EXACTLY as today.
   load_json(pdir: Path, filename: str) -> dict        reads pdir/filename as UTF-8 JSON (Tamil must round-trip).
   save_json(pdir: Path, filename: str, data) -> None  writes UTF-8 JSON, indent=2, ensure_ascii=False.
   validate_shots(data: dict) -> list[str]
@@ -20,8 +24,11 @@ Contract (implement exactly; tests in tests/test_project.py):
 from pathlib import Path
 import json
 
+# Import here to avoid circular imports
+from aistudio.formats import get_format
 
-def create_project(root, name):
+
+def create_project(root, name, format=None):
     if not name or '/' in name or '\\' in name or '..' in name:
         raise ValueError("invalid project name")
     project_path = Path(root) / name
@@ -32,23 +39,154 @@ def create_project(root, name):
     (project_path / "clips").mkdir()
     (project_path / "stills").mkdir()
     
-    for fname, content in [
-        ("brief.md", f"# Brief for {name}\n"),
-        ("Story.md", f"# Story for {name}\n"),
-        ("TODO.md", f"# TODO for {name}\n"),
-    ]:
-        (project_path / fname).write_text(content, encoding="utf-8")
+    # Default values (blank project behavior)
+    aspect_ratio = "9:16"
+    audio = False
+    shots_count = 0
+    brief_length = ""
+    brief_purpose = ""
+    format_id = None
+    caption_defaults = None
     
+    if format is not None:
+        fmt = get_format(format)
+        format_id = fmt["id"]
+        aspect_ratio = fmt["aspect_ratio"]
+        audio = fmt["audio"]
+        shots_count = fmt["shots"]
+        brief_length = fmt["brief"]["length"]
+        brief_purpose = fmt["brief"]["purpose"]
+        caption_defaults = fmt["caption"]
+    
+    # Write brief.md with format info if provided
+    if format is not None and brief_length and brief_purpose:
+        brief_content = f"""# Brief for {name}
+- Length: {brief_length}
+- Purpose: {brief_purpose}
+"""
+    else:
+        brief_content = f"# Brief for {name}\n"
+    (project_path / "brief.md").write_text(brief_content, encoding="utf-8")
+    
+    # Write Story.md with shot skeleton if format provided
+    if format is not None and shots_count > 0:
+        story_content = _build_story_skeleton(name, shots_count, aspect_ratio)
+    else:
+        story_content = f"# Story for {name}\n"
+    (project_path / "Story.md").write_text(story_content, encoding="utf-8")
+    
+    (project_path / "TODO.md").write_text(f"# TODO for {name}\n", encoding="utf-8")
+    
+    # Write shots.json with format info
+    shots_data = {"aspect_ratio": aspect_ratio, "audio": audio, "shots": []}
+    if format_id:
+        shots_data["format"] = format_id
     (project_path / "shots.json").write_text(
-        json.dumps({"aspect_ratio": "9:16", "audio": False, "shots": []}, indent=2, ensure_ascii=False),
+        json.dumps(shots_data, indent=2, ensure_ascii=False),
         encoding="utf-8"
     )
+    
     (project_path / "images.json").write_text(
         json.dumps({"style": "", "images": []}, indent=2, ensure_ascii=False),
         encoding="utf-8"
     )
     
+    # Write edit.json with aspect + caption defaults if format provided
+    if format is not None and caption_defaults:
+        edit_data = {
+            "version": 1,
+            "aspect": aspect_ratio,
+            "fps": 24,
+            "tracks": {
+                "video": [],
+                "text": [],
+                "audio": [],
+                "elements": [],
+                "subtitles": {
+                    "cues": [],
+                    "style": "classic",
+                    "font": caption_defaults.get("font", "Poppins"),
+                    "size": caption_defaults.get("size", 46),
+                    "color": "#ffffff",
+                    "bg": caption_defaults.get("bg", "#000000AA"),
+                    "y": caption_defaults.get("y", 0.86)
+                }
+            }
+        }
+        (project_path / "edit.json").write_text(
+            json.dumps(edit_data, indent=2, ensure_ascii=False),
+            encoding="utf-8"
+        )
+    
     return project_path
+
+
+def _build_story_skeleton(name, shots_count, aspect_ratio):
+    """Build a Story.md skeleton with N empty shot sections."""
+    lines = [
+        f"# {name}: AI VIDEO STORYBOARD",
+        "",
+        "## Concept",
+        f"**Title:** {name}",
+        f"**Format:** {aspect_ratio}",
+        f"**Target Duration:** ~{shots_count * 4} seconds",
+        "**Language:**",
+        "**Characters:**",
+        "**Brand:**",
+        "**Core Flow:**",
+        "",
+        "---",
+        "",
+        "## Character Direction",
+        "### <Name>",
+        "- Role / look / age / clothes / expressions",
+        "> **Consistency rule:** same face, hairstyle, clothing and setting in every clip. Every character and place has a master image.",
+        "",
+        "---",
+        "",
+        "# SHOT-BY-SHOT STORYBOARD",
+        ""
+    ]
+    
+    for i in range(1, shots_count + 1):
+        shot_num = f"{i:02d}"
+        lines.extend([
+            f"## Shot {shot_num}",
+            f"### Purpose:",
+            "",
+            "**Visual**",
+            "",
+            "**Camera**",
+            "",
+            "**Action**",
+            "",
+            "**Voice** (who speaks: ON-CAMERA dialogue with lip-sync, or OFF-CAMERA narrator voice-over)",
+            "> ",
+            "",
+            "**English**",
+            "> ",
+            "",
+            "**On-screen text** (added in the editor, never generated)",
+            "> ",
+            "",
+            "**Image**: frame id from images.json (characters + background)",
+            "",
+            "**AI Video Prompt**",
+            "> SUBJECT / ACTION (one) / CAMERA (one move) / LIGHTING / STYLE",
+            "",
+            "---",
+            ""
+        ])
+    
+    lines.extend([
+        "# FULL VOICEOVER SCRIPT",
+        "",
+        "# AI VIDEO PRODUCTION NOTES",
+        "- One shot per clip. Do not generate the whole video in one clip.",
+        "- Claims: show results visually, no guaranteed sales/reach."
+    ])
+    
+    return "\n".join(lines)
 
 
 def load_json(pdir, filename):
