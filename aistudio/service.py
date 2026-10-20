@@ -360,8 +360,8 @@ class Workspace(SettingsMixin):
     def _review_file(self, p, target):
         return self._pipeline._review_file(p, target)
 
-    def propose(self, name, kind, target, reveal_code=False):
-        return self._pipeline.propose(name, kind, target, reveal_code=reveal_code)
+    def propose(self, name, kind, target, reveal_code=False, options=None):
+        return self._pipeline.propose(name, kind, target, reveal_code=reveal_code, options=options)
 
     def approve_human(self, name, pid):
         return self._pipeline.approve_human(name, pid)

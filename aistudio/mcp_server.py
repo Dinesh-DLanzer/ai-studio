@@ -193,7 +193,7 @@ TOOLS = {
             prompt=a.get("prompt", ""),
         ),
     ),
-    "analyze_character": ("Perform multi-angle consistency review on a character asset image.", S(name=STR, rel=STR), lambda ws, a: ws.analyze_character_image(a["name"], a["rel"])),
+    "analyze_character": ("Propose a paid multi-angle consistency review on a character asset image. Nothing is spent; a human must approve the returned review proposal before it can run.", S(name=STR, rel=STR), lambda ws, a: ws.analyze_character_image(a["name"], a["rel"])), 
     "add_todo": ("Add a task to the project TODO list.", S(name=STR, title=STR), lambda ws, a: ws.todo_add(a["name"], a["title"])),
     "toggle_todo": ("Toggle task completion status on the project TODO list.", S(name=STR, tid=STR), lambda ws, a: ws.todo_toggle(a["name"], a["tid"])),
     "remove_todo": (
@@ -209,12 +209,12 @@ TOOLS = {
         lambda ws, a: {"path": str(ws.export_project(a["name"], include_discarded=bool(a.get("include_discarded", False))))},
     ),
     "edit_still": (
-        "Inpaint, outpaint or swap background of an existing still with natural language prompting.",
+        "Propose an inpaint, outpaint or background-swap edit of an existing still. Nothing is spent; a human must approve the returned proposal before execution.",
         S(name=STR, still_id=STR, prompt=STR, edit_mode={"type": "string", "enum": ["inpaint_insertion", "inpaint_removal", "outpaint", "bgswap"], "optional": True}, mask_mode={"type": "string", "optional": True}),
         lambda ws, a: ws.edit_still(a["name"], a["still_id"], a["prompt"], edit_mode=a.get("edit_mode", "inpaint_insertion"), mask_mode=a.get("mask_mode", "MASK_MODE_BACKGROUND")),
     ),
     "extend_clip": (
-        "Extend an existing video clip forward with a continuation prompt using Veo 3.1.",
+        "Propose extending an existing video clip forward with a continuation prompt. Nothing is spent; a human must approve the returned proposal before execution.",
         S(name=STR, clip_id=STR, prompt=STR, seconds={"type": "integer", "optional": True}),
         lambda ws, a: ws.extend_clip(a["name"], a["clip_id"], a["prompt"], seconds=int(a.get("seconds", 5))),
     ),

@@ -349,7 +349,7 @@ class StoryboardDomain:
         return items
 
     def edit_still(self, name, still_id, prompt, edit_mode="inpaint_insertion", mask_mode="MASK_MODE_BACKGROUND"):
-        """Inpaint, outpaint or swap background of an existing still."""
+        """Create an image-edit proposal; execution happens only after human approval."""
         p = self.ws.pdir(name)
         src_file = None
         for ext in self.IMG_EXT:
@@ -363,21 +363,13 @@ class StoryboardDomain:
                 src_file = cand
         if not src_file:
             raise ServiceError(f"still not found: {still_id}")
-
-        res = self.ws.runner().image_edit(str(src_file), prompt, edit_mode=edit_mode, mask_mode=mask_mode, project_dir=p)
-        raw_bytes = res["bytes"]
-        ts = int(time.time())
-        out_name = f"stills/{src_file.stem}_edit_{ts}.png"
-        self.ws.add_file(name, out_name, raw_bytes, replace=True)
-        return {
-            "file": out_name,
-            "cost": res.get("cost", 0),
-            "provider": res.get("provider", ""),
-            "model": res.get("model", "")
-        }
+        return self.ws.propose(name, "image_edit", still_id, options={
+            "source": src_file.resolve().relative_to(p.resolve()).as_posix(), "prompt": str(prompt),
+            "edit_mode": edit_mode, "mask_mode": mask_mode,
+        })
 
     def extend_clip(self, name, clip_id, prompt, seconds=5):
-        """Extend an existing Veo video clip forward with a continuation prompt."""
+        """Create a clip-extension proposal; execution happens only after human approval."""
         p = self.ws.pdir(name)
         src_file = None
         for ext in (".mp4", ".mov", ".webm"):
@@ -391,21 +383,7 @@ class StoryboardDomain:
                 src_file = cand
         if not src_file:
             raise ServiceError(f"clip not found: {clip_id}")
-
-        res = self.ws.runner().video_extend(str(src_file), prompt, seconds=seconds, project_dir=p)
-        if res.get("status") == "pending":
-            return {"status": "pending", "job": res.get("job"), "cost": 0}
-        if res.get("status") == "failed":
-            raise ServiceError(f"clip extension failed: {res.get('error', 'unknown error')}")
-
-        ts = int(time.time())
-        out_name = f"clips/{src_file.stem}_extended_{ts}.mp4"
-        (p / out_name).write_bytes(res["bytes"])
-        return {
-            "status": "done",
-            "file": out_name,
-            "cost": res.get("cost", 0),
-            "provider": res.get("provider", ""),
-            "model": res.get("model", "")
-        }
+        return self.ws.propose(name, "clip_extend", clip_id, options={
+            "source": src_file.resolve().relative_to(p.resolve()).as_posix(), "prompt": str(prompt), "seconds": int(seconds),
+        })
 

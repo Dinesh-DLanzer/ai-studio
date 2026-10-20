@@ -49,12 +49,22 @@ class FakeAdapter(Adapter):
             raise Rejected("at most %d reference images" % legacy.MAX_REFS)
         return {"bytes": legacy.PNG_1X1, "usage": {}, "cost": legacy.FakeImageProvider.price, "model": model}
 
+    def image_edit(self, model, image_path, prompt, edit_mode="inpaint_insertion", mask_mode="MASK_MODE_BACKGROUND", opts=None):
+        _maybe_fail(model)
+        return {"bytes": legacy.PNG_1X1, "usage": {}, "cost": legacy.FakeImageProvider.price, "model": model}
+
     def video_submit(self, model, req):
         _maybe_fail(model)
         if int(req["seconds"]) not in legacy.ALLOWED_SECONDS:
             raise Rejected("seconds must be one of %s" % (legacy.ALLOWED_SECONDS,))
         tag = "fail" if "FAIL_ME" in req.get("prompt", "") else "ok"
         return {"job_id": f"fake-{tag}-{int(req['seconds'])}-{'A' if req.get('audio') else 'S'}", "model": model}
+
+    def video_extend(self, model, video_path, prompt, seconds=5, aspect_ratio="16:9", resolution="720p", opts=None):
+        _maybe_fail(model)
+        if int(seconds) not in legacy.ALLOWED_SECONDS:
+            raise Rejected("seconds must be one of %s" % (legacy.ALLOWED_SECONDS,))
+        return {"job_id": f"fake-ext-{int(seconds)}-S", "model": model}
 
     def video_poll(self, job):
         _, tag, secs, a = job["job_id"].split("-")

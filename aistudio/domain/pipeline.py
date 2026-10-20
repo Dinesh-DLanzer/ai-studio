@@ -5,6 +5,7 @@ from pathlib import Path
 from aistudio import activity, approvals, chat as chat_mod, costlog, editor as editor_mod, frames as frames_mod, gates, palette as palette_mod, project as project_mod, roles as roles_mod
 from aistudio.domain.common import REVIEW_PRICE, ServiceError, _ident, _sha
 from aistudio.providers import base as pbase
+from aistudio import character_check
 from aistudio.vision import clip_checklist, image_checklist
 
 
@@ -159,8 +160,20 @@ class PipelineDomain:
             raise ServiceError(f"first frame missing: {ff}")
         return shot, doc, res, audio, ff
 
-    def _payload_and_price(self, name, kind, target):
+    @staticmethod
+    def _source_file(p, rel, label="source"):
+        try:
+            f = (p / str(rel)).resolve()
+            f.relative_to(p.resolve())
+        except (OSError, ValueError):
+            raise ServiceError(f"{label} must stay inside the project") from None
+        if not f.is_file():
+            raise ServiceError(f"{label} not found: {rel}")
+        return f
+
+    def _payload_and_price(self, name, kind, target, options=None):
         p = self.ws.pdir(name)
+        options = options or {}
         _ident(target, "target")
         if kind == "image":
             spec, refs, prompt = self.ws._image_spec(p, target)
@@ -179,11 +192,34 @@ class PipelineDomain:
                 raise ServiceError(f"No price for {e['model']} at {res} ({shot['seconds']}s). Set it in Settings > Model Configuration.")
             return {"prompt": shot["prompt"], "seconds": shot["seconds"], "audio": audio, "resolution": res, "provider": e["provider"]["id"],
                     "aspect_ratio": doc.get("aspect_ratio", "9:16"), "first_frame": ff, "first_frame_sha": _sha(p / ff) if ff else ""}, e["model"], price
+        if kind == "image_edit":
+            source = self._source_file(p, options.get("source"), "still")
+            e = self.ws._primary("image", p)
+            price = self.ws.pricing().image_price(e["card"])
+            if price is None:
+                raise ServiceError(f"No price set for {e['model']}. Set it in Settings > Model Configuration before editing stills.")
+            return {"source": source.relative_to(p.resolve()).as_posix(), "source_sha": _sha(source), "prompt": str(options.get("prompt", "")),
+                    "edit_mode": options.get("edit_mode", "inpaint_insertion"), "mask_mode": options.get("mask_mode", "MASK_MODE_BACKGROUND"),
+                    "provider": e["provider"]["id"]}, e["model"], price
+        if kind == "clip_extend":
+            source = self._source_file(p, options.get("source"), "clip")
+            seconds = int(options.get("seconds", 5))
+            e = self.ws._primary("video", p)
+            req = {"seconds": seconds, "resolution": "720p", "audio": False}
+            price = self.ws.runner().video_price(e, req)
+            if price is None:
+                raise ServiceError(f"No price for {e['model']} at 720p ({seconds}s). Set it in Settings > Model Configuration.")
+            return {"source": source.relative_to(p.resolve()).as_posix(), "source_sha": _sha(source), "prompt": str(options.get("prompt", "")),
+                    "seconds": seconds, "aspect_ratio": "16:9", "resolution": "720p", "provider": e["provider"]["id"]}, e["model"], price
         if kind == "review":
+            if options.get("review_type") == "character":
+                f = self._source_file(p, options.get("file"), "character image")
+                e = self.ws._primary("vision", p)
+                return {"review_type": "character", "target": target, "file": f.relative_to(p.resolve()).as_posix(), "file_sha": _sha(f), "provider": e["provider"]["id"]}, e["model"], REVIEW_PRICE
             f = self._review_file(p, target)
             e = self.ws._primary("vision", p)
             return {"target": target, "file": f.relative_to(p).as_posix(), "file_sha": _sha(f), "provider": e["provider"]["id"]}, e["model"], REVIEW_PRICE
-        raise ServiceError("kind must be image, clip or review")
+        raise ServiceError("kind must be image, clip, image_edit, clip_extend or review")
 
     def _review_file(self, p, target):
         rows = [r for r in costlog.read_log(p) if r["shot"] == target and r["stage"] == "final" and r["result"] == "completed"]
@@ -194,13 +230,14 @@ class PipelineDomain:
                 return p / "stills" / f"{target}{ext}"
         raise ServiceError(f"nothing to review for {target}")
 
-    def propose(self, name, kind, target, reveal_code=False):
+    def propose(self, name, kind, target, reveal_code=False, options=None):
         """Nothing is spent. reveal_code=True ONLY from the human-facing channel (web UI / terminal)."""
         p = self.ws.pdir(name)
-        payload, model, price = self._payload_and_price(name, kind, target)
+        payload, model, price = self._payload_and_price(name, kind, target, options)
         summary = {"prompt": payload.get("prompt", "")[:400], "seconds": payload.get("seconds"), "audio": payload.get("audio"),
-                   "first_frame": payload.get("first_frame"), "refs": [r["path"] for r in payload.get("refs", [])], "file": payload.get("file"), "provider": payload.get("provider")}
-        return approvals.propose(p, kind, target, model, price, payload, reveal_code=reveal_code, summary=summary)
+                   "first_frame": payload.get("first_frame"), "refs": [r["path"] for r in payload.get("refs", [])], "file": payload.get("file") or payload.get("source"),
+                   "review_type": payload.get("review_type"), "provider": payload.get("provider")}
+        return approvals.propose(p, kind, target, model, price, payload, reveal_code=reveal_code, summary=summary, options=options)
 
     def approve_human(self, name, pid):
         """HUMAN channel only (web UI / terminal). Never expose through MCP."""
@@ -234,13 +271,13 @@ class PipelineDomain:
         except approvals.ApprovalError as e:
             raise ServiceError(str(e)) from None
         kind, target = prop["kind"], prop["shot"]
-        payload, model, price = self._payload_and_price(name, kind, target)
+        payload, model, price = self._payload_and_price(name, kind, target, prop.get("options"))
         b = self.ws._read(p, "budget.json", {})
         rows = costlog.read_log(p)
-        stage = {"clip": "final", "image": "image", "review": "vision"}[kind]
+        stage = {"clip": "final", "image": "image", "image_edit": "image_edit", "clip_extend": "clip_extend", "review": "vision"}[kind]
         attempts = len([r for r in rows if r["shot"] == target and r["stage"] == stage])
         try:
-            gates.check_run(b, costlog.spent(p), price, attempts if kind == "clip" else 0, override=override)
+            gates.check_run(b, costlog.spent(p), price, attempts if kind in ("clip", "image_edit", "clip_extend") else 0, override=override)
             request_digest = approvals.request_hash(kind, target, model, price, payload)
             grant = approvals.consume(p, pid, request_digest)
         except (gates.GateError, approvals.ApprovalError) as e:
@@ -263,6 +300,32 @@ class PipelineDomain:
             raise
 
     def _execute_kind(self, p, kind, target, payload, model, price, attempt, log, grant):
+        if kind == "image_edit":
+            source = p / payload["source"]
+            res = self.ws.runner().image_edit(source.as_posix(), payload["prompt"], edit_mode=payload["edit_mode"], mask_mode=payload["mask_mode"], project_dir=p, grant=grant)
+            out = p / "stills" / f"{source.stem}_edit_{int(datetime.now().timestamp())}.png"
+            out.parent.mkdir(parents=True, exist_ok=True)
+            out.write_bytes(res["bytes"])
+            row = {**log, "model": res["model"], "provider": res["provider"], "cost_source": res["cost_source"], "timestamp": datetime.now().isoformat(timespec="seconds"), "resolution": "", "cost": res["cost"], "result": "completed"}
+            costlog.append_log(p, row)
+            return {"kind": kind, "file": out.relative_to(p).as_posix(), "cost": res["cost"]}
+        if kind == "clip_extend":
+            source = p / payload["source"]
+            res = self.ws.runner().video_extend(source.as_posix(), payload["prompt"], seconds=payload["seconds"], aspect_ratio=payload["aspect_ratio"], resolution=payload["resolution"], project_dir=p, grant=grant)
+            job = res.get("job") or {}
+            row = {**log, "model": res.get("model") or model, "provider": res.get("provider") or log["provider"], "cost_source": res.get("cost_source", ""),
+                   "timestamp": datetime.now().isoformat(timespec="seconds"), "resolution": payload["resolution"], "seconds": str(payload["seconds"]), "job_id": job.get("job_id", "")}
+            if res.get("status") == "pending":
+                costlog.append_log(p, {**row, "cost": price, "result": "pending", "cost_source": "estimated"})
+                return {"kind": kind, "pending": True, "job_id": row["job_id"]}
+            if res.get("status") == "failed":
+                costlog.append_log(p, {**row, "cost": res.get("cost", 0), "result": "failed"})
+                return {"kind": kind, "error": res.get("error", "extension failed"), "cost": res.get("cost", 0)}
+            out = p / "clips" / f"{source.stem}_extended_{int(datetime.now().timestamp())}.mp4"
+            out.parent.mkdir(parents=True, exist_ok=True)
+            out.write_bytes(res["bytes"])
+            costlog.append_log(p, {**row, "cost": res["cost"], "result": "completed"})
+            return {"kind": kind, "file": out.relative_to(p).as_posix(), "cost": res["cost"]}
         if kind == "image":
             _, refs, _ = self.ws._image_spec(p, target)
             out = p / payload["out"]
@@ -302,6 +365,13 @@ class PipelineDomain:
         f = p / payload["file"]
         outdir = p / "checks" / f.stem
         outdir.mkdir(parents=True, exist_ok=True)
+        if payload.get("review_type") == "character":
+            raw = self.ws.runner().review(character_check.build_character_check_prompt(), [str(f)], {"max_tokens": 1500, "temperature": 0.2}, project_dir=p, grant=grant)
+            review = {**character_check.parse_character_analysis(raw["text"]), "file": payload["file"], "model": raw["model"], "cost": raw["cost"], "when": datetime.now().isoformat(timespec="seconds")}
+            log = {**log, "model": raw["model"], "provider": raw["provider"], "cost_source": raw["cost_source"]}
+            project_mod.save_json(outdir, "character_review.json", review)
+            costlog.append_log(p, {**log, "timestamp": datetime.now().isoformat(timespec="seconds"), "resolution": "", "cost": raw["cost"], "result": "completed"})
+            return {"kind": "review", "review_type": "character", "review": review}
         if f.suffix == ".mp4":
             doc = self.ws._read(p, "shots.json", {"shots": []})
             shot = next((s for s in doc["shots"] if s["id"] == target), {"id": target})

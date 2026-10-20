@@ -5,6 +5,26 @@ from aistudio import character_check
 from aistudio.domain.common import ServiceError
 
 
+def resolve_character_image(p, rel):
+    """Resolve a character image without allowing a path outside the project."""
+    raw = str(rel or "")
+    try:
+        direct = (p / raw).resolve()
+        direct.relative_to(p.resolve())
+    except (OSError, ValueError):
+        raise ServiceError("image path must stay inside the project") from None
+    candidates = [direct]
+    candidates += [(p / "stills" / f"{raw}{ext}").resolve() for ext in (".png", ".jpg", ".jpeg")]
+    for candidate in candidates:
+        try:
+            candidate.relative_to(p.resolve())
+        except ValueError:
+            continue
+        if candidate.is_file():
+            return candidate
+    raise ServiceError(f"image not found: {rel}")
+
+
 class CharacterDomain:
     def __init__(self, ws):
         self.ws = ws
@@ -45,27 +65,9 @@ class CharacterDomain:
         return spec, refs, prompt
 
     def analyze_character_image(self, name, rel):
-        """Analyze an uploaded image to verify whether it's a full character sheet (multi-angle + expressions)
-        or a single face/character reference image."""
+        """Create a character-review proposal; analysis runs only after human approval."""
         p = self.ws.pdir(name)
-        img_path = p / rel
-        if not img_path.exists():
-            for ext in (".png", ".jpg", ".jpeg"):
-                cand = p / "stills" / f"{rel}{ext}"
-                if cand.exists():
-                    img_path = cand
-                    break
-        if not img_path.exists():
-            raise ServiceError(f"image not found: {rel}")
-
-        prompt = character_check.build_character_check_prompt()
-        try:
-            raw = self.ws.runner().vision(prompt, [str(img_path)], {"max_tokens": 1500, "temperature": 0.2}, project_dir=p)
-            result = character_check.parse_character_analysis(raw.get("text", ""))
-            result["model"] = raw.get("model", "")
-            result["cost"] = raw.get("cost", 0)
-        except Exception:
-            # Fallback if vision model unavailable or fails
-            result = dict(character_check._FALLBACK_ANALYSIS)
-        result["file"] = rel
-        return result
+        img_path = resolve_character_image(p, rel)
+        return self.ws.propose(name, "review", str(rel), options={
+            "review_type": "character", "file": img_path.relative_to(p.resolve()).as_posix(),
+        })
