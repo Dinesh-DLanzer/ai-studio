@@ -48,18 +48,20 @@ def create_project(root, name, format=None, brand_kit=None, kit_root=None):
         kit_source = Path(kit_root) if kit_root is not None else Path(root).parent / "brand_kits"
         brand_kits.get_kit(kit_source, brand_kit)          # ValueError: unknown kit
 
+    created = False
     try:
+        project_path.mkdir(parents=True)
+        created = True
+        (project_path / "clips").mkdir()
+        (project_path / "stills").mkdir()
         return _write_project(project_path, name, fmt, brand_kit, kit_source)
     except Exception:
-        shutil.rmtree(project_path, ignore_errors=True)    # never leave half a project behind
+        if created:
+            shutil.rmtree(project_path, ignore_errors=True)    # never leave half a project behind
         raise
 
 
 def _write_project(project_path, name, fmt, brand_kit, kit_source):
-    project_path.mkdir(parents=True)
-    (project_path / "clips").mkdir()
-    (project_path / "stills").mkdir()
-
     # Default values (blank project behavior)
     aspect_ratio = "9:16"
     audio = False

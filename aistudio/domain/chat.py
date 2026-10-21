@@ -64,7 +64,7 @@ class ChatDomain:
         st = self.ws._production(p)
         nxt = self.ws.production_progress(p.name)["next"]
         fmt, kit = self._format_and_kit(p)
-        answered = chat_mod.format_answers(fmt)      # what the format (and its kit) already answered
+        answered = chat_mod.format_answers(fmt)      # the length and the purpose the format already fixed
         return {
             "brief_so_far": {k: st["brief"].get(k, "") for k in chat_mod.FIELD_KEYS if st["brief"].get(k)},
             "still_missing_required": [k for k in st["progress"]["missing"] if k not in answered],
