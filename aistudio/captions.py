@@ -43,12 +43,12 @@ DEFAULT_MAX_LINES = 2
 
 # punctuation that never carries meaning of its own: stripped before two tokens are compared
 _PUNCT = " \t\n.,!?;:\"'“”‘’()[]{}<>…«»-–—_/\\|"
-# the marks that close a sentence (Tamil: ௹ the full stop, ஃ the pulli, । the danda)
+# the marks that close a sentence (Tamil: ௹ the full stop, । the danda)
 _SENTENCE_END = ".!?。！？।॥௹۔؟…"
 # the marks that close a clause (a good place to break a caption)
 _CLAUSE_END = ",;:،؛、-–—()[]{}\"“”‘’"
 
-_ZWJ = "‍"
+_ZWJ = "‍"                       # the zero width joiner (a letter and the next one are one cluster)
 
 
 # ---------------------------------------------------------------- text helpers

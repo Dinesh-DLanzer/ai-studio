@@ -124,6 +124,16 @@ class TestEditorOptions(unittest.TestCase):
         fc = self.fc(self.plan(options={"duck": {"voice": "vo_s01", "music": "m1"}}))
         self.assertIn("sidechaincompress", fc)
 
+    def test_two_music_tracks_under_one_voice(self):
+        doc = editor.clean({"tracks": {
+            "video": [{"id": "s01", "src": "clips/a.mp4", "in": 0, "out": 4, "volume": 1, "transition": {"type": "cut", "dur": 0.5}}],
+            "audio": [{"id": "vo_s01", "src": "audio/vo_s01.mp3", "start": 0, "in": 0, "out": 4, "volume": 1, "name": "voiceover s01"},
+                      {"id": "m1", "src": "audio/bg.mp3", "start": 0, "in": 0, "out": 4, "volume": 0.4, "name": "music"},
+                      {"id": "m2", "src": "audio/bg2.mp3", "start": 0, "in": 0, "out": 4, "volume": 0.3, "name": "music 2"}]}})
+        fc = self.fc(self.plan(options={"duck": True}, doc=doc))
+        self.assertIn("asplit=3", fc)                        # the voice, the mix copy and two sidechains
+        self.assertEqual(fc.count("sidechaincompress"), 2)
+
     def test_the_denoise_cleans_the_voice(self):
         fc = self.fc(self.plan(options={"duck": True, "denoise": True}))
         self.assertIn("afftdn=nr=12:nf=-25", fc)
@@ -203,10 +213,13 @@ class TestRealFfmpeg(unittest.TestCase):
                         str(p / "audio" / "vo.mp3")], check=True)
         subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-f", "lavfi", "-i", "sine=frequency=220:duration=2",
                         str(p / "audio" / "bg.mp3")], check=True)
+        subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-f", "lavfi", "-i", "sine=frequency=330:duration=2",
+                        str(p / "audio" / "bg2.mp3")], check=True)
         doc = editor.clean({"tracks": {
             "video": [{"id": "s01", "src": "clips/a.mp4", "in": 0, "out": 2, "volume": 1, "transition": {"type": "cut", "dur": 0.5}}],
             "audio": [{"id": "vo_s01", "src": "audio/vo.mp3", "start": 0, "in": 0, "out": 2, "volume": 1, "name": "voiceover s01"},
-                      {"id": "m1", "src": "audio/bg.mp3", "start": 0, "in": 0, "out": 2, "volume": 0.4, "name": "music"}]}})
+                      {"id": "m1", "src": "audio/bg.mp3", "start": 0, "in": 0, "out": 2, "volume": 0.4, "name": "music"},
+                      {"id": "m2", "src": "audio/bg2.mp3", "start": 0, "in": 0, "out": 2, "volume": 0.3, "name": "music 2"}]}})
         out = editor.render(p, doc, options={"duck": True, "denoise": True})
         self.assertTrue((p / out).is_file())
         self.assertGreater((p / out).stat().st_size, 1000)

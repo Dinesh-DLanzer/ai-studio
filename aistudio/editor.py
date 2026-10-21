@@ -761,20 +761,24 @@ def plan(edit, files, probes, text_pngs, sub_pngs=None, options=None):
         labels[a["id"]] = (k, f"[m{k}]")
     mixed = list(mus)
     if pairs:                                   # the music ducks under the voice (the sidechain)
-        split = set()
+        counts = {}
+        for v, m in pairs:
+            counts[v] = counts.get(v, 0) + 1
+        for v, n in counts.items():             # one copy of the voice for the mix, one per music track
+            outs = "".join(f"[vsc{labels[v][0]}c{i}]" for i in range(n))
+            parts.append(f"{labels[v][1]}asplit={n + 1}{outs}[vmix{labels[v][0]}]")
+        used = {}
         mixed = []
         for a in audio:
             k, lab = labels[a["id"]]
             if a["id"] in voice_of:
                 v = voice_of[a["id"]]
-                vk = labels[v][0]
-                if vk not in split:
-                    parts.append(f"{labels[v][1]}asplit=2[vsc{vk}][vmix{vk}]")
-                    split.add(vk)
-                parts.append(mixing.duck_filter(f"[vsc{vk}]", lab, out=f"[dk{k}]"))
+                i = used.get(v, 0)
+                used[v] = i + 1
+                parts.append(mixing.duck_filter(f"[vsc{labels[v][0]}c{i}]", lab, out=f"[dk{k}]"))
                 mixed.append(f"[dk{k}]")
             elif a["id"] in voice_ids:
-                mixed.append(f"[vmix{labels[a['id']][0]}]")
+                mixed.append(f"[vmix{k}]")
             else:
                 mixed.append(lab)
     if options.get("denoise") and not voice_ids:
