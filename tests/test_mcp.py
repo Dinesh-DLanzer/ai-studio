@@ -4,6 +4,7 @@ import json, os, subprocess, sys, tempfile, unittest
 from pathlib import Path
 from unittest.mock import patch
 from aistudio import mcp_server as M
+from aistudio import tool_registry as R
 from aistudio.service import Workspace
 from tests.test_story_convert import MD
 
@@ -222,6 +223,41 @@ class TestMcp(unittest.TestCase):
         self.assertEqual(len(out), 3)
         self.assertEqual(out[1]["result"]["isError"], False)
         self.assertEqual(out[2]["error"]["code"], -32700)
+
+
+class TestMcpFormats(unittest.TestCase):
+    """The MCP surface of plan 19: list_formats is free and read-only, create_project stays human-only."""
+
+    def setUp(self):
+        HERM.all_test(self)
+        self.ws = Workspace(tempfile.mkdtemp())
+
+    def test_list_formats_is_a_free_read_tool(self):
+        out, err = call(self.ws, "list_formats")
+        self.assertFalse(err)
+        ids = [f["id"] for f in out["formats"]]
+        self.assertIn("instagram-reel", ids)
+        self.assertIn("product-ad", ids)
+        self.assertEqual(R.cost_class("list_formats"), "free")
+        self.assertIn("list_formats", R.crew_tools())
+        self.assertFalse(R.META["list_formats"]["writes"])
+        self.assertIn("list_formats", {t["name"] for t in M.tool_list()})
+
+    def test_create_project_stays_human_only_and_takes_a_format(self):
+        self.assertEqual(R.cost_class("create_project"), "human_only")
+        self.assertNotIn("create_project", R.crew_tools())
+        out, err = call(self.ws, "create_project", name="reel", format="instagram-reel")
+        self.assertFalse(err)
+        self.assertEqual(out["name"], "reel")
+        shots = json.loads((self.ws.pdir("reel") / "shots.json").read_text(encoding="utf-8"))
+        self.assertEqual(shots["format"], "instagram-reel")
+        self.assertEqual(shots["aspect_ratio"], "9:16")
+
+    def test_create_project_with_an_unknown_format_is_refused(self):
+        out, err = call(self.ws, "create_project", name="bad", format="nope")
+        self.assertTrue(err)
+        self.assertIn("not found", out["error"])
+        self.assertFalse((self.ws.root / "projects" / "bad").exists())
 
 
 if __name__ == "__main__":

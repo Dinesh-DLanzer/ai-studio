@@ -38,6 +38,7 @@ When running in Claude Code, the following tools are available via MCP (`.mcp.js
 | `get_edit` | Get timeline video edit structure (edit.json) and tool status | free |
 | `unregistered_stills` | Find unregistered images in the stills folder that can be added to project assets | free |
 | `list_recipes` | Read-only: one-click recipes with their inputs, and whether every step can run with configured models | free |
+| `list_formats` | Read-only: the project formats (aspect ratio, shots, seconds per shot, safe area, caption, CTA, suggested models) | free |
 
 ### Free write tools
 | Tool | Purpose | Cost Class |
@@ -87,7 +88,7 @@ When running in Claude Code, the following tools are available via MCP (`.mcp.js
 | Tool | Purpose | Cost Class |
 |------|---------|------------|
 | `list_projects` | List projects with spend and budget status | human_only |
-| `create_project` | Create a project folder from the guided templates | human_only |
+| `create_project` | Create a project folder from the guided templates, optionally from a format and a brand kit | human_only |
 | `delete_project` | Move a project to _trash (restorable). Requires human confirmation matching project name | human_only |
 | `list_trash` | List deleted projects available in trash for restoration | human_only |
 | `restore_trash` | Restore a project from trash | human_only |
@@ -111,6 +112,13 @@ python3 -m aistudio.cli overview <project> --json
 
 # Convert Story.md to storyboard shots
 python3 -m aistudio.cli convert-story <project> --json
+
+# List the project formats and the workspace brand kits
+python3 -m aistudio.cli formats
+python3 -m aistudio.cli brand-kits list
+
+# Create a project from a format and a brand kit
+python3 -m aistudio.cli create <name> --format instagram-reel --brand-kit acme
 
 # Run targeted unit tests (never run full suite unnecessarily)
 ./.venv/bin/python -m unittest tests/test_service.py tests/test_mcp.py

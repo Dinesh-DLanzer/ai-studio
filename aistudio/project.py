@@ -1,7 +1,7 @@
 """E1: project folders. A project is a folder of plain files. Standard library only.
 
 Contract (implement exactly; tests in tests/test_project.py):
-  create_project(root: Path, name: str, format: str | None = None) -> Path
+  create_project(root: Path, name: str, format: str | None = None, brand_kit: str | None = None, kit_root: Path | None = None) -> Path
       Creates root/name with subfolders clips/ and stills/ and files brief.md, Story.md, TODO.md (each a short
       non-empty text containing the project name), shots.json = {"aspect_ratio":"9:16","audio":false,"shots":[]},
       images.json = {"style":"","images":[]}.  Raises FileExistsError if the folder exists.  Rejects names that are
@@ -10,6 +10,9 @@ Contract (implement exactly; tests in tests/test_project.py):
       and audio, plus "format": id; pre-fills brief length/purpose if brief.md is written; seeds a Story.md
       skeleton with N empty shot sections following templates/Story.md; seeds edit.json with aspect + caption
       defaults only if the editor's default structure is easy to reuse. format=None must behave EXACTLY as today.
+      If brand_kit is provided (kit id like "acme"), the kit is COPIED into the project (brand/kit.json) and the
+      project records "brand_kit": id.  The format and the kit are validated BEFORE the folder is made: an
+      unknown id raises ValueError and leaves no project behind.
   load_json(pdir: Path, filename: str) -> dict        reads pdir/filename as UTF-8 JSON (Tamil must round-trip).
   save_json(pdir: Path, filename: str, data) -> None  writes UTF-8 JSON, indent=2, ensure_ascii=False.
   validate_shots(data: dict) -> list[str]
@@ -23,6 +26,7 @@ Contract (implement exactly; tests in tests/test_project.py):
 """
 from pathlib import Path
 import json
+import shutil
 
 # Import here to avoid circular imports
 from aistudio.formats import get_format
@@ -34,11 +38,30 @@ def create_project(root, name, format=None, brand_kit=None, kit_root=None):
     project_path = Path(root) / name
     if project_path.exists():
         raise FileExistsError(f"Project {name} already exists")
-    
-    project_path.mkdir(parents=True)
-    (project_path / "clips").mkdir()
-    (project_path / "stills").mkdir()
-    
+
+    # The format and the brand kit are checked BEFORE the folder exists: an unknown id must not leave a
+    # half-made project behind (a 400 from the API, an empty folder in the workspace).
+    fmt = get_format(format) if format is not None else None
+    kit_source = None
+    if brand_kit is not None:
+        from aistudio import brand_kits
+        kit_source = Path(kit_root) if kit_root is not None else Path(root).parent / "brand_kits"
+        brand_kits.get_kit(kit_source, brand_kit)          # ValueError: unknown kit
+
+    created = False
+    try:
+        project_path.mkdir(parents=True)
+        created = True
+        (project_path / "clips").mkdir()
+        (project_path / "stills").mkdir()
+        return _write_project(project_path, name, fmt, brand_kit, kit_source)
+    except Exception:
+        if created:
+            shutil.rmtree(project_path, ignore_errors=True)    # never leave half a project behind
+        raise
+
+
+def _write_project(project_path, name, fmt, brand_kit, kit_source):
     # Default values (blank project behavior)
     aspect_ratio = "9:16"
     audio = False
@@ -47,9 +70,8 @@ def create_project(root, name, format=None, brand_kit=None, kit_root=None):
     brief_purpose = ""
     format_id = None
     caption_defaults = None
-    
-    if format is not None:
-        fmt = get_format(format)
+
+    if fmt is not None:
         format_id = fmt["id"]
         aspect_ratio = fmt["aspect_ratio"]
         audio = fmt["audio"]
@@ -57,9 +79,9 @@ def create_project(root, name, format=None, brand_kit=None, kit_root=None):
         brief_length = fmt["brief"]["length"]
         brief_purpose = fmt["brief"]["purpose"]
         caption_defaults = fmt["caption"]
-    
+
     # Write brief.md with format info if provided
-    if format is not None and brief_length and brief_purpose:
+    if fmt is not None and brief_length and brief_purpose:
         brief_content = f"""# Brief for {name}
 - Length: {brief_length}
 - Purpose: {brief_purpose}
@@ -69,7 +91,7 @@ def create_project(root, name, format=None, brand_kit=None, kit_root=None):
     (project_path / "brief.md").write_text(brief_content, encoding="utf-8")
     
     # Write Story.md with shot skeleton if format provided
-    if format is not None and shots_count > 0:
+    if fmt is not None and shots_count > 0:
         story_content = _build_story_skeleton(name, shots_count, aspect_ratio)
     else:
         story_content = f"# Story for {name}\n"
@@ -92,7 +114,7 @@ def create_project(root, name, format=None, brand_kit=None, kit_root=None):
     )
     
     # Write edit.json with aspect + caption defaults if format provided
-    if format is not None and caption_defaults:
+    if fmt is not None and caption_defaults:
         edit_data = {
             "version": 1,
             "aspect": aspect_ratio,
@@ -120,8 +142,7 @@ def create_project(root, name, format=None, brand_kit=None, kit_root=None):
     
     if brand_kit is not None:
         from aistudio.brand_kits import attach_kit
-        source_root = Path(kit_root) if kit_root is not None else Path(root).parent / "brand_kits"
-        attach_kit(project_path, source_root, brand_kit)
+        attach_kit(project_path, kit_source, brand_kit)
     return project_path
 
 

@@ -44,7 +44,10 @@ def _no_job(jid):
 
 TOOLS = {
     "list_projects": ("List projects with spend and budget status.", S(), lambda ws, a: ws.list_projects()),
-    "create_project": ("Create a project folder from the guided templates.", S(name=STR), lambda ws, a: {"name": ws.create_project(a["name"])}),
+    "create_project": ("Create a project folder from the guided templates, optionally from a format (aspect ratio, shot skeleton, brief) and a workspace brand kit (copied into the project). Human-only: a crew agent can never create a project.",
+                       S(name=STR, format={"type": "string", "optional": True, "description": "Format id, e.g. 'instagram-reel' (see list_formats)"},
+                         brand_kit={"type": "string", "optional": True, "description": "Brand kit id, e.g. 'acme'"}),
+                       lambda ws, a: {"name": ws.create_project(a["name"], format=a.get("format") or None, brand_kit=a.get("brand_kit") or None)}),
     "delete_project": (
         "Move a project to _trash (restorable). Discard or delete a project folder. Requires human confirmation parameter matching project name or 'yes'.",
         S(name=STR, confirm=STR),
@@ -115,6 +118,8 @@ TOOLS = {
                              S(name=STR, character=STR, views={"type": "array", "optional": True}), lambda ws, a: ws.identity_sheet(a["name"], a["character"], a.get("views"), actor="mcp")),
     "list_recipes": ("Read-only: one-click recipes (product ad, product showcase, photo to clip, ...) with their inputs, and whether every step can run with the configured models (reasons when not). Free.",
                      S(name={"type": "string", "optional": True}), lambda ws, a: {"recipes": __import__("aistudio.recipes", fromlist=["list_recipes"]).list_recipes(ws, a.get("name") or None)}),
+    "list_formats": ("Read-only: the project formats (aspect ratio, shots, seconds per shot, safe area, caption, CTA, loudness, brief, suggested models) as static catalog data. Free.",
+                     S(), lambda ws, a: {"formats": __import__("aistudio.formats", fromlist=["load_formats"]).load_formats()}),
     "plan_recipe": ("Plan a recipe in a project: validates the inputs, prices every paid step and creates ONE awaiting-approval batch (nothing is approved, run or spent). A human must approve it with approve_batch at the exact total. Real-person recipes need a recorded consent.",
                     S(name=STR, recipe=STR, inputs={"type": "object"}),
                     lambda ws, a: __import__("aistudio.recipes", fromlist=["plan"]).plan(ws, a["name"], a["recipe"], a.get("inputs") or {}, actor="mcp")),
@@ -209,7 +214,7 @@ TOOLS = {
 
 
 FREE_READ = ("get_project", "read_doc", "get_brief", "get_model_setup", "get_todos", "get_verification", "get_proposal", "get_spec", "get_costs",
-             "list_providers", "production_progress", "get_batch", "get_edit", "unregistered_stills", "list_recipes")
+             "list_providers", "production_progress", "get_batch", "get_edit", "unregistered_stills", "list_recipes", "list_formats")
 FREE_WRITE = ("write_doc", "update_brief", "rename_asset", "rename_shot", "convert_story", "update_shots", "update_images", "update_edit",
               "import_stills", "add_todo", "toggle_todo", "remove_todo", "export_edit", "export_project")
 PAID = ("propose", "analyze_character", "edit_still", "extend_clip", "clip_tool", "audio_tool", "generate_all_plan", "build_identity_sheet")

@@ -10,6 +10,7 @@ from aistudio import (
     chat as chat_mod,
     costlog,
     discard as discard_mod,
+    formats as formats_mod,
     imageconv,
     importzip as importzip_mod,
     languages as lang_mod,
@@ -52,9 +53,24 @@ class ProjectDomain:
             t = REPO / "templates" / fn
             if t.exists() and not (format and fn != "TODO.md"):
                 (p / fn).write_text(t.read_text(encoding="utf-8").replace("{{PROJECT}}", name), encoding="utf-8")
+        if format:
+            self._seed_format_brief(p, format)
         if test_pipeline:
             project_mod.save_json(p, "sandbox.json", {"test_pipeline": True})
         return p.name
+
+    def _seed_format_brief(self, p, format_id):
+        """A format answers the length and the purpose: write them in the brief so nobody asks again."""
+        try:
+            fmt = formats_mod.get_format(format_id)
+        except ValueError:
+            return
+        answers = chat_mod.format_answers(fmt)
+        if not answers:
+            return
+        values = {**self.ws._read(p, "brief.json", {}), **answers}
+        project_mod.save_json(p, "brief.json", load_doc("brief", values))
+        (p / "brief.md").write_text(chat_mod.render_brief_md(p.name, values) + MD_MARK, encoding="utf-8")
 
     def set_favorite(self, name, on):
         """Mark / unmark a project as a favorite."""

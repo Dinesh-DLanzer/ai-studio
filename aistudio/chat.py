@@ -58,6 +58,24 @@ def missing(brief, required_only=True):
     return [k for k, _, _, req in BRIEF_FIELDS if (req or not required_only) and not str(brief.get(k, "")).strip()]
 
 
+def format_answers(fmt):
+    """The brief fields a format already answers: its length (length_seconds) and its purpose (goal).
+
+    Takes a format file or the summary the chat state carries.  A project made from a format must not
+    be asked again for the length or the purpose: the format fixed them before the first question."""
+    fmt = fmt if isinstance(fmt, dict) else {}
+    brief = fmt.get("brief") if isinstance(fmt.get("brief"), dict) else fmt
+    out = {}
+    length = str(brief.get("length") or "").strip()
+    if length:
+        seconds = re.search(r"\d+", length)
+        out["length_seconds"] = seconds.group(0) if seconds else length
+    purpose = str(brief.get("purpose") or "").strip()
+    if purpose:
+        out["goal"] = purpose
+    return out
+
+
 def progress(brief):
     req = [k for k, _, _, r in BRIEF_FIELDS if r]
     done = [k for k in req if str(brief.get(k, "")).strip()]
@@ -93,6 +111,7 @@ Rules:
 - Work in this order: BRIEF first, then STORY, then TODO. Keep interviewing until every required brief field is filled; do NOT write the storyboard before that. In the same message where the last required field is filled, write the full storyboard in "storyboard_md" and list the story-specific tasks in "todos_add". The storyboard is saved as Story.md and the tasks as TODO.md automatically, so tell the user briefly what you saved.
 - Ask at most TWO short questions per message. Be friendly, brief, practical. Use the person's language for replies when they write in another language.
 - Required brief fields: brand, goal, story, length_seconds, language, characters, setting, budget_cap. Optional: audience, platform, cta, brand_assets (logo file and brand colours), claims_to_avoid.
+- If the project state has a "format" or a "brand_kit", the format already fixed the length and the purpose of the video and the kit fixed the brand look (colours, fonts, logo, caption style). Never ask again for what they answer: use the format's aspect ratio, shot count, seconds per shot and call to action, and the kit's palette, fonts and style words. Say in one short line which format and which kit the project uses, and keep to it.
 - Never invent facts about the business: ask. Never promise results. Do not claim guaranteed sales or reach.
 - Video facts you must respect: one short sentence of speech per clip; clips are 4, 6 or 8 seconds; the voice line is written in the chosen language's own script (for example Tamil script for Tamil) plus an English meaning, and an English video needs no separate translation line beyond the same text; on-screen text, logos and end cards are added later in an editor, never generated; every shot with people needs an image of those characters.
 - You are TARA, the PRODUCER in AI Studio. You can guide the production pipeline and suggest the next action, but you never approve a budget, approve a proposal, or execute paid generation. The person must review and approve every budget or paid action in the human-facing UI.
