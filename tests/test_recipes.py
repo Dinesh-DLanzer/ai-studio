@@ -62,3 +62,25 @@ class LoaderTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestReviewHardening(unittest.TestCase):
+    def test_a_face_task_without_consent_required_is_rejected_by_the_loader(self):
+        from aistudio import recipes
+        base = {"id": "bad-swap", "label": "Bad", "category": "x", "inputs": [{"key": "photo", "type": "image", "required": True}],
+                "steps": [{"id": "swap", "task": "face_swap", "source": {"input": "photo"}}], "consent": "none"}
+        with self.assertRaises(Exception) as cm:
+            recipes.validate(base)
+        self.assertIn("consent", str(cm.exception).lower())
+
+    def test_step_output_paths_from_batch_json_must_stay_inside_the_project(self):
+        import tempfile
+        from pathlib import Path
+        from aistudio import recipes
+        p = Path(tempfile.mkdtemp())
+        (p / "stills").mkdir()
+        (p / "stills" / "a.png").write_bytes(b"x")
+        self.assertEqual(recipes._contained(p, "stills/a.png"), "stills/a.png")
+        for bad in ("../x.png", "/etc/passwd", "stills/a.txt"):
+            with self.assertRaises(recipes.RecipeError):
+                recipes._contained(p, bad)

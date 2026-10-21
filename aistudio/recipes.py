@@ -31,6 +31,8 @@ EDIT_MODES = ("inpaint_insertion", "inpaint_removal", "outpaint", "bgswap")
 PAID = {"text_to_image": ("image", "image", "image"), "image_edit": ("image", "image_edit", "image_edit"),
         "image_to_video": ("video", "video_submit", "clip"), "video_extend": ("video", "video_extend", "clip_extend")}
 FREE = ("assemble", "reframe")
+# tasks that put a real person's face, body or voice into new media: a recipe using one MUST declare consent "required" (a future data file cannot omit it)
+CONSENT_TASKS = {"face_swap", "headshot", "outfit_swap", "lipsync", "character_swap", "motion_transfer", "voice_clone", "tts_clone"}
 TEXT_FIELDS = ("prompt", "text")          # may reference text/choice/number inputs only
 REF_FIELDS = ("source", "clips", "audio")  # whole-value references to a file input or an earlier step
 
@@ -110,6 +112,8 @@ def validate(doc, rid=None):
             _bad(rid, f"step id {sid!r} must be unique snake_case and not an input key")
         if not isinstance(task, str) or not task:
             _bad(rid, f"step {sid}: task is required")
+        if task in CONSENT_TASKS and doc.get("consent", "none") != "required":
+            _bad(rid, f"step {sid}: task {task} involves a real person and needs consent: required")
         if s.get("when") is not None and s["when"] not in inputs:
             _bad(rid, f"step {sid}: when must name an input")
         for field in TEXT_FIELDS + ("direction",):       # prompts see text-like inputs only: never a file, never another step's output
@@ -321,9 +325,11 @@ def _live(ws, p, item):
     if item["kind"] == "clip":
         shot = next((s for s in ws._read(p, "shots.json", {"shots": []})["shots"] if s["id"] == item["target"]), None)
         live["shot"] = shot and {k: shot.get(k) for k in ("prompt", "seconds", "direction", "audio", "resolution", "model")}
+        live["aspect_ratio"] = ws._read(p, "shots.json", {}).get("aspect_ratio")
     if item["kind"] == "image":
         img = next((i for i in ws._read(p, "images.json", {"images": []})["images"] if i["id"] == item["target"]), None)
         live["image"] = img and {k: img.get(k) for k in ("prompt", "aspect_ratio", "refs", "out", "model")}
+        live["style"] = ws._read(p, "images.json", {}).get("style", "")
     return live
 
 
@@ -458,7 +464,16 @@ def _source_file(ws, name, p, rd, batch):
     done = next((i for i in batch["items"] if i["recipe"]["step"] == src["step"] and i["status"] == "done" and i.get("file")), None)
     if not done:
         raise RecipeError(f"step {src['step']} produced no file to use")
-    return done["file"]
+    return _contained(p, done["file"])
+
+
+def _contained(p, rel):
+    """A path read from batch json is data: it must be project-relative, stay inside the project and be a media file."""
+    root = Path(p).resolve()
+    f = (root / str(rel)).resolve()
+    if Path(str(rel)).is_absolute() or not f.is_relative_to(root) or f.suffix.lower() not in (".png", ".jpg", ".jpeg", ".webp", ".mp4", ".mov", ".webm", ".wav", ".mp3", ".m4a"):
+        raise RecipeError(f"refusing step output path {rel!r}: it must be a media file inside the project")
+    return str(rel)
 
 
 def _step_file(batch, step):
@@ -530,6 +545,7 @@ def _assemble(ws, name, p, item, batch):
         rel = _step_file(batch, step)
         if not rel:
             raise RecipeError(f"step {step} produced no clip")
+        rel = _contained(p, rel)
         info = editor.probe(Path(p) / rel)
         secs = float((info or {}).get("duration") or next((i["recipe"].get("seconds") for i in batch["items"] if i["recipe"]["step"] == step), None) or 4)
         video.append({"id": f"c{n}", "src": rel, "in": 0, "out": round(max(secs, 0.3), 2), "volume": 1, "transition": {"type": "cut", "dur": 0.5}})
@@ -537,6 +553,7 @@ def _assemble(ws, name, p, item, batch):
     audio = []
     for n, a in enumerate(rd["audio"], 1):
         rel = a["path"] if "input" in a else _step_file(batch, a["step"])
+        rel = _contained(p, rel) if rel else rel
         if rel:
             audio.append({"id": f"a{n}", "src": rel, "in": 0, "out": round(t, 2), "start": 0, "volume": 0.6})
     text = []
