@@ -298,3 +298,41 @@ def require_verified_shas(pdir, shas):
         if (sha not in known or sha in unverified) and sha not in bound and sha not in cleared:
             raise ServiceError("an unverified media file needs human clearance (sha-bound consent or not-a-real-person clearance) for these exact file bytes")
     require_shas(pdir, shas)
+
+
+def _asset_ids_for(rel):
+    """Asset ids a media file can stand for: stills/<id>.png, <id>.v2.png, <id>_edit_a1.png, <id>_extended.mp4, <id>_final_a1.mp4."""
+    stem = Path(str(rel)).stem
+    return {stem, stem.split(".v")[0], stem.split("_edit_a")[0], stem.split("_extended")[0], stem.split("_final_a")[0]}
+
+
+def require_inputs(pdir, files):
+    """Consent check over the files that will REALLY be sent to a provider (the resolved payload list, never a re-derived one).
+    1. A file a human marked as a real person needs bound consent (require_shas).
+    2. An asset a human marked whose file bytes have since changed (re-encoded, cropped, replaced, round-tripped through an editor) is refused until a
+       human marks, clears or records consent for the new bytes: consent never silently carries over to different bytes.
+    3. An asset flagged real_person in images.json needs consent for its subject, found by the file's path or id (covers auto-attached and path refs)."""
+    p = Path(pdir)
+    paths = [Path(f) for f in files if f]
+    records = read(p)
+    marked_assets = {x.get("asset") for x in records if x.get("kind") == "real_person_sha" and x.get("asset")}
+    known = {x.get("sha") for x in records if x.get("sha") and x.get("kind") in ("real_person", "voice", "real_person_sha", "not_a_real_person_sha")}
+    known |= real_person_shas(p)
+    shas, ids = [], set()
+    images = [i for i in (json.loads((p / "images.json").read_text(encoding="utf-8")).get("images", []) if (p / "images.json").is_file() else []) if isinstance(i, dict)]
+    for f in paths:
+        if not f.is_file():
+            continue
+        sha = _sha(f)
+        shas.append(sha)
+        try:
+            rel = f.resolve().relative_to(p.resolve()).as_posix()
+        except ValueError:
+            rel = f.name
+        here = _asset_ids_for(rel) | {i.get("id") for i in images if i.get("out") == rel}
+        ids |= here
+        if sha not in known and here & marked_assets:
+            raise ServiceError(f"{rel} was marked as a real person but its file bytes have changed since. A human must mark it again, clear it, or record consent "
+                               "for the new file before it can be used.")
+    require_shas(p, shas)
+    require_assets(p, {"images": images}, sorted(i for i in ids if i))

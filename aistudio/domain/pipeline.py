@@ -346,7 +346,22 @@ class PipelineDomain:
                    "chars": chars, "files": [{"role": k, "path": rel, "sha": digest} for k, rel, digest, _f in files]}
         return payload, entry["model"], price
 
+    @staticmethod
+    def _payload_files(p, payload):
+        """Every project file a payload will send to the provider."""
+        rels = [r.get("path") for r in payload.get("refs", []) if isinstance(r, dict)]
+        rels += [payload.get(k) for k in ("source", "file", "first_frame", "end_frame")]
+        rels += [r.get("path") for r in payload.get("files", []) if isinstance(r, dict)]
+        rels.append((payload.get("shot_spec") or {}).get("first_frame"))
+        return [Path(p) / str(r) for r in rels if r]
+
     def _payload_and_price(self, name, kind, target, options=None):
+        payload, model, price = self._payload_and_price_raw(name, kind, target, options)
+        if isinstance(payload, dict):       # consent is judged on the resolved payload, not on a second derivation of its refs
+            consent_mod.require_inputs(self.ws.pdir(name), self._payload_files(self.ws.pdir(name), payload))
+        return payload, model, price
+
+    def _payload_and_price_raw(self, name, kind, target, options=None):
         p = self.ws.pdir(name)
         options = options or {}
         _ident(target, "target")

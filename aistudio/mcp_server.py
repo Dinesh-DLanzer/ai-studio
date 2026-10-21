@@ -122,13 +122,23 @@ def _approve_budget_mcp(ws, a, session=None):
             "message": f"Budget approved (${est:.2f}). Generation proposals can now be created and executed."}
 
 
+def _destination(prop):
+    """What the human must see before approving: which provider gets which files (a real person's photo may be among them)."""
+    sm = prop.get("summary") or {}
+    files = [f for f in [sm.get("first_frame"), sm.get("end_frame"), sm.get("file"), *(sm.get("refs") or []), *(sm.get("files") or [])] if f]
+    where = f" via provider '{sm['provider']}'" if sm.get("provider") else ""
+    sent = f" Files sent to the provider: {', '.join(dict.fromkeys(files))}." if files else " No project files are sent."
+    return where, sent
+
+
 def _approve_proposal_mcp(ws, a, session=None):
     name, pid = a["name"], a["id"]
     prop = ws.proposal_status(name, pid)
     if a.get("confirm") is not None:
         raise ServiceError("confirm=true is not human approval; use MCP elicitation or the one-time fallback code")
     request_digest = prop.get("hash")
-    message = f"Approve {prop['kind']} '{prop['shot']}' with {prop.get('model', '')} for ${prop['price']:.3f}?"
+    where, sent = _destination(prop)
+    message = f"Approve {prop['kind']} '{prop['shot']}' with {prop.get('model', '')}{where} for ${prop['price']:.3f}?{sent}"
     if a.get("code"):
         if not a.get("code_id"):
             raise ServiceError("code_id is required with an approval code")

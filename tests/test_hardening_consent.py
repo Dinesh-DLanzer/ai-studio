@@ -390,3 +390,68 @@ class TestHardeningConsent(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestConsentOnResolvedInputs(TestHardeningConsent):
+    """Real-person bypasses found by the pre-test audit: consent is judged on the files really sent, and never carries over to changed bytes."""
+
+    @staticmethod
+    def png(color, size=(8, 8)):
+        from io import BytesIO
+        from PIL import Image
+        b = BytesIO()
+        Image.new("RGB", size, color).save(b, format="PNG")
+        return b.getvalue()
+
+    def _marked_actor(self):
+        (self.p / "stills" / "actor.png").write_bytes(self.png("red"))
+        self.ws.consent_mark("demo", "actor")                       # a human marks it; NO consent is recorded
+
+    def _images(self, *extra):
+        base = [{"id": "actor", "kind": "other", "out": "stills/actor.png", "prompt": "p", "refs": []}]
+        project_mod.save_json(self.p, "images.json", {"style": "", "images": base + list(extra)})
+
+    def test_image_ref_given_as_a_raw_path_is_checked(self):
+        self._marked_actor()
+        self._images({"id": "bg1", "kind": "background", "out": "stills/bg1.png", "prompt": "p", "refs": ["stills/actor.png"]})
+        with self.assertRaisesRegex(ServiceError, "consent"):
+            self.ws.propose("demo", "image", "bg1")
+
+    def test_auto_attached_other_asset_is_checked(self):
+        (self.p / "stills" / "actor_photo.png").write_bytes(self.png("red"))
+        self.ws.consent_mark("demo", "actor_photo")                 # the marked photo is attached to the character "actor" automatically
+        project_mod.save_json(self.p, "images.json", {"style": "", "images": [
+            {"id": "actor_photo", "kind": "other", "out": "stills/actor_photo.png", "prompt": "p", "refs": []},
+            {"id": "actor", "kind": "character", "out": "stills/actor.png", "prompt": "p", "refs": []}]})
+        with self.assertRaisesRegex(ServiceError, "consent"):
+            self.ws.propose("demo", "image", "actor")
+
+    def test_every_file_in_a_resolved_payload_is_checked_whatever_its_ref_form(self):
+        from aistudio.domain.pipeline import PipelineDomain
+        self._marked_actor()
+        self._images()
+        for payload in ({"refs": [{"path": "stills/actor.png", "sha": "x"}]}, {"first_frame": "stills/actor.png"}, {"end_frame": "stills/actor.png"},
+                        {"source": "stills/actor.png"}, {"files": [{"path": "stills/actor.png", "sha": "x"}]}, {"shot_spec": {"first_frame": "stills/actor.png"}}):
+            with self.assertRaisesRegex(ServiceError, "consent"):
+                consent.require_inputs(self.p, PipelineDomain._payload_files(self.p, payload))
+        self.ws.consent_record("demo", "Actor", "ok", asset_id="actor")
+        consent.require_inputs(self.p, PipelineDomain._payload_files(self.p, {"refs": [{"path": "stills/actor.png"}]}))
+
+    def test_consent_does_not_carry_over_to_changed_bytes(self):
+        self._marked_actor()
+        self.ws.consent_record("demo", "Actor", "ok", asset_id="actor")
+        self._images({"id": "bg", "kind": "background", "out": "stills/bg.png", "prompt": "p", "refs": ["actor"]})
+        project_mod.save_json(self.p, "shots.json", {"aspect_ratio": "16:9", "shots": [
+            {"id": "s01", "prompt": "scene", "seconds": 3, "refs": [{"id": "actor"}], "first_frame": "stills/actor.png"}]})
+        self.ws.propose("demo", "clip", "s01")                       # consented bytes: allowed
+        (self.p / "stills" / "actor.png").write_bytes(self.png("red", (7, 7)))      # re-encoded / cropped / replaced
+        for kind, target, opts in (("clip", "s01", None), ("image", "bg", None),
+                                   ("image_edit", "actor", {"source": "stills/actor.png", "prompt": "x"}),
+                                   ("clip_extend", "actor", {"source": "stills/actor.png", "prompt": "x"})):
+            with self.assertRaisesRegex(ServiceError, "changed|consent|clearance"):
+                self.ws.propose("demo", kind, target, options=opts)
+        new_sha = hashlib.sha256((self.p / "stills" / "actor.png").read_bytes()).hexdigest()
+        self.ws.consent_mark("demo", "actor")                        # a human marks the new bytes and records consent again
+        self.ws.consent_record("demo", "Actor", "ok again", asset_id="actor")
+        self.ws.propose("demo", "clip", "s01")
+        self.assertTrue(new_sha)

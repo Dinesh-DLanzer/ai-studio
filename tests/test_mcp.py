@@ -53,6 +53,9 @@ class TestMcp(unittest.TestCase):
         out, err = call(self.ws, "approve_proposal", session=session, name="demo", id=prop["id"])
         self.assertFalse(err)
         self.assertTrue(out.get("approved"))
+        shown = requests[-1][1]["message"]            # the approver sees the price AND where the request goes (privacy)
+        self.assertIn("via provider", shown)
+        self.assertRegex(shown, r"Files sent to the provider|No project files are sent")
 
         # An agent-supplied boolean is never approval.
         prop2, _ = call(self.ws, "propose", name="demo", kind="image", target="s01")
