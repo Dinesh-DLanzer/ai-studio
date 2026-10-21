@@ -15,6 +15,11 @@ class TestProject(unittest.TestCase):
         self.assertEqual(json.loads((p / "shots.json").read_text()), {"schema_version": 1, "aspect_ratio": "9:16", "audio": False, "shots": []})
         self.assertEqual(json.loads((p / "images.json").read_text()), {"schema_version": 1, "style": "", "images": []})
 
+    def test_create_without_brand_kit_remains_blank(self):
+        p = P.create_project(self.root, "blank", brand_kit=None)
+        self.assertEqual(json.loads((p / "shots.json").read_text()), {"schema_version": 1, "aspect_ratio": "9:16", "audio": False, "shots": []})
+        self.assertFalse((p / "brand").exists())
+
     def test_create_errors(self):
         P.create_project(self.root, "demo")
         with self.assertRaises(FileExistsError):
