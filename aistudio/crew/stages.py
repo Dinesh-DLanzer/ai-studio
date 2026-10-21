@@ -22,17 +22,23 @@ STAGES = {
         ("writer", "Write Story.md for this project from the brief: shared style, characters, backgrounds and a numbered shot list."),
         ("director", "Convert Story.md into shots.json and set durations, pacing and a model per shot using get_spec.")]},
     "cast_and_design": {"label": "Cast and design", "checkpoint": True, "paid": ({"character", "background"}, False), "steps": [
-        ("image-artist", "Tune the prompts of the character and background images that are not made yet, then propose each one once.")]},
+        ("image-artist", "Tune prompts for character and background images that are not made yet, then propose each one once."),
+        ("casting-art-director", "Review character identities and references. Propose missing identity-sheet views only when a master image already exists.")]},
     "create_scenes": {"label": "Create scenes", "checkpoint": True, "paid": ({"frame"}, False), "steps": [
-        ("scene-designer", "Design a scene frame for every shot (prompts, references, first and end frames) and propose each frame image once.")]},
+        ("scene-designer", "Design a scene frame for every shot (prompts, references, first and end frames) and propose each frame image once."),
+        ("cinematographer", "Read shot and spec details, then set camera direction and end_frame using the camera presets. Preserve every other shot field.")]},
     "generate_images": {"label": "Generate images", "checkpoint": False, "paid": ({"character", "background", "frame"}, False), "steps": [
         ("image-artist", "Propose every image that is not made yet and has no open proposal, once each.")]},
     "generate_clips": {"label": "Generate clips", "checkpoint": True, "paid": (set(), True), "steps": [
         ("video-director", "Tighten the clip prompt of every shot without a clip and propose each clip once.")]},
+    "sound": {"label": "Sound", "checkpoint": False, "paid": (set(), False), "steps": [
+        ("sound-designer", "Write the voice, captions, music and effects plan. Propose audio work only when the brief requires it.")]},
     "assemble_edit": {"label": "Assemble edit", "checkpoint": False, "paid": None, "steps": [
         ("editor", "Assemble edit.json from the clips that exist, in shot order, with captions from the voice lines. Do not export.")]},
     "qa": {"label": "QA", "checkpoint": False, "paid": None, "steps": [
         ("qa", "Check the whole project and report what the human should fix first.")]},
+    "deliver": {"label": "Deliver", "checkpoint": False, "paid": None, "steps": [
+        ("delivery", "Check readiness and draft publish metadata in Story.md. Do not export, upload or publish.")]},
 }
 MAKE_VIDEO = list(STAGES)          # dependency order
 DECISIONS = ("approve_continue", "edit_continue", "stop")
@@ -79,6 +85,13 @@ def prereqs(ws, project, stage):
         miss.append("generate the character and background images first (approve their batch)")
     if stage == "generate_clips" and unmade:
         miss.append("generate all the images first, the clips need the scene frames")
+    if stage in ("sound", "deliver") and any(not s["clip"] for s in st["shots"]):
+        miss.append("generate a clip for every shot first")
+    if stage == "deliver":
+        edit = ws.edit_get(project).get("edit") or {}
+        clips = (edit.get("tracks") or {}).get("video") or []
+        if not clips:
+            miss.append("assemble the edit first")
     if stage == "assemble_edit" and any(not s["clip"] for s in st["shots"]):
         miss.append("generate a clip for every shot first")
     return miss
@@ -250,4 +263,3 @@ def continue_run(ws, project, rid, decision, note="", llm=None, progress=None):
         _save(ws, project, rec)
     _advance(ws, project, rec, llm, progress)
     return rec
-

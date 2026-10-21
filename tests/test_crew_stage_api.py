@@ -118,7 +118,8 @@ class StageApiTests(unittest.TestCase):
 
     def test_agents_list_and_safe_overrides(self):
         got = self.c.get("/api/crew/agents", headers=self.S).json()
-        self.assertEqual({a["id"] for a in got["agents"]}, {"producer", "writer", "director", "scene-designer", "image-artist", "video-director", "editor", "qa"})
+        self.assertEqual({a["id"] for a in got["agents"]}, {"producer", "writer", "director", "scene-designer", "image-artist", "video-director", "editor", "qa",
+                                                              "cinematographer", "casting-art-director", "sound-designer", "delivery"})
         self.assertEqual(got["hard_limits"], agents.HARD)
         tools = next(a for a in got["agents"] if a["id"] == "writer")["tools"]
         put = lambda body, aid="writer": self.c.put(f"/api/crew/agents/{aid}", json=body, headers=self.S)

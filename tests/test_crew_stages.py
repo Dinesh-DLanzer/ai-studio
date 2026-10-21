@@ -88,6 +88,38 @@ class GoldenAgentTests(Base):
         self.assertEqual((rec["status"], rec["steps"][1]["status"]), ("done", "proposed"))
         self.assertEqual(costlog.read_log(self.p), [])
 
+    def test_cinematographer_sets_direction_and_end_frame(self):
+        shots = json.loads((self.p / "shots.json").read_text())
+        shots["shots"][0]["direction"] = {"movement": "dolly-in", "speed": "slow"}
+        shots["shots"][0]["end_frame"] = "s01_end"
+        rec = self.agent_run("cinematographer", [act("update_shots", name="demo", doc=shots), DONE])
+        self.assertEqual(rec["status"], "done", rec["error"])
+        actual = json.loads((self.p / "shots.json").read_text())["shots"][0]
+        self.assertEqual((actual["direction"]["movement"], actual["end_frame"]), ("dolly-in", "s01_end"))
+
+    def test_casting_proposes_identity_sheet_batch(self):
+        self.approve_budget()
+        self.make("meena")
+        rec = self.agent_run("casting-art-director", [act("build_identity_sheet", name="demo", character="meena", views=["front", "profile"]), DONE])
+        self.assertEqual(rec["status"], "done", rec["error"])
+        self.assertEqual(rec["steps"][0]["status"], "proposed")
+        self.assertEqual(rec["batch"]["status"], "awaiting_approval")
+        self.assertEqual(costlog.read_log(self.p), [])
+
+    def test_sound_designer_writes_audio_plan_and_proposes_audio_task(self):
+        self.approve_budget()
+        rec = self.agent_run("sound-designer", [act("write_doc", name="demo", doc="Story.md", text="# Story\n\nAudio plan: warm instrumental bed, no voice clone.\n"),
+                                                 act("audio_tool", name="demo", task="music", target="project", options={"prompt": "warm instrumental bed", "seconds": 30}), DONE])
+        self.assertEqual(rec["status"], "done", rec["error"])
+        self.assertEqual(rec["steps"][1]["status"], "proposed")
+        self.assertIn("warm instrumental", (self.p / "Story.md").read_text())
+        self.assertEqual(costlog.read_log(self.p), [])
+
+    def test_delivery_writes_metadata_draft_without_export_tools(self):
+        rec = self.agent_run("delivery", [act("write_doc", name="demo", doc="Story.md", text="# Story\n\nPublish metadata draft: Tea with Meena.\n"), DONE])
+        self.assertEqual(rec["status"], "done", rec["error"])
+        self.assertIn("Publish metadata draft", (self.p / "Story.md").read_text())
+
     def test_editor_writes_valid_edit(self):
         doc = self.ws.edit_get("demo")["edit"]
         rec = self.agent_run("editor", [act("get_edit", name="demo"), act("update_edit", name="demo", doc=doc), DONE])
@@ -114,6 +146,23 @@ class GoldenAgentTests(Base):
 
 
 class StageTests(Base):
+    def test_new_stage_order_and_human_prerequisites(self):
+        self.assertEqual(stages.MAKE_VIDEO, ["write_storyboard", "cast_and_design", "create_scenes", "generate_images", "generate_clips", "sound", "assemble_edit", "qa", "deliver"])
+        self.assertEqual(stages.STAGES["create_scenes"]["steps"][0][0], "scene-designer")
+        self.assertEqual([x[0] for x in stages.STAGES["create_scenes"]["steps"]], ["scene-designer", "cinematographer"])
+        self.assertIn("casting-art-director", [x[0] for x in stages.STAGES["cast_and_design"]["steps"]])
+        sound_missing = stages.prereqs(self.ws, "demo", "sound")
+        self.assertIn("generate a clip for every shot first", sound_missing)
+        deliver_missing = stages.prereqs(self.ws, "demo", "deliver")
+        self.assertIn("generate a clip for every shot first", deliver_missing)
+        self.assertIn("assemble the edit first", deliver_missing)
+        self.assertTrue(any("estimate and approve the budget first" in item for item in stages.prereqs(self.ws, "demo", "sound")))
+
+    def test_sound_and_delivery_are_blocked_until_media_is_ready(self):
+        self.approve_budget()
+        for stage in ("sound", "deliver"):
+            with self.assertRaises(ServiceError):
+                stages.run_stages(self.ws, "demo", stage, llm=Script([]))
     def test_refuses_without_prerequisites(self):
         with self.assertRaisesRegex(ServiceError, "budget"):
             stages.run_stages(self.ws, "demo", "cast_and_design", llm=Script([]))
@@ -210,7 +259,7 @@ class RunPlanTests(Base):
     def test_checkpoints_default_on_and_switchable_and_cap_shown(self):
         plan = stages.build_run_plan(self.ws, "demo", "make_video", checkpoints={"create_scenes": False, "qa": True})
         cps = {s["stage"]: s["checkpoint"] for s in plan["stages"]}
-        self.assertEqual(cps, {"write_storyboard": True, "cast_and_design": True, "create_scenes": False, "generate_images": False, "generate_clips": True, "assemble_edit": False, "qa": True})
+        self.assertEqual(cps, {"write_storyboard": True, "cast_and_design": True, "create_scenes": False, "generate_images": False, "generate_clips": True, "sound": False, "assemble_edit": False, "qa": True, "deliver": False})
         self.assertEqual(plan["llm"]["ai_cap_usd"], self.ws.ai_settings()["settings"]["ai_cap_usd"])
         self.assertGreater(plan["llm"]["max_usd"], 0)
         self.assertEqual(plan["stages"][1]["prerequisites_missing"], ["estimate and approve the budget first (a human step)"])
