@@ -420,6 +420,10 @@ def create_app(root=None, token=None, rates_path=None, transport=None, static_di
         b = await request.json()
         return guard(ws.extend_clip, name, shot_id, b.get("prompt", ""), int(b.get("seconds", 5)))
 
+    @app.get("/api/projects/{name}/spec/{kind}/{target}", dependencies=[api])
+    def spec(name: str, kind: str, target: str):
+        return guard(ws.spec, name, kind, target)
+
     @app.get("/api/projects/{name}/costs", dependencies=[api])
     def costs(name: str):
         return guard(ws.costs, name)

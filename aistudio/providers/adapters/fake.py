@@ -20,6 +20,7 @@ def _maybe_fail(model):
 class FakeAdapter(Adapter):
     type = "fake"
     capabilities = frozenset({"chat", "vision", "image", "video"})
+    request_features = frozenset({"end_frame"})
 
     def __init__(self, conn=None, transport=None):
         super().__init__(conn or {"id": "fake", "type": "fake"}, transport=lambda *a, **k: {})

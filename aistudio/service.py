@@ -12,7 +12,7 @@ import os
 from pathlib import Path
 import threading
 
-from aistudio import activity, kind as kind_mod, migrate as migrate_mod, pricing as pricing_mod, roles as roles_mod, secrets as secrets_mod
+from aistudio import activity, catalog as catalog_mod, kind as kind_mod, migrate as migrate_mod, pricing as pricing_mod, roles as roles_mod, secrets as secrets_mod
 from aistudio.domain.agents import AgentDomain
 from aistudio.domain.characters import CharacterDomain
 from aistudio.domain.chat import ChatDomain
@@ -26,6 +26,7 @@ from aistudio.domain.common import (
     _ident,
     _sha,
 )
+from aistudio.domain import spec as spec_mod
 from aistudio.domain.batches import BatchDomain
 from aistudio.domain.costs import CostDomain
 from aistudio.domain.pipeline import PipelineDomain
@@ -95,6 +96,9 @@ class Workspace(SettingsMixin):
     def pricing(self):
         return pricing_mod.Pricing.load(self.rates_path, self.settings_dir)
 
+    def catalog(self):
+        return catalog_mod.Catalog(self.settings_dir, self.pricing())
+
     def runner(self):
         self.ensure_settings()
         if self._runner is None:
@@ -104,6 +108,7 @@ class Workspace(SettingsMixin):
             self._runner = roles_mod.RoleRunner(self.settings_dir, self.secrets, self.pricing(), transport=shim, fake_mode=self.forced_test, fake_for=self._fake_for,
                                                 health=self._health, trust_transport=t is not None)
         self._runner.pricing = self.pricing()
+        self._runner.catalog = self.catalog()
         return self._runner
 
     def forced_test(self):
@@ -367,6 +372,11 @@ class Workspace(SettingsMixin):
 
     def approve_human(self, name, pid):
         return self._pipeline.approve_human(name, pid)
+
+    def spec(self, name, kind, target):
+        """Read-only GenerationSpec preview: the model, snapped seconds, frames, references, price and warnings a generation would use."""
+        _ident(target, "target")
+        return spec_mod.resolve(self, self.pdir(name), kind, target, loose=True).to_dict()
 
     def proposal_status(self, name, pid):
         return self._pipeline.proposal_status(name, pid)

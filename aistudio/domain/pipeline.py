@@ -7,6 +7,7 @@ import tempfile
 
 from aistudio import activity, approvals, chat as chat_mod, costlog, editor as editor_mod, frames as frames_mod, gates, palette as palette_mod, project as project_mod, project_lock, roles as roles_mod
 from aistudio.domain.costs import BudgetStale
+from aistudio.domain import spec as spec_mod
 from aistudio.domain.common import REVIEW_PRICE, ServiceError, _ident, _sha
 from aistudio.providers import base as pbase
 from aistudio import character_check
@@ -134,19 +135,9 @@ class PipelineDomain:
         return {"items": items, "total": total, "budget": {"estimate": b.get("estimate"), "stop_loss": b.get("stop_loss"), "spent": spent}}
 
     def _item_price(self, p, kind, target):
-        """(price, model) of one image or clip as the primary model would charge now; inputs need not exist yet."""
-        if kind == "image":
-            e = self.ws._primary("image", p)
-            price = self.ws.pricing().image_price(e["card"])
-            if price is None:
-                raise ServiceError(f"No price set for {e['model']}. Set it in Settings > Model Configuration before generating images.")
-            return price, e["model"]
-        shot, doc, res, audio, _ = self._clip_spec_loose(p, target)
-        e = self.ws._primary("video", p)
-        price = self.ws.runner().video_price(e, {"seconds": shot["seconds"], "resolution": res, "audio": audio})
-        if price is None:
-            raise ServiceError(f"No price for {e['model']} at {res} ({shot['seconds']}s). Set it in Settings > Model Configuration.")
-        return price, e["model"]
+        """(price, model) of one image or clip exactly as its GenerationSpec charges now; inputs need not exist yet."""
+        sp = spec_mod.resolve(self.ws, p, "image" if kind == "image" else "clip", target, loose=True)
+        return sp.price, sp.model
 
     def _clip_spec_loose(self, p, shot_id):
         """Like _clip_spec but the first frame may not exist yet (it is made earlier in the same run)."""
@@ -180,41 +171,30 @@ class PipelineDomain:
         options = options or {}
         _ident(target, "target")
         if kind == "image":
+            sp = spec_mod.resolve(self.ws, p, "image", target)
             spec, refs, prompt = self.ws._image_spec(p, target)
-            e = self.ws._primary("image", p)
-            price = self.ws.pricing().image_price(e["card"])
-            if price is None:
-                raise ServiceError(f"No price set for {e['model']}. Set it in Settings > Model Configuration before generating images.")
-            return {"prompt": prompt, "aspect_ratio": spec.get("aspect_ratio", "9:16"), "out": spec["out"], "provider": e["provider"]["id"],
-                    "refs": [{"path": r.relative_to(p).as_posix(), "sha": _sha(r)} for r in refs]}, e["model"], price
+            return {"prompt": prompt, "aspect_ratio": sp.aspect_ratio, "out": spec["out"], "provider": sp.provider,
+                    "refs": [{"path": r.relative_to(p).as_posix(), "sha": _sha(r)} for r in refs]}, sp.model, sp.price
         if kind == "clip":
-            shot, doc, res, audio, ff = self._clip_spec(p, target)
-            e = self.ws._primary("video", p)
-            req = {"seconds": shot["seconds"], "resolution": res, "audio": audio}
-            price = self.ws.runner().video_price(e, req)
-            if price is None:
-                raise ServiceError(f"No price for {e['model']} at {res} ({shot['seconds']}s). Set it in Settings > Model Configuration.")
-            return {"prompt": shot["prompt"], "seconds": shot["seconds"], "audio": audio, "resolution": res, "provider": e["provider"]["id"],
-                    "aspect_ratio": doc.get("aspect_ratio", "9:16"), "first_frame": ff, "first_frame_sha": _sha(p / ff) if ff else ""}, e["model"], price
+            sp = spec_mod.resolve(self.ws, p, "clip", target)
+            shot = self._clip_spec(p, target)[0]
+            ff, end = sp.start_frame or None, sp.end_frame or None
+            payload = {"prompt": shot["prompt"], "seconds": sp.seconds, "audio": sp.audio, "resolution": sp.resolution, "provider": sp.provider,
+                       "aspect_ratio": sp.aspect_ratio, "first_frame": ff, "first_frame_sha": _sha(p / ff) if ff else ""}
+            if end:      # only present when asked for, so the request digest of ordinary clips is unchanged
+                payload.update(end_frame=end, end_frame_sha=_sha(p / end))
+            return payload, sp.model, sp.price
         if kind == "image_edit":
             source = self._source_file(p, options.get("source"), "still")
-            e = self.ws._primary("image", p)
-            price = self.ws.pricing().image_price(e["card"])
-            if price is None:
-                raise ServiceError(f"No price set for {e['model']}. Set it in Settings > Model Configuration before editing stills.")
+            sp = spec_mod.resolve(self.ws, p, "image_edit", target)
             return {"source": source.relative_to(p.resolve()).as_posix(), "source_sha": _sha(source), "prompt": str(options.get("prompt", "")),
                     "edit_mode": options.get("edit_mode", "inpaint_insertion"), "mask_mode": options.get("mask_mode", "MASK_MODE_BACKGROUND"),
-                    "provider": e["provider"]["id"]}, e["model"], price
+                    "provider": sp.provider}, sp.model, sp.price
         if kind == "clip_extend":
             source = self._source_file(p, options.get("source"), "clip")
-            seconds = int(options.get("seconds", 5))
-            e = self.ws._primary("video", p)
-            req = {"seconds": seconds, "resolution": "720p", "audio": False}
-            price = self.ws.runner().video_price(e, req)
-            if price is None:
-                raise ServiceError(f"No price for {e['model']} at 720p ({seconds}s). Set it in Settings > Model Configuration.")
+            sp = spec_mod.resolve(self.ws, p, "clip_extend", target, options)
             return {"source": source.relative_to(p.resolve()).as_posix(), "source_sha": _sha(source), "prompt": str(options.get("prompt", "")),
-                    "seconds": seconds, "aspect_ratio": "16:9", "resolution": "720p", "provider": e["provider"]["id"]}, e["model"], price
+                    "seconds": sp.seconds, "aspect_ratio": "16:9", "resolution": "720p", "provider": sp.provider}, sp.model, sp.price
         if kind == "review":
             if options.get("review_type") == "character":
                 f = self._source_file(p, options.get("file"), "character image")
@@ -256,6 +236,9 @@ class PipelineDomain:
         summary = {"prompt": payload.get("prompt", "")[:400], "seconds": payload.get("seconds"), "audio": payload.get("audio"),
                    "first_frame": payload.get("first_frame"), "refs": [r["path"] for r in payload.get("refs", [])], "file": payload.get("file") or payload.get("source"),
                    "review_type": payload.get("review_type"), "provider": payload.get("provider")}
+        if kind in ("image", "clip"):      # what the model can do, and what was adjusted, shown to the approver
+            sp = spec_mod.resolve(self.ws, p, kind, target)
+            summary.update(profile=sp.profile, warnings=sp.warnings, end_frame=sp.end_frame or None)
         return approvals.propose(p, kind, target, model, price, payload, reveal_code=reveal_code, summary=summary, options=options)
 
     def approve_human(self, name, pid):
@@ -342,7 +325,7 @@ class PipelineDomain:
     @staticmethod
     def _snapshot_inputs(p, dest, payload):
         files = [(r["path"], r["sha"]) for r in payload.get("refs", [])]
-        for path_key, hash_key in (("source", "source_sha"), ("file", "file_sha"), ("first_frame", "first_frame_sha")):
+        for path_key, hash_key in (("source", "source_sha"), ("file", "file_sha"), ("first_frame", "first_frame_sha"), ("end_frame", "end_frame_sha")):
             if payload.get(path_key):
                 files.append((payload[path_key], payload[hash_key]))
         shot = payload.get("shot_spec") or {}
@@ -403,7 +386,8 @@ class PipelineDomain:
             out = p / payload["out"]
             if out.exists():
                 raise ServiceError(f"{payload['out']} exists; discard it first")
-            res = self.ws.runner().image(payload["prompt"], [str(r) for r in refs], payload["aspect_ratio"], project_dir=p, grant=grant)
+            res = self.ws.runner().image(payload["prompt"], [str(r) for r in refs], payload["aspect_ratio"], project_dir=p, grant=grant,
+                                         first=self._pin("image", p, payload, model), required={"task": "text_to_image", "refs": len(refs)})
             log = {**log, "model": res["model"], "provider": res["provider"], "cost_source": res["cost_source"]}
             data = res["bytes"]
             out = out.with_suffix(".jpg" if data[:3] == b"\xff\xd8\xff" else ".png")
@@ -415,7 +399,11 @@ class PipelineDomain:
             ff = str(inputs / payload["first_frame"]) if payload["first_frame"] else None
             req = {"prompt": payload["prompt"], "seconds": payload["seconds"], "resolution": payload["resolution"], "aspect_ratio": payload["aspect_ratio"],
                    "audio": payload["audio"], "first_frame": ff}
-            res = self.ws.runner().video(req, project_dir=p, grant=grant)
+            end = payload.get("end_frame")
+            if end:
+                req["last_frame"] = str(inputs / end)
+            res = self.ws.runner().video(req, project_dir=p, grant=grant, first=self._pin("video", p, payload, model),
+                                         required={"task": "image_to_video" if ff else "text_to_video", "end_frame": bool(end), "refs": 0})
             job = res.get("job") or {}
             row = {**log, "model": res.get("model") or model, "provider": res.get("provider") or log["provider"], "cost_source": res.get("cost_source", ""),
                    "timestamp": datetime.now().isoformat(timespec="seconds"), "resolution": payload["resolution"], "seconds": str(payload["seconds"]),
@@ -432,6 +420,10 @@ class PipelineDomain:
                 out.write_bytes(res["bytes"])
             return {"kind": kind, "file": out.relative_to(p).as_posix(), "cost": res["cost"]}
         return self._do_review(p, target, payload, model, log, grant, inputs)
+
+    def _pin(self, role, p, payload, model):
+        """The approved provider/model as a chain entry, so the shot's own model runs first (the rest of the chain stays as fallback)."""
+        return self.ws.runner().entry_for(role, payload.get("provider"), model, p)
 
     def _do_review(self, p, target, payload, model, log, grant, inputs):
         f = inputs / payload["file"]

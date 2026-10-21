@@ -82,6 +82,8 @@ class BatchDomain:
             shot, doc, res, audio, ff = self.ws._clip_spec_loose(p, target)
             body = {"prompt": shot["prompt"], "seconds": shot["seconds"], "resolution": res, "audio": audio, "first_frame": ff,
                     "aspect_ratio": doc.get("aspect_ratio", "9:16")}
+            if shot.get("end_frame"):
+                body["end_frame"] = shot["end_frame"]
         return approvals.request_hash(kind, target, model, price, body)
 
     # ---- lifecycle

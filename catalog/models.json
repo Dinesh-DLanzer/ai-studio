@@ -1,0 +1,490 @@
+{
+ "_note": "Built-in capability profiles. First matching entry wins (fnmatch on provider type + model id). Only entries with verified_at were checked against official docs.",
+ "entries": [
+  {
+   "provider_type": "google",
+   "pattern": "veo-3.1*",
+   "verified_at": "2026-10-21",
+   "note": "Verified 2026-10-21 at ai.google.dev/gemini-api/docs/veo: durationSeconds 4/6/8 (8 required for 1080p/4k/references/extension), lastFrame (needs a start image), referenceImages up to 3, aspectRatio 16:9/9:16, no camera parameter (prompt wording only). 4k and negative prompt not enabled here. Veo 3.1 preview ids are listed as deprecated from 2026-10-22.",
+   "profile": {
+    "tasks": [
+     "text_to_video",
+     "image_to_video"
+    ],
+    "durations": [
+     4,
+     6,
+     8
+    ],
+    "resolutions": [
+     "720p",
+     "1080p"
+    ],
+    "aspect_ratios": [
+     "16:9",
+     "9:16"
+    ],
+    "audio": "always",
+    "frames": {
+     "start": true,
+     "end": true,
+     "keyframes": 0
+    },
+    "references": {
+     "max": 3,
+     "roles": []
+    },
+    "camera": {
+     "mode": "prompt",
+     "native": [],
+     "param": null
+    },
+    "seed": true,
+    "negative_prompt": false,
+    "tools": "json"
+   }
+  },
+  {
+   "provider_type": "google",
+   "pattern": "veo-*",
+   "verified_at": null,
+   "note": "Not verified against current provider docs; conservative defaults (camera via prompt, no end frame). Older Veo.",
+   "profile": {
+    "tasks": [
+     "text_to_video",
+     "image_to_video"
+    ],
+    "durations": [],
+    "resolutions": [],
+    "aspect_ratios": [],
+    "audio": "optional",
+    "frames": {
+     "start": true,
+     "end": false,
+     "keyframes": 0
+    },
+    "references": {
+     "max": 0,
+     "roles": []
+    },
+    "camera": {
+     "mode": "prompt",
+     "native": [],
+     "param": null
+    },
+    "seed": false,
+    "negative_prompt": false,
+    "tools": "json"
+   }
+  },
+  {
+   "provider_type": "google",
+   "pattern": "imagen-*",
+   "verified_at": null,
+   "note": "Not verified against current provider docs; conservative defaults (camera via prompt, no end frame).",
+   "profile": {
+    "tasks": [
+     "text_to_image",
+     "image_edit"
+    ],
+    "durations": [],
+    "resolutions": [],
+    "aspect_ratios": [],
+    "audio": "none",
+    "frames": {
+     "start": true,
+     "end": false,
+     "keyframes": 0
+    },
+    "references": {
+     "max": 0,
+     "roles": []
+    },
+    "camera": {
+     "mode": "prompt",
+     "native": [],
+     "param": null
+    },
+    "seed": false,
+    "negative_prompt": false,
+    "tools": "json"
+   }
+  },
+  {
+   "provider_type": "google",
+   "pattern": "gemini-*image*",
+   "verified_at": null,
+   "note": "Not verified against current provider docs; conservative defaults (camera via prompt, no end frame).",
+   "profile": {
+    "tasks": [
+     "text_to_image",
+     "image_edit"
+    ],
+    "durations": [],
+    "resolutions": [],
+    "aspect_ratios": [],
+    "audio": "none",
+    "frames": {
+     "start": true,
+     "end": false,
+     "keyframes": 0
+    },
+    "references": {
+     "max": 3,
+     "roles": []
+    },
+    "camera": {
+     "mode": "prompt",
+     "native": [],
+     "param": null
+    },
+    "seed": false,
+    "negative_prompt": false,
+    "tools": "json"
+   }
+  },
+  {
+   "provider_type": "kling",
+   "pattern": "kling-*",
+   "verified_at": null,
+   "note": "Not verified against current provider docs; conservative defaults (camera via prompt, no end frame). Kling documents image_tail and camera_control for some models; not confirmed, so not enabled.",
+   "profile": {
+    "tasks": [
+     "text_to_video",
+     "image_to_video"
+    ],
+    "durations": [],
+    "resolutions": [],
+    "aspect_ratios": [],
+    "audio": "none",
+    "frames": {
+     "start": true,
+     "end": false,
+     "keyframes": 0
+    },
+    "references": {
+     "max": 0,
+     "roles": []
+    },
+    "camera": {
+     "mode": "prompt",
+     "native": [],
+     "param": null
+    },
+    "seed": false,
+    "negative_prompt": false,
+    "tools": "json"
+   }
+  },
+  {
+   "provider_type": "runway",
+   "pattern": "gen4*",
+   "verified_at": null,
+   "note": "Not verified against current provider docs; conservative defaults (camera via prompt, no end frame). Runway promptImage first/last position not confirmed.",
+   "profile": {
+    "tasks": [
+     "image_to_video"
+    ],
+    "durations": [],
+    "resolutions": [],
+    "aspect_ratios": [],
+    "audio": "none",
+    "frames": {
+     "start": true,
+     "end": false,
+     "keyframes": 0
+    },
+    "references": {
+     "max": 0,
+     "roles": []
+    },
+    "camera": {
+     "mode": "prompt",
+     "native": [],
+     "param": null
+    },
+    "seed": false,
+    "negative_prompt": false,
+    "tools": "json"
+   }
+  },
+  {
+   "provider_type": "runway",
+   "pattern": "gen3*",
+   "verified_at": null,
+   "note": "Not verified against current provider docs; conservative defaults (camera via prompt, no end frame).",
+   "profile": {
+    "tasks": [
+     "text_to_video",
+     "image_to_video"
+    ],
+    "durations": [],
+    "resolutions": [],
+    "aspect_ratios": [],
+    "audio": "none",
+    "frames": {
+     "start": true,
+     "end": false,
+     "keyframes": 0
+    },
+    "references": {
+     "max": 0,
+     "roles": []
+    },
+    "camera": {
+     "mode": "prompt",
+     "native": [],
+     "param": null
+    },
+    "seed": false,
+    "negative_prompt": false,
+    "tools": "json"
+   }
+  },
+  {
+   "provider_type": "openrouter",
+   "pattern": "bytedance/seedance-*",
+   "verified_at": null,
+   "note": "Not verified against current provider docs; conservative defaults (camera via prompt, no end frame). Price verified in rates.json 2026-09-30.",
+   "profile": {
+    "tasks": [
+     "text_to_video",
+     "image_to_video"
+    ],
+    "durations": [],
+    "resolutions": [],
+    "aspect_ratios": [],
+    "audio": "optional",
+    "frames": {
+     "start": true,
+     "end": false,
+     "keyframes": 0
+    },
+    "references": {
+     "max": 0,
+     "roles": []
+    },
+    "camera": {
+     "mode": "prompt",
+     "native": [],
+     "param": null
+    },
+    "seed": false,
+    "negative_prompt": false,
+    "tools": "json"
+   }
+  },
+  {
+   "provider_type": "openrouter",
+   "pattern": "alibaba/wan-*",
+   "verified_at": null,
+   "note": "Not verified against current provider docs; conservative defaults (camera via prompt, no end frame). Price verified in rates.json 2026-09-30.",
+   "profile": {
+    "tasks": [
+     "text_to_video",
+     "image_to_video"
+    ],
+    "durations": [],
+    "resolutions": [],
+    "aspect_ratios": [],
+    "audio": "optional",
+    "frames": {
+     "start": true,
+     "end": false,
+     "keyframes": 0
+    },
+    "references": {
+     "max": 0,
+     "roles": []
+    },
+    "camera": {
+     "mode": "prompt",
+     "native": [],
+     "param": null
+    },
+    "seed": false,
+    "negative_prompt": false,
+    "tools": "json"
+   }
+  },
+  {
+   "provider_type": "openrouter",
+   "pattern": "google/veo-3.1*",
+   "verified_at": null,
+   "note": "Not verified against current provider docs; conservative defaults (camera via prompt, no end frame). Same model family as Google Veo 3.1, but OpenRouter's pass-through of last frame and references is unconfirmed.",
+   "profile": {
+    "tasks": [
+     "text_to_video",
+     "image_to_video"
+    ],
+    "durations": [],
+    "resolutions": [],
+    "aspect_ratios": [],
+    "audio": "optional",
+    "frames": {
+     "start": true,
+     "end": false,
+     "keyframes": 0
+    },
+    "references": {
+     "max": 0,
+     "roles": []
+    },
+    "camera": {
+     "mode": "prompt",
+     "native": [],
+     "param": null
+    },
+    "seed": false,
+    "negative_prompt": false,
+    "tools": "json"
+   }
+  },
+  {
+   "provider_type": "openrouter",
+   "pattern": "qwen/qwen-image-*",
+   "verified_at": null,
+   "note": "Not verified against current provider docs; conservative defaults (camera via prompt, no end frame).",
+   "profile": {
+    "tasks": [
+     "text_to_image"
+    ],
+    "durations": [],
+    "resolutions": [],
+    "aspect_ratios": [],
+    "audio": "none",
+    "frames": {
+     "start": true,
+     "end": false,
+     "keyframes": 0
+    },
+    "references": {
+     "max": 0,
+     "roles": []
+    },
+    "camera": {
+     "mode": "prompt",
+     "native": [],
+     "param": null
+    },
+    "seed": false,
+    "negative_prompt": false,
+    "tools": "json"
+   }
+  },
+  {
+   "provider_type": "replicate",
+   "pattern": "*",
+   "verified_at": null,
+   "note": "Fallback for Replicate models; describe_model() reads the real input schema.",
+   "profile": {
+    "tasks": [
+     "text_to_video",
+     "image_to_video"
+    ],
+    "durations": [],
+    "resolutions": [],
+    "aspect_ratios": [],
+    "audio": "none",
+    "frames": {
+     "start": true,
+     "end": false,
+     "keyframes": 0
+    },
+    "references": {
+     "max": 0,
+     "roles": []
+    },
+    "camera": {
+     "mode": "prompt",
+     "native": [],
+     "param": null
+    },
+    "seed": false,
+    "negative_prompt": false,
+    "tools": "json"
+   }
+  },
+  {
+   "provider_type": "fake",
+   "pattern": "fake/video",
+   "verified_at": null,
+   "note": "Built-in test model.",
+   "profile": {
+    "tasks": [
+     "text_to_video",
+     "image_to_video"
+    ],
+    "durations": [
+     4,
+     6,
+     8
+    ],
+    "resolutions": [
+     "480p",
+     "720p"
+    ],
+    "aspect_ratios": [
+     "16:9",
+     "9:16"
+    ],
+    "audio": "optional",
+    "frames": {
+     "start": true,
+     "end": false,
+     "keyframes": 0
+    },
+    "references": {
+     "max": 0,
+     "roles": []
+    },
+    "camera": {
+     "mode": "prompt",
+     "native": [],
+     "param": null
+    },
+    "seed": false,
+    "negative_prompt": false,
+    "tools": "json"
+   }
+  },
+  {
+   "provider_type": "fake",
+   "pattern": "fake/image",
+   "verified_at": null,
+   "note": "Built-in test model.",
+   "profile": {
+    "tasks": [
+     "text_to_image",
+     "image_edit"
+    ],
+    "durations": [],
+    "resolutions": [],
+    "aspect_ratios": [
+     "9:16",
+     "16:9",
+     "3:2",
+     "1:1"
+    ],
+    "audio": "none",
+    "frames": {
+     "start": true,
+     "end": false,
+     "keyframes": 0
+    },
+    "references": {
+     "max": 4,
+     "roles": []
+    },
+    "camera": {
+     "mode": "prompt",
+     "native": [],
+     "param": null
+    },
+    "seed": false,
+    "negative_prompt": false,
+    "tools": "json"
+   }
+  }
+ ]
+}

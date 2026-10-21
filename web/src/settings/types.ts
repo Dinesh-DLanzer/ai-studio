@@ -26,3 +26,17 @@ export interface RoleView { title: string; sub: string; capability: Capability; 
 export interface RolesResponse { roles: Record<Role, RoleView>; allow_paid: boolean; ai_cap_usd: number; auto_verify: boolean; fake_mode: boolean; }
 export interface ChainRef { provider: string; model: string; }
 export interface TestRow { provider: string; model: string; ok: boolean; message: string; }
+
+export type Task = "text_to_image" | "image_edit" | "text_to_video" | "image_to_video" | "video_extend" | "video_to_video" | "upscale" | "reframe" | "motion_transfer"
+  | "tts" | "voice_clone" | "music" | "sfx" | "lipsync" | "transcribe";
+
+/** What one model can do (aistudio/schemas/catalog.py). Empty durations / resolutions / aspect_ratios mean "not constrained". */
+export interface CapabilityProfile {
+  tasks: Task[]; durations: number[]; resolutions: string[]; aspect_ratios: string[];
+  audio: "none" | "optional" | "always";
+  frames: { start: boolean; end: boolean; keyframes: number };
+  references: { max: number; roles: string[] };
+  camera: { mode: "native" | "prompt" | "none"; native: string[]; param: string | null };
+  seed: boolean; negative_prompt: boolean; tools: "native" | "json";
+  source: "user" | "provider_api" | "builtin" | "default"; verified_at: string | null; note?: string | null;
+}

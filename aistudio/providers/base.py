@@ -145,6 +145,7 @@ class Adapter:
     type = ""
     capabilities = frozenset()
     default_base_url = ""
+    request_features = frozenset()      # request features this adapter really transmits (for example "end_frame"); none is ever dropped silently
 
     def __init__(self, conn, transport=None):
         self.conn = conn
@@ -164,6 +165,10 @@ class Adapter:
             return {"ok": True, "message": f"Connected successfully ({n} models)"}
         except ProviderError as e:
             return {"ok": False, "message": scrub(e, self.secret)[:200]}
+
+    def describe_model(self, model):
+        """A partial capability profile read from the provider's own metadata, or None (see aistudio/catalog.py)."""
+        return None
 
     def chat(self, model, messages, opts=None):
         self._unsupported("chat")
