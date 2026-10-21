@@ -62,6 +62,7 @@ IMAGE_CATEGORIES = ("text-to-image", "image-to-image")
 class FalAdapter(Adapter):
     type = "fal"
     capabilities = frozenset({"music", "sfx", "lipsync", "tts", "image", "video"})
+    task_methods = frozenset()
     default_base_url = "https://queue.fal.run"
 
     def __init__(self, conn, transport=None, sleep=time.sleep):

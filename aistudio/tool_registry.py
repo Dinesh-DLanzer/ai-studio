@@ -31,6 +31,13 @@ def _late(name):
     return lambda ws, a: getattr(_m(), name)(ws, a)
 
 
+def _list_voices(ws, provider_id):
+    provider = ws.runner().providers().get(provider_id)
+    if not provider:
+        raise ServiceError(f"unknown provider {provider_id}")
+    return ws.runner().adapter(provider).list_voices()
+
+
 def _no_job(jid):
     raise ServiceError(f"unknown job {jid}")
 
@@ -183,6 +190,17 @@ TOOLS = {
           target={"type": "string", "optional": True}),
         lambda ws, a: ws.clip_tool(a["name"], a["tool"], a["clip_id"], **{k: v for k, v in a.items() if k not in ("name", "tool", "clip_id")}),
     ),
+    "audio_tool": (
+        "Propose a paid audio task (tts, music, sfx, lipsync or transcribe). Nothing is spent; a human must approve the exact request before it can run.",
+        S(name=STR, task={"type": "string", "enum": ["tts", "music", "sfx", "lipsync", "transcribe"]}, target=STR,
+          options={"type": "object", "optional": True}),
+        lambda ws, a: ws.propose(a["name"], a["task"], a["target"], options=a.get("options") or {}),
+    ),
+    "list_voices": (
+        "Read-only, human-only: list voices exposed by one configured provider. This can contact that provider's API.",
+        S(provider=STR),
+        lambda ws, a: _list_voices(ws, a["provider"]),
+    ),
     "list_crew_runs": ("Read-only: the studio crew's runs in a project (agent, task, status, steps, LLM cost). Starting, stopping and undoing a run is human-only.", S(name=STR),
                        lambda ws, a: {"runs": _runs().list_runs(ws, a["name"])}),
     "get_crew_run": ("Read-only: one crew run with its step log, document diffs, proposals and batch.", S(name=STR, id=STR), lambda ws, a: _runs().get_run(ws, a["name"], a["id"])),
@@ -194,13 +212,13 @@ FREE_READ = ("get_project", "read_doc", "get_brief", "get_model_setup", "get_tod
              "list_providers", "production_progress", "get_batch", "get_edit", "unregistered_stills", "list_recipes")
 FREE_WRITE = ("write_doc", "update_brief", "rename_asset", "rename_shot", "convert_story", "update_shots", "update_images", "update_edit",
               "import_stills", "add_todo", "toggle_todo", "remove_todo", "export_edit", "export_project")
-PAID = ("propose", "analyze_character", "edit_still", "extend_clip", "clip_tool", "generate_all_plan", "build_identity_sheet")
+PAID = ("propose", "analyze_character", "edit_still", "extend_clip", "clip_tool", "audio_tool", "generate_all_plan", "build_identity_sheet")
 # approve/execute/override/cancel/delete/budget tools, tools that reveal codes, and tools that reach outside the run's project
 # (other projects, trash, local file paths, the job ledger of every project) are never crew tools.
 APPROVAL = ("approve_budget", "approve_proposal", "approve_batch", "approve_shot", "run_proposal", "run_batch", "reject_proposal", "set_max_attempts",
             "estimate", "discard", "restore")
 HUMAN_ONLY = ("delete_project", "create_project", "list_projects", "list_trash", "restore_trash", "upload_image", "list_jobs", "get_job",
-              "list_crew_runs", "get_crew_run", "search_library", "plan_recipe")      # reading runs is for humans and MCP; a crew agent has no use for it
+              "list_crew_runs", "get_crew_run", "search_library", "plan_recipe", "list_voices")      # reading runs is for humans and MCP; a crew agent has no use for it
 
 META = {}
 for _names, _cls, _w in ((FREE_READ, "free", False), (FREE_WRITE, "free", True), (PAID, "paid", False), (APPROVAL, "approval", False), (HUMAN_ONLY, "human_only", False)):

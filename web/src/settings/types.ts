@@ -1,7 +1,7 @@
 /** Shapes returned by the providers / models / roles API (see aistudio/settings_api.py). Secrets never appear here, only masked info. */
-export type Capability = "chat" | "vision" | "image" | "video";
-export type Role = "chat" | "verify" | "vision" | "image" | "video";
-export const ROLES: Role[] = ["chat", "verify", "vision", "image", "video"];
+export type Capability = "chat" | "vision" | "image" | "video" | "tts" | "music" | "sfx" | "lipsync" | "transcribe";
+export type Role = "chat" | "verify" | "vision" | "image" | "video" | "tts" | "music" | "sfx" | "lipsync" | "transcribe";
+export const ROLES: Role[] = ["chat", "verify", "vision", "image", "video", "tts", "music", "sfx", "lipsync", "transcribe"];
 export type ProviderState = "active" | "inactive" | "needs_key" | "error";
 
 export interface ProviderType { type: string; label: string; sub: string; fields: string[]; base_url: boolean; capabilities: Capability[]; auth_type?: "api_key" | "oauth"; }

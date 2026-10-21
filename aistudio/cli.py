@@ -93,6 +93,13 @@ def main(argv=None, ask=input, out=print):
     p_pend.add_argument("project")
     p_pend.add_argument("--json", action="store_true")
 
+    p_audio = sp.add_parser("audio", help="Propose a paid audio task (approval and execution remain separate commands)")
+    p_audio.add_argument("project")
+    p_audio.add_argument("task", choices=["tts", "music", "sfx", "lipsync", "transcribe"])
+    p_audio.add_argument("target")
+    p_audio.add_argument("--options", default="{}", help="Task options as JSON")
+    p_audio.add_argument("--json", action="store_true")
+
     p_app = sp.add_parser("approve", help="Approve proposal")
     p_app.add_argument("project")
     p_app.add_argument("id")
@@ -249,7 +256,20 @@ def main(argv=None, ask=input, out=print):
             else:
                 out(json.dumps(res, ensure_ascii=False))
 
-        if args.cmd == "projects":
+        if args.cmd == "audio":
+            try:
+                options = json.loads(args.options)
+            except ValueError:
+                raise ServiceError("--options must be valid JSON") from None
+            if not isinstance(options, dict):
+                raise ServiceError("--options must be a JSON object")
+            res = ws.propose(args.project, args.task, args.target, reveal_code=True, options=options)
+            if is_json:
+                out(json.dumps(res, indent=2, ensure_ascii=False))
+            else:
+                out(f"Proposal {res['id']} for {args.task} awaits approval: ${res['price']:.3f}. Use 'aistudio approve {args.project} {res['id']}' then 'aistudio run {args.project} {res['id']}'. Code: {res.get('code', '')}")
+
+        elif args.cmd == "projects":
             res = ws.list_projects()
             if is_json:
                 out(json.dumps(res, indent=2))

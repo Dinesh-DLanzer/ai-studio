@@ -115,8 +115,9 @@ class BatchDomain:
             if not plan["items"]:
                 raise ServiceError("none of the proposed items can be batched right now")
         items = [{"kind": it["kind"], "target": it["target"], "label": it.get("label", ""), "model": it["model"], "price": round(float(it["price"]), 6),
-                  "request_hash": it["request_hash"] if it.get("recipe") else self.digest(p, it["kind"], it["target"], it["model"], it["price"], it.get("variant")),
+                  "request_hash": it["request_hash"] if it.get("request_hash") else self.digest(p, it["kind"], it["target"], it["model"], it["price"], it.get("variant")),
                   "status": "pending", **({"variant": it["variant"]} if it.get("variant") else {}),
+                  **({"options": it["options"]} if it.get("options") else {}),
                   **({"recipe": it["recipe"]} if it.get("recipe") else {})} for it in plan["items"]]      # recipe items carry their own request hash (aistudio/recipes.py)
         total = round(sum(it["price"] for it in items), 6)
         batch = {"id": secrets.token_hex(6), "items": items, "total": total, "batch_hash": batch_hash(items, total), "status": "awaiting_approval",
@@ -195,13 +196,18 @@ class BatchDomain:
     def _run_item(self, name, p, item, exclude_files=()):
         """Run one item; returns None on success or the batch status to stop with."""
         try:
-            price, model = self.ws.pipeline_domain._item_price(p, item["kind"], item["target"])
+            if item["kind"] in ("tts", "music", "sfx", "lipsync", "transcribe"):
+                payload, model, price = self.ws.pipeline_domain._payload_and_price(name, item["kind"], item["target"], item.get("options") or {})
+                current_hash = approvals.request_hash(item["kind"], item["target"], model, price, payload)
+            else:
+                price, model = self.ws.pipeline_domain._item_price(p, item["kind"], item["target"])
+                current_hash = self.digest(p, item["kind"], item["target"], model, price, item.get("variant"), exclude_files)
             changes = []
             if model != item["model"]:
                 changes.append(f"model {item['model']} -> {model}")
             if round(float(price), 6) != item["price"]:
                 changes.append(f"price ${item['price']:.3f} -> ${float(price):.3f}")
-            if self.digest(p, item["kind"], item["target"], model, price, item.get("variant"), exclude_files) != item["request_hash"]:
+            if current_hash != item["request_hash"]:
                 changes.append("request changed")
         except ServiceError as error:
             item.update(status="error", error=str(error))
@@ -210,7 +216,7 @@ class BatchDomain:
             item.update(status="needs_reapproval", changes=changes)
             return "needs_reapproval"
         try:
-            prop = self.ws.propose(name, item["kind"], item["target"], options={"variant": item["variant"]} if item.get("variant") else None)
+            prop = self.ws.propose(name, item["kind"], item["target"], options=item.get("options") or ({"variant": item["variant"]} if item.get("variant") else None))
             if prop["model"] != item["model"] or prop["price"] != item["price"]:
                 self.ws.reject(name, prop["id"])
                 item.update(status="needs_reapproval", changes=["model or price changed while starting"])

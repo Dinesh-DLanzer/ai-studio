@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { CheckCircle2, ChevronRight, Eye, Image as ImageIcon, MessageSquare, RotateCcw, ShieldCheck, SlidersHorizontal, Video, XCircle, type LucideIcon } from "lucide-react";
+import { CheckCircle2, ChevronRight, Eye, Image as ImageIcon, MessageSquare, Music2, RotateCcw, ShieldCheck, SlidersHorizontal, Video, Volume2, XCircle, type LucideIcon } from "lucide-react";
 import { Button, Card, IconTile, Input, Label, type TileTone } from "../ui";
 import { useToast } from "../toast";
 import { confirmDialog } from "../dialogs";
@@ -10,10 +10,12 @@ import PriceDialog, { type PriceTarget } from "./PriceDialog";
 import CapabilitiesDialog, { type CapTarget } from "./CapabilitiesDialog";
 import type { ChainEntry, ChainRef, ModelInfo, Provider, Role, RoleView, RolesResponse, TestRow } from "./types";
 
-const ORDER: Role[] = ["chat", "vision", "image", "video", "verify"];
+const ORDER: Role[] = ["chat", "vision", "image", "video", "tts", "music", "sfx", "lipsync", "transcribe", "verify"];
 const LOOK: Record<Role, { icon: LucideIcon; tone: TileTone }> = {
   chat: { icon: MessageSquare, tone: "pink" }, vision: { icon: Eye, tone: "violet" }, image: { icon: ImageIcon, tone: "emerald" },
-  video: { icon: Video, tone: "amber" }, verify: { icon: ShieldCheck, tone: "sky" },
+  video: { icon: Video, tone: "amber" }, tts: { icon: Volume2, tone: "violet" }, music: { icon: Music2, tone: "pink" },
+  sfx: { icon: Volume2, tone: "amber" }, lipsync: { icon: Video, tone: "emerald" }, transcribe: { icon: MessageSquare, tone: "sky" },
+  verify: { icon: ShieldCheck, tone: "sky" },
 };
 const refs = (c: ChainEntry[]): ChainRef[] => c.map((e) => ({ provider: e.provider, model: e.model }));
 const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, Math.round(n)));

@@ -11,14 +11,20 @@ import json
 import re
 from pathlib import Path
 
-ROLES = ("chat", "verify", "vision", "image", "video")
-ROLE_CAPABILITY = {"chat": "chat", "verify": "chat", "vision": "vision", "image": "image", "video": "video"}
+ROLES = ("chat", "verify", "vision", "image", "video", "tts", "music", "sfx", "lipsync", "transcribe")
+ROLE_CAPABILITY = {"chat": "chat", "verify": "chat", "vision": "vision", "image": "image", "video": "video",
+                   "tts": "tts", "music": "music", "sfx": "sfx", "lipsync": "lipsync", "transcribe": "transcribe"}
 ROLE_INFO = {
     "chat": {"title": "Chat", "sub": "Text generation, planning, ideas"},
     "verify": {"title": "Verify", "sub": "Review the brief, story, assets and shots"},
     "vision": {"title": "Vision", "sub": "Analyze images and clip frames"},
     "image": {"title": "Image generation", "sub": "Generate images and scene frames"},
     "video": {"title": "Video generation", "sub": "Text to video, image to video"},
+    "tts": {"title": "Text to speech", "sub": "Generate voiceover audio"},
+    "music": {"title": "Music generation", "sub": "Generate music beds"},
+    "sfx": {"title": "Sound effects", "sub": "Generate sound effects"},
+    "lipsync": {"title": "Lip sync", "sub": "Synchronize video to speech"},
+    "transcribe": {"title": "Transcription", "sub": "Transcribe audio"},
 }
 MAX_CHAIN = 8
 ID_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,39}$")
@@ -126,7 +132,7 @@ def default_providers():
 
 # ---------------------------------------------------------------- roles
 def default_policy(role=None):
-    return {"retries": 1, "timeout": 1500 if role == "video" else 120}
+    return {"retries": 1, "timeout": 1500 if role in ("video", "lipsync") else 120}
 
 
 def default_roles():

@@ -29,6 +29,7 @@ from aistudio.providers.base import Adapter, Retryable, AuthError, NotFound, Rej
 class SarvamAdapter(Adapter):
     type = "sarvam"
     capabilities = frozenset({"tts", "transcribe"})
+    task_methods = frozenset({"tts", "transcribe"})
     default_base_url = "https://api.sarvam.ai"
 
     # Known speakers for bulbul:v3 (30+ voices) - subset listed here
