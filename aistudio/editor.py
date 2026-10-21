@@ -29,6 +29,8 @@ from datetime import datetime
 from pathlib import Path
 from xml.sax.saxutils import escape as xml_escape
 
+from aistudio import mixing
+
 REPO = Path(__file__).resolve().parent.parent
 FONT_DIR = REPO / "assets" / "fonts"
 
@@ -325,6 +327,7 @@ def clean(doc):
             raise EditError(f"{w}: out must be at least 0.2 s after in")
         out["tracks"]["audio"].append({"id": i, "src": safe_rel(a.get("src"), "audio", AUDIO_SUFFIX), "start": _num(a, "start", 0, 36000, 0, w), "in": lo, "out": hi,
                                        "volume": _num(a, "volume", 0, 2, 0.6, w), "fadeIn": _num(a, "fadeIn", 0, 30, 0, w), "fadeOut": _num(a, "fadeOut", 0, 30, 0, w),
+                                       "speed": _optnum(a, "speed", 0.5, 2, 1, w),
                                        "name": str(a.get("name") or Path(a["src"]).stem)[:60]})
 
     elem, seen = tracks.get("elements") or [], set()
@@ -487,6 +490,21 @@ def subtitle_item(cue, cfg):
             "opacity": 1.0, "shadow": {"on": style != "minimal", "color": "#000000", "blur": 14}}
 
 
+# ---------------------------------------------------------------- captions
+def caption_items(cues, style=None):
+    """The caption cues as the editor's text items (TText): the format's or brand kit's caption
+    style, fonts only from assets/fonts.  The items are valid by construction (they go through
+    clean())."""
+    from aistudio import captions
+    return captions.to_text_track(cues, style)
+
+
+def with_captions(edit, cues, style=None):
+    """The edit with the caption cues as its text track (a new edit list; nothing is written)."""
+    from aistudio import captions
+    return captions.with_captions(edit, cues, style)
+
+
 # ---------------------------------------------------------------- ffmpeg command (pure)
 def _filter_chain(f):
     """Colour grading look -> ffmpeg chain (eq / colorbalance, mixed towards the original by `intensity`).  '' = nothing to do."""
@@ -565,12 +583,57 @@ def _background_parts(bg, W, H, fps, head, out, idx):
             f"pad={W}:{H}:(ow-iw)/2:(oh-ih)/2:color={color},setsar=1,fps={fps},settb=1/{fps},format=yuv420p{out}"]
 
 
-def plan(edit, files, probes, text_pngs, sub_pngs=None):
+def mix_options(doc=None, options=None):
+    """The optional export mix settings: {"loudness": LUFS, "duck": ..., "denoise": bool}.
+    They come from the edit document (the "audio" or "mix" object) and are OFF when they are not
+    there, so an export without them is exactly the export of before."""
+    if options is None:
+        raw = (doc or {}).get("audio") or (doc or {}).get("mix") or {}
+        options = raw if isinstance(raw, dict) else {}
+    out = {}
+    lufs = options.get("loudness")
+    if isinstance(lufs, (int, float)) and not isinstance(lufs, bool) and -70 <= lufs <= -5:
+        out["loudness"] = float(lufs)
+    if options.get("duck"):
+        out["duck"] = options["duck"]
+    if options.get("denoise"):
+        out["denoise"] = True
+    return out
+
+
+def _duck_pairs(audio, options):
+    """The (voice, music) pairs the music is ducked under.
+    duck = {"voice": id, "music": id} | [{"voice","music"}, ...] | True (the voiceover clips are
+    the ones whose id starts with 'vo', the rest is the music).  [] when there is nothing to duck."""
+    duck = (options or {}).get("duck")
+    if not duck:
+        return []
+    ids = [a["id"] for a in audio]
+    if duck is True:
+        voice = next((a["id"] for a in audio if a["id"].startswith("vo") or str(a.get("name") or "").lower().startswith("voiceover")), None)
+        return [(voice, m) for m in ids if m != voice] if voice else []
+    raw = duck if isinstance(duck, list) else [duck]
+    pairs = []
+    for item in raw:
+        if isinstance(item, dict) and item.get("voice") and item.get("music"):
+            pairs.append((item["voice"], item["music"]))
+        elif isinstance(item, (list, tuple)) and len(item) == 2:
+            pairs.append((item[0], item[1]))
+    return [(v, m) for v, m in pairs if v in ids and m in ids]
+
+
+def plan(edit, files, probes, text_pngs, sub_pngs=None, options=None):
     """Build the ffmpeg arguments.  edit is clean(); files = {src: absolute path}; probes = {src: {'duration','audio'}};
     text_pngs = {text id: (png path, width, height)}; sub_pngs = {subtitle cue id: (png path, width, height)}.
+    options = the mix settings (see mix_options): the music is ducked under the voice and the
+    dialogue is cleaned of noise.  Without them the arguments are exactly the ones of before.
     Returns {'args': [...], 'total': seconds}."""
     W, H = ASPECTS[edit["aspect"]]
     fps = edit["fps"]
+    options = mix_options(options=options)
+    pairs = _duck_pairs(edit["tracks"]["audio"], options)
+    voice_ids = {v for v, _ in pairs}
+    voice_of = {m: v for v, m in pairs}
     video, texts, audio, elements = edit["tracks"]["video"], edit["tracks"]["text"], edit["tracks"]["audio"], edit["tracks"].get("elements", [])
     if not video:
         raise EditError("Add at least one video clip before exporting")
@@ -676,23 +739,50 @@ def plan(edit, files, probes, text_pngs, sub_pngs=None):
         parts.append(f"{cur_v}[{k}:v]overlay=x={x}:y={y}:enable='between(t,{cue['start']:.3f},{cue['end']:.3f})'[o{k}]")
         cur_v = f"[o{k}]"
     mus = []
+    labels = {}
     for a in audio:
         args += ["-i", str(files[a["src"]])]
         k = n_in
         n_in += 1
         d = a["out"] - a["in"]
         chain = (f"[{k}:a]atrim=start={a['in']:.3f}:end={a['out']:.3f},asetpts=PTS-STARTPTS,aresample=44100,aformat=sample_fmts=fltp:channel_layouts=stereo,volume={a['volume']:.3f}")
+        if a.get("speed") and abs(a["speed"] - 1.0) > 1e-6:
+            chain += f",atempo={a['speed']:.4f}"      # a voiceover that had to be sped up to fit its shot
         if a["fadeIn"]:
             chain += f",afade=t=in:st=0:d={min(a['fadeIn'], d):.3f}"
         if a["fadeOut"]:
             fo = min(a["fadeOut"], d)
             chain += f",afade=t=out:st={d - fo:.3f}:d={fo:.3f}"
+        if options.get("denoise") and a["id"] in voice_ids:
+            chain += "," + mixing.denoise_filter()   # the dialogue is cleaned of hiss
         ms = int(a["start"] * 1000)
         parts.append(f"{chain},adelay={ms}|{ms}[m{k}]")
         mus.append(f"[m{k}]")
+        labels[a["id"]] = (k, f"[m{k}]")
+    mixed = list(mus)
+    if pairs:                                   # the music ducks under the voice (the sidechain)
+        split = set()
+        mixed = []
+        for a in audio:
+            k, lab = labels[a["id"]]
+            if a["id"] in voice_of:
+                v = voice_of[a["id"]]
+                vk = labels[v][0]
+                if vk not in split:
+                    parts.append(f"{labels[v][1]}asplit=2[vsc{vk}][vmix{vk}]")
+                    split.add(vk)
+                parts.append(mixing.duck_filter(f"[vsc{vk}]", lab, out=f"[dk{k}]"))
+                mixed.append(f"[dk{k}]")
+            elif a["id"] in voice_ids:
+                mixed.append(f"[vmix{labels[a['id']][0]}]")
+            else:
+                mixed.append(lab)
+    if options.get("denoise") and not voice_ids:
+        parts.append(f"{cur_a}{mixing.denoise_filter()}[aclean]")   # no voiceover: the clips carry the dialogue
+        cur_a = "[aclean]"
     parts.append(f"{cur_v}format=yuv420p[vout]")
-    if mus:
-        parts.append(f"{cur_a}{''.join(mus)}amix=inputs={1 + len(mus)}:duration=first:normalize=0:dropout_transition=0,atrim=duration={total:.3f}[aout]")
+    if mixed:
+        parts.append(f"{cur_a}{''.join(mixed)}amix=inputs={1 + len(mixed)}:duration=first:normalize=0:dropout_transition=0,atrim=duration={total:.3f}[aout]")
     else:
         parts.append(f"{cur_a}anull[aout]")
     args += ["-filter_complex", ";".join(parts), "-map", "[vout]", "-map", "[aout]", "-t", f"{total:.3f}", "-r", str(fps),
@@ -701,10 +791,13 @@ def plan(edit, files, probes, text_pngs, sub_pngs=None):
 
 
 # ---------------------------------------------------------------- render
-def render(pdir, edit, progress=None):
+def render(pdir, edit, progress=None, options=None):
     """Render the edit to projects/<name>/exports/<name>_<time>.mp4 (never overwrites).  progress(percent) is called while it runs.
+    options = the mix settings (see mix_options): {"loudness": LUFS, "duck": ..., "denoise": bool}.
+    They are OFF when they are not given, so the export is exactly the export of before.
     Returns the relative path 'exports/<file>'."""
     pdir = Path(pdir)
+    options = mix_options(edit, options)
     edit = clean(edit)
     if not tools()["ffmpeg"]:
         raise EditError("ffmpeg is not installed. Install it (macOS: brew install ffmpeg) and restart AI Studio.")
@@ -746,7 +839,7 @@ def render(pdir, edit, progress=None):
             p = tmp / f"sub_{cue['id']}.png"
             w, h = render_text_png(subtitle_item(cue, subs), W, p)
             sub_pngs[cue["id"]] = (p, w, h)
-        pl = plan(edit, files, probes, pngs, sub_pngs)
+        pl = plan(edit, files, probes, pngs, sub_pngs, options=options)
         part = tmp / "out.mp4"
         err = tmp / "err.txt"
         cmd = ["ffmpeg", "-y", "-nostdin", "-hide_banner", "-loglevel", "error", "-progress", "pipe:1", "-nostats", *pl["args"], str(part)]
@@ -763,6 +856,13 @@ def render(pdir, edit, progress=None):
         if proc.returncode != 0 or not part.exists():
             tail = err.read_text(errors="replace").strip().splitlines()[-4:]
             raise EditError("ffmpeg failed: " + " | ".join(tail)[:500])
+        if options.get("loudness"):      # the two-pass loudnorm: measure the mix, then apply the target
+            loud = tmp / "loud.mp4"
+            try:
+                mixing.normalise(part, loud, options["loudness"], pdir=tmp)
+            except mixing.MixError as e:
+                raise EditError(str(e)) from None
+            shutil.move(str(loud), str(part))
         shutil.move(str(part), str(final))
         if progress:
             progress(100.0)
