@@ -198,6 +198,30 @@ class CrewEvalsTests(unittest.TestCase):
         self.assertFalse(res["checks"]["budget_cap"]["ok"])
         self.assertIn("exceeds cap", res["checks"]["budget_cap"]["detail"])
 
+    def test_cli_eval_crew(self):
+        from unittest.mock import patch
+        from aistudio import cli
+        case = evals.get_case("english-coffee-reel")
+        llm = Script([DONE, DONE, DONE])
+        out_lines = []
+
+        with patch.dict("os.environ", {"AISTUDIO_HOME": self.tmp.name}):
+            with patch("aistudio.crew.evals.stages.run_stages") as mock_stages:
+                mock_stages.return_value = {
+                    "id": "mock-run-1",
+                    "status": "done",
+                    "steps": [],
+                    "proposals": [],
+                    "llm_usd": 0.01,
+                    "results": [],
+                }
+                cli.main(["eval", "crew", "--case", "english-coffee-reel", "--json"], out=out_lines.append)
+
+        self.assertEqual(len(out_lines), 1)
+        data = json.loads(out_lines[0])
+        self.assertIn("summary", data)
+        self.assertEqual(data["summary"]["total_cases"], 1)
+
 
 if __name__ == "__main__":
     unittest.main()
