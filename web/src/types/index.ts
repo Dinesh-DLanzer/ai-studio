@@ -8,7 +8,10 @@ export interface Shot {
   first_frame?: string; note?: string; final_ok?: boolean; final_clip?: string;
   direction?: Direction; end_frame?: string; keyframes?: { at: number; image: string }[]; camera?: string;
 }
-export interface ImageSpec { id: string; kind: "character" | "background" | "frame" | "other"; out: string; prompt: string; refs: string[]; aspect_ratio?: string; }
+export interface ImageSpec {
+  id: string; kind: "character" | "background" | "frame" | "other"; out: string; prompt: string; refs: string[]; aspect_ratio?: string;
+  views?: { id: string; view: string; file: string }[]; real_person?: boolean; subject?: string; selected_version?: number;
+}
 export interface Review { verdict: "pass" | "warn" | "fail"; findings: { frame: number; issue: string; severity: string }[]; summary: string; cost?: number; model?: string; advisory?: string; }
 export interface PriceBreakdown { base: number | null; minimum_applied: boolean; billed_seconds?: number; refs: number; audio: boolean; total: number | null; retrieved_at?: string | null; age_days?: number | null; source?: string | null; }
 export interface ProposalSummary {

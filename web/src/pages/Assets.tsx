@@ -17,6 +17,9 @@ import { EmptyState, PageBanner, RailCard } from "../components/kit";
 import { ID_OK, ImportStills, KINDS, ReviewBadge, stem, type TabProps } from "../ProjectPage";
 import type { FoundStill, ImageSpec } from "../types";
 import { useProjectAssets, type Kind } from "../hooks/useProjectAssets";
+import CastPanel from "../components/CastPanel";
+import BatchPlanModal from "../components/BatchPlanModal";
+import { useBatchPipeline } from "../hooks/useBatchPipeline";
 
 const KIND_ICON: Record<Kind, JSX.Element> = { character: <Users size={17} />, background: <ImageIcon size={17} />, frame: <LayoutGrid size={17} />, other: <UploadIcon size={17} /> };
 
@@ -38,8 +41,9 @@ export function storyDescription(story: string, i: ImageSpec): string {
   return "";
 }
 
-export function AssetsTab({ o, name, load, start, running }: TabProps) {
+export function AssetsTab({ o, name, load, start, openProposal, running }: TabProps) {
   const toast = useToast();
+  const pipe = useBatchPipeline({ project: name, running, reloadAll: load, load: async () => { await load(); } });
   const {
     doc,
     style,
@@ -213,7 +217,7 @@ export function AssetsTab({ o, name, load, start, running }: TabProps) {
       <PageBody stickyRail rail={shown ? (
         <AssetPreview description={descOf(shown)} renameTo={async (n) => { await api("POST", `/api/projects/${name}/assets/${shown.id}/rename`, { new: n }); toast("ok", `Renamed ${shown.id} to ${n}.`); setPick(n); load(); }} o={o} name={name} spec={shown} file={file(shown.id)} img={url(shown.id)} urlOf={url} doc={doc} setPick={setPick} dirty={dirty} save={save} running={running} start={start}
           edit={edit} toggleRef={toggleRef} upload={(replace) => uploadLabel(shown.id, replace, "btn btn-outline w-full", replace ? "Replace Image" : "Upload Image")}
-          discard={discard} remove={remove} reload={load} toast={toast} />
+          discard={discard} remove={remove} reload={load} toast={toast} onBatch={pipe.setPlan} openProposal={openProposal} />
       ) : null}>
         <div className="space-y-4">
           {found.length > 0 && <ImportStills project={name} found={found} reload={load} />}
@@ -247,6 +251,8 @@ export function AssetsTab({ o, name, load, start, running }: TabProps) {
           </section>
         </div>
       </PageBody>
+
+      <BatchPlanModal plan={pipe.plan} mode={o.mode} title="Approve this batch?" onClose={() => pipe.setPlan(null)} onApprove={pipe.runAll} />
 
       <Modal open={!!checkingChar} onClose={() => setCheckingChar(null)} title="Character Image Check">
         {checkingChar && (
@@ -294,11 +300,12 @@ export function AssetsTab({ o, name, load, start, running }: TabProps) {
 }
 
 /** Right rail: large preview of the selected asset with prev/next, then its details. */
-function AssetPreview({ description, renameTo, o, name, spec, file, img, urlOf, doc, setPick, dirty, save, running, start, edit, toggleRef, upload, discard, remove, reload, toast }: {
+function AssetPreview({ description, renameTo, o, name, spec, file, img, urlOf, doc, setPick, dirty, save, running, start, edit, toggleRef, upload, discard, remove, reload, toast, onBatch, openProposal }: {
   description: string; renameTo: (n: string) => Promise<void>;
   o: TabProps["o"]; name: string; spec: ImageSpec; file?: string; img?: string; urlOf: (id: string) => string | undefined; doc: ImageSpec[]; setPick: (id: string) => void;
   dirty: boolean; save: () => void; running: TabProps["running"]; start: TabProps["start"]; edit: (n: ImageSpec[]) => void; toggleRef: (i: ImageSpec, r: string) => void;
   upload: (replace: boolean) => React.ReactNode; discard: (rel: string) => void; remove: (id: string) => void; reload: () => void; toast: (k: "ok" | "error" | "info", t: string) => void;
+  onBatch: (b: import("../hooks/useBatchPipeline").Plan) => void; openProposal?: TabProps["openProposal"];
 }) {
   const [tab, setTab] = useState<"details" | "used">("details");
   const idx = doc.findIndex((d) => d.id === spec.id);
@@ -428,6 +435,7 @@ function AssetPreview({ description, renameTo, o, name, spec, file, img, urlOf, 
           </ul>
         )}
       </RailCard>
+      {spec.kind === "character" && <CastPanel project={name} spec={spec} stills={o.files.stills} hasMaster={!!file} onBatch={onBatch} openProposal={openProposal} reload={reload} />}
       <RailCard title="Verification"><VerifyBar scope="assets" label="Assets" /></RailCard>
     </>
   );

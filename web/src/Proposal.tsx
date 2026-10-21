@@ -39,6 +39,9 @@ export function useProposal(project: string, mode: string, onDone: () => void) {
     catch (e: any) { toast("error", e.message); }
   }, [project, toast]);
 
+  /** Show a proposal that was created elsewhere (a remix, a drift check). The human still reads the exact price and clicks approve. */
+  const open = useCallback((p: Proposal) => { setMsg(""); setOverride(false); setProp(p); }, []);
+
   const close = async () => {
     if (prop) await api("POST", `/api/projects/${project}/proposals/${prop.id}/reject`).catch(() => {});
     setProp(null);
@@ -48,7 +51,8 @@ export function useProposal(project: string, mode: string, onDone: () => void) {
     if (!prop) return;
     const p = prop, key = runKey(p.kind, p.shot);
     try {
-      await api("POST", `/api/projects/${project}/proposals/${p.id}/approve`, { code: p.code });
+      if (p.code) await api("POST", `/api/projects/${project}/proposals/${p.id}/approve`, { code: p.code });
+      else await api("POST", `/api/projects/${project}/proposals/${p.id}/approve-human`);      // the human channel: only this click, never automatic
     } catch (e: any) { setMsg(e.message); return; }
     setProp(null);                                        // close the popup right away
     setRunning((r) => ({ ...r, [key]: p.kind }));
@@ -84,5 +88,5 @@ export function useProposal(project: string, mode: string, onDone: () => void) {
       )}
     </Modal>
   );
-  return { start, dialog, running };
+  return { start, open, dialog, running };
 }

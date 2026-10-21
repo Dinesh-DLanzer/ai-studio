@@ -4,9 +4,9 @@ import type { Plan } from "../hooks/useBatchPipeline";
 const usd = (n: number) => `$${n < 1 ? n.toFixed(3) : n.toFixed(2)}`;
 
 /** The human approve dialog for a frozen batch (shared by Chat's Generate all and the Crew page). Approving is only ever done here. */
-export default function BatchPlanModal({ plan, mode, onClose, onApprove }: { plan: Plan | null; mode: string; onClose: () => void; onApprove: () => void }) {
+export default function BatchPlanModal({ plan, mode, onClose, onApprove, title = "Generate everything that is left?" }: { plan: Plan | null; mode: string; onClose: () => void; onApprove: () => void; title?: string }) {
   return (
-    <Modal open={!!plan} onClose={onClose} title="Generate everything that is left?">
+    <Modal open={!!plan} onClose={onClose} title={title}>
       {plan && (
         <div className="space-y-3 text-sm" data-testid="plan">
           <div className="flex flex-wrap items-center gap-2">

@@ -4,7 +4,7 @@ import * as Dialog from "@radix-ui/react-dialog";
 import * as Menu from "@radix-ui/react-dropdown-menu";
 import {
   ChevronDown, Clapperboard, Download, FlaskConical, Github, Star, Command as CmdIcon, Film, FolderOpen, HelpCircle, Home, Image as ImageIcon,
-  LayoutGrid, Menu as MenuIcon, MessageCircle, Pencil, Plus, Search, Settings, Trash2, Users, Wand2, Wallet, X,
+  LayoutGrid, Library, Menu as MenuIcon, MessageCircle, Pencil, Plus, Search, Settings, Trash2, Users, Wand2, Wallet, X,
 } from "lucide-react";
 import { api } from "../api";
 import { RenameButton, RenameDialog } from "../Rename";
@@ -142,6 +142,7 @@ function SidebarBody({ project, onNavigate, onRenameProject }: { project?: Shell
       <div className="mt-auto flex flex-col gap-3 pt-4">
         {project && <SpendCard project={project} />}
         <nav aria-label="Workspace" className="flex flex-col gap-1">
+          <NavItem to="/library" icon={<Library size={17} />} label="Library" onNavigate={onNavigate} />
           <NavItem to="/help" icon={<HelpCircle size={17} />} label="Help &amp; Docs" onNavigate={onNavigate} />
           <NavItem to="/settings" icon={<Settings size={17} />} label="Settings" onNavigate={onNavigate} />
         </nav>

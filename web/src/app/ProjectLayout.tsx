@@ -144,14 +144,14 @@ export default function ProjectLayout({ name }: { name: string }) {
     };
   }, [name, handleActivity]);
 
-  const { start, dialog, running } = useProposal(name, o?.mode || "real", load);
+  const { start, open: openProposal, dialog, running } = useProposal(name, o?.mode || "real", load);
 
   const combinedRunning = { ...running, ...mcpRunning };
 
   if (err) return <Shell>{/no such project/i.test(err) ? <NotFound kind="project" name={name} onRestored={() => { setErr(""); setO(null); load(); }} /> : <Card title="Could not open the project"><p className="text-sm text-slate-400">{err}</p><Link to="/" className="mt-3 inline-block"><Button variant="outline">Back to all projects</Button></Link></Card>}</Shell>;
   if (!o) return <Shell><div className="space-y-4"><Skeleton className="h-16 w-72" /><Skeleton className="h-64" /><Skeleton className="h-72" /></div></Shell>;
   const shellProject = { name, test: !!(o as any).is_test, counts: { assets: o.images.images.length, shots: o.shots.shots.length }, spend: { total: o.costs.total, estimate: o.budget.estimate ?? null } };
-  const ctx: TabProps = { todosDone: !!todos && [...todos.auto, ...todos.manual].every((t) => t.done), o, name, load, start, running: combinedRunning, openBudget: () => setBudgetOpen(true), todoNode: <TodoList project={name} todos={todos} reload={load} go={(t) => nav(t === "overview" ? `/p/${name}` : `/p/${name}/${t === "story" ? "storyboard" : t}`)} /> };
+  const ctx: TabProps = { todosDone: !!todos && [...todos.auto, ...todos.manual].every((t) => t.done), o, name, load, start, openProposal, running: combinedRunning, openBudget: () => setBudgetOpen(true), todoNode: <TodoList project={name} todos={todos} reload={load} go={(t) => nav(t === "overview" ? `/p/${name}` : `/p/${name}/${t === "story" ? "storyboard" : t}`)} /> };
 
   return (
     <VerifyProvider project={name} tick={o}>
