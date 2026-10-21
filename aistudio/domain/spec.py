@@ -10,7 +10,10 @@ from aistudio import catalog as catalog_mod
 from aistudio.domain.characters import pick_refs
 from aistudio.domain.common import ServiceError
 
-ROLE = {"image": "image", "image_edit": "image", "clip": "video", "clip_extend": "video"}
+# paid AI clip tools (plan 17): proposal kind -> the plan 13 capability task a model must list AND its adapter implement
+AI_TOOLS = {"upscale_ai": "upscale", "reframe_ai": "reframe", "restyle": "video_to_video", "replace": "video_to_video",
+            "motion_transfer": "motion_transfer", "character_swap": "video_to_video"}
+ROLE = {"image": "image", "image_edit": "image", "clip": "video", "clip_extend": "video", **{k: "video" for k in AI_TOOLS}}
 KIND = {"video": "video", "image": "image"}
 
 
@@ -130,10 +133,26 @@ def _snap(profile, seconds, warnings):
     return best
 
 
+def clip_seconds(p, options):
+    """Billed seconds of a clip tool: the caller's `seconds`, else the source clip's length from ffprobe (rounded up). Never guessed."""
+    options = options or {}
+    if options.get("seconds") not in (None, ""):
+        n = options["seconds"]
+        if isinstance(n, bool) or not isinstance(n, int) or not 1 <= n <= 300:
+            raise ServiceError("seconds must be a whole number from 1 to 300")
+        return n
+    from math import ceil
+    from aistudio import editor
+    info = options.get("source") and editor.probe(p / str(options["source"]))
+    if not info or not info.get("duration"):
+        raise ServiceError("cannot read the clip length (ffprobe missing or unreadable file); pass seconds")
+    return max(1, ceil(info["duration"]))
+
+
 def resolve(ws, p, kind, target, options=None, loose=False):
     """GenerationSpec for an image, image_edit, clip or clip_extend. loose=True lets a first frame that is not made yet pass (planning)."""
     options = options or {}
-    role = ROLE.get(kind) or (_ for _ in ()).throw(ServiceError("kind must be image, clip, image_edit or clip_extend"))
+    role = ROLE.get(kind) or (_ for _ in ()).throw(ServiceError("kind must be image, clip, image_edit, clip_extend or " + ", ".join(AI_TOOLS)))
     pricing, warnings = ws.pricing(), []
     if kind == "image":
         if loose:      # planning: referenced stills may not be made yet, so only count them
@@ -157,6 +176,14 @@ def resolve(ws, p, kind, target, options=None, loose=False):
             raise ServiceError(f"No price set for {entry['model']}. Set it in Settings > Model Configuration before editing stills.")
         return GenerationSpec(kind, target, role, entry, "image_edit", _profile(ws, entry), price=price, warnings=_age(pricing, entry))
     runner = ws.runner()
+    if kind in AI_TOOLS:
+        task = AI_TOOLS[kind]
+        entry, _ = select_entry(ws, p, role, None, {"task": task}, kind.replace("_", " "))
+        seconds = clip_seconds(p, options)
+        price = ws.pricing().task_price(entry["card"], seconds, "720p")
+        if price is None:
+            raise ServiceError(f"No price for {entry['model']} ({task.replace('_', ' ')}, {seconds}s). Set it in Settings > Model Configuration.")
+        return GenerationSpec(kind, target, role, entry, task, _profile(ws, entry), seconds, "720p", price=price, warnings=_age(ws.pricing(), entry))
     if kind == "clip_extend":
         entry, _ = select_entry(ws, p, role, None, {}, "clip extension")
         profile = _profile(ws, entry)

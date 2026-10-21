@@ -456,7 +456,11 @@
    "profile": {
     "tasks": [
      "text_to_video",
-     "image_to_video"
+     "image_to_video",
+     "upscale",
+     "reframe",
+     "video_to_video",
+     "motion_transfer"
     ],
     "durations": [
      4,

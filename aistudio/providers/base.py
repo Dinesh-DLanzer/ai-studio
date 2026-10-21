@@ -150,6 +150,8 @@ class Adapter:
         """Optional: a reason this adapter will certainly refuse the request, checked when a proposal is made. None = no objection."""
         return None
 
+    task_methods = frozenset()      # paid clip-tool tasks (upscale, reframe, video_to_video, motion_transfer) that video_task really implements
+
     request_features = frozenset()      # request features this adapter really transmits (for example "end_frame"); none is ever dropped silently
 
     def __init__(self, conn, transport=None):
@@ -192,6 +194,10 @@ class Adapter:
 
     def video_extend(self, model, video_path, prompt, seconds=5, aspect_ratio="16:9", resolution="720p", opts=None):
         self._unsupported("video extension")
+
+    def video_task(self, model, task, video_path, prompt, params, reference=None, seconds=0):
+        """Submit a paid clip tool (see task_methods) on a source clip; returns a job for video_poll / video_download."""
+        self._unsupported(f"video task {task}")
 
     def video_poll(self, job):
         self._unsupported("video generation")

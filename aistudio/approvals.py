@@ -176,7 +176,7 @@ def consume(pdir, pid, request_hash_value=None, *, kind=None, shot=None, model=N
 def _kind_allows(role, proposal_kind):
     return proposal_kind in {
         "image": {"image", "image_edit"},
-        "video": {"clip", "clip_extend"},
+        "video": {"clip", "clip_extend", "upscale_ai", "reframe_ai", "restyle", "replace", "motion_transfer", "character_swap"},
         "vision": {"review", "character_review"},
     }.get(role, {role})
 

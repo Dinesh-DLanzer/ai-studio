@@ -11,6 +11,7 @@ from aistudio.pricing import key
 from aistudio.providers import config as cfg
 from aistudio.schemas.catalog import validate_profile
 
+AI_TOOL_TASKS = ("upscale", "reframe", "video_to_video", "motion_transfer")      # paid clip tools (plan 17)
 BUILTIN = Path(__file__).resolve().parent.parent / "catalog" / "models.json"
 
 
@@ -89,6 +90,11 @@ class Catalog:
 def missing(profile, ptype, req):
     """Why a model cannot serve a request, or None. req = {"task", "end_frame": bool, "refs": int}."""
     task = req.get("task")
+    if task in AI_TOOL_TASKS:      # fail closed: the profile must LIST the task and the adapter must implement it (a model nobody described cannot do it)
+        if task not in profile["tasks"]:
+            return f"no {task.replace('_', ' ')} support"
+        if ptype in cfg.PROVIDER_TYPES and task not in cfg.adapter_class(ptype).task_methods:
+            return f"its adapter cannot run {task.replace('_', ' ')} yet"
     if task and profile["tasks"] and task not in profile["tasks"]:
         return f"no {task.replace('_', ' ')} support"
     if req.get("end_frame"):

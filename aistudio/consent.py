@@ -23,8 +23,9 @@ def read(pdir):
     return [x for x in data if isinstance(x, dict)] if isinstance(data, list) else []
 
 
-def record(pdir, subject, statement, kind="real_person", when=None):
-    """Append one consent entry. HUMAN channel only (never wire this to MCP, the crew or an agent route)."""
+def record(pdir, subject, statement, kind="real_person", when=None, sha=None):
+    """Append one consent entry. HUMAN channel only (never wire this to MCP, the crew or an agent route).
+    With `sha` the consent is bound to those exact file bytes (the only kind that satisfies a file marked by mark_real_person)."""
     subject, statement = str(subject or "").strip(), str(statement or "").strip()
     if not subject or not statement:
         raise ServiceError("consent needs the subject's name and a statement")
@@ -32,6 +33,8 @@ def record(pdir, subject, statement, kind="real_person", when=None):
         raise ServiceError(f"consent kind must be one of: {', '.join(KINDS)}")
     items = read(pdir)
     entry = {"subject": subject, "statement": statement, "date": when or _date.today().isoformat(), "kind": kind}
+    if sha:
+        entry["sha"] = str(sha)
     items.append(entry)
     project_mod.save_json(Path(pdir), FILE, items)
     return entry
@@ -55,3 +58,30 @@ def require_assets(pdir, images_doc, ids):
         a = by.get(aid)
         if a and a.get("real_person"):
             require(pdir, a.get("subject") or aid)
+
+
+def mark_real_person(pdir, asset_id, sha, subject=""):
+    """HUMAN channel only: file bytes `sha` show a real person. From now on any paid tool touching a file with this sha needs a sha-bound consent
+    entry, whatever images.json says (an agent clearing the real_person flag or renaming the asset cannot lift it)."""
+    sha = str(sha or "").strip()
+    if not sha:
+        raise ServiceError("a file sha is required")
+    items = read(pdir)
+    if not any(x.get("kind") == "real_person_sha" and x.get("sha") == sha for x in items):
+        items.append({"kind": "real_person_sha", "asset": str(asset_id or ""), "sha": sha, "subject": str(subject or "").strip(), "date": _date.today().isoformat()})
+        project_mod.save_json(Path(pdir), FILE, items)
+    return {"asset": asset_id, "sha": sha}
+
+
+def real_person_shas(pdir):
+    return {x["sha"] for x in read(pdir) if x.get("kind") == "real_person_sha" and x.get("sha")}
+
+
+def require_shas(pdir, shas):
+    """Refuse when a file whose sha a human marked as a real person has no sha-bound consent entry."""
+    marked = real_person_shas(pdir)
+    bound = {x.get("sha") for x in read(pdir) if x.get("kind") == "real_person" and x.get("sha")}
+    for sha in shas:
+        if sha in marked and sha not in bound:
+            raise ServiceError("a file marked as a real person has no consent bound to it. A human must record consent for these exact file bytes "
+                               "(POST /api/projects/<name>/consent with the file's sha); generation is refused until then.")
