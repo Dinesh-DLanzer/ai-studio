@@ -291,7 +291,7 @@ def to_images_doc(story, known_ids=()):
             ids.add(item["id"])
             refs = []
             if kind == "character":
-                # Link matching uploaded reference images (e.g. "leema_ref_4" for character "leema" or explicit mention in prompt)
+                # Link matching uploaded reference images (e.g. "maya_ref_4" for character "maya" or explicit mention in prompt)
                 cid = item["id"]
                 prompt_lower = (item.get("prompt") or "").lower()
                 for kid in known_list:
