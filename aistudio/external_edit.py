@@ -185,3 +185,16 @@ def register_version(project_dir, original_rel, new_path, app=None):
         n += 1
     shutil.copy2(source, dest)
     return dest, {"tool": "external", "app": app, "source_sha": _sha(source)}
+
+
+def poll_and_register(edit, project_dir):
+    """Poll one session and, after validation/stability, create a new version."""
+    changed = edit.poll()
+    if not changed:
+        return None
+    session = edit.session
+    if not session:
+        return None
+    original_rel = str(Path(session["original"]).relative_to(Path(project_dir).resolve()))
+    dest, metadata = register_version(project_dir, original_rel, changed["path"], changed.get("app"))
+    return {"file": dest, "original": original_rel, "metadata": metadata}

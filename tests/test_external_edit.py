@@ -7,7 +7,7 @@ from unittest.mock import Mock
 
 from PIL import Image
 
-from aistudio.external_edit import ExternalEdit, allowed_apps, open_file, register_version
+from aistudio.external_edit import ExternalEdit, allowed_apps, open_file, poll_and_register, register_version
 
 
 class ExternalEditTests(unittest.TestCase):
@@ -79,6 +79,25 @@ class ExternalEditTests(unittest.TestCase):
             self.assertEqual(hashlib.sha256(original.read_bytes()).hexdigest(), before)
             dest2, _ = register_version(root, "image.png", src, app="GIMP")
             self.assertEqual(Path(dest2).name, "image.v2.png")
+
+    def test_poller_registers_stable_saved_copy_as_new_version(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            original = root / "image.png"
+            Image.new("RGB", (2, 2), "red").save(original)
+            now = [0.0]
+            edit = ExternalEdit(root, clock=lambda: now[0], poll_interval=1, opener=lambda *a, **k: None)
+            started = edit.start("image.png")
+            saved = Path(started["path"])
+            Image.new("RGB", (3, 3), "blue").save(saved)
+            self.assertIsNone(poll_and_register(edit, root))
+            now[0] += 1
+            self.assertIsNone(poll_and_register(edit, root))
+            now[0] += 1
+            result = poll_and_register(edit, root)
+            self.assertEqual(result["file"].name, "image.v1.png")
+            self.assertEqual(Image.open(original).size, (2, 2))
+            self.assertEqual(Image.open(result["file"]).size, (3, 3))
 
 
 if __name__ == "__main__":

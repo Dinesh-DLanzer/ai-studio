@@ -5,7 +5,7 @@ Fields: (method, path, agent, group, summary, body, returns).  agent=True: allow
 page's session token (a human): approvals, budget, providers, keys, limits, deleting.
 """
 GROUPS = ["Projects", "Story and documents", "Chat (producer)", "Assets and shots", "Budget, proposals and approvals", "Generation jobs", "Review and Export",
-          "Costs and verification", "Library", "Providers, models and limits", "Integrations", "Files and utility"]
+          "Costs and verification", "Library", "Providers, models and limits", "Integrations", "Files and utility", "Settings"]
 
 R = [
     ("GET", "/api/library", False, "Library", "Search the workspace generation library. Read-only; results can span projects.", "query parameters", '{"items": [...], "total"}'),
@@ -108,6 +108,13 @@ R = [
     ("GET", "/api/projects/{name}/edit/export-edl", False, "Review and Export", "The timeline as a CMX 3600 EDL (Premiere, DaVinci Resolve, Avid, Lightworks): picture and audio events with source and record timecodes. Free.", "-", "EDL text"),
     ("GET", "/api/projects/{name}/edit/export-subtitles", False, "Review and Export", "The subtitle cues as SubRip or WebVTT for Canva, YouTube, TikTok and Google Vids. ?format=srt|vtt (default srt). Free.", "-", "caption file"),
     ("GET", "/api/projects/{name}/edit/export-bundle", False, "Review and Export", "The Canva / Google Vids zip: the media the timeline uses, captions.srt and captions.vtt, timeline.fcpxml, timeline.edl, timeline_summary.json and the newest rendered preview. Free.", "-", "application/zip"),
+    ("GET", "/api/projects/{name}/edit/export/{fmt}", False, "Review and Export", "Download an interchange export: otio, otioz, xmeml, fcpxml, edl, srt, vtt or bundle.", "-", "file download"),
+    ("POST", "/api/projects/{name}/edit/import-otio", False, "Review and Export", "Preview an OTIO round trip. Apply by reviewing the diff and saving with PUT /edit.", '{"otio": "..."}', "diff preview"),
+    ("POST", "/api/projects/{name}/external-edit", False, "Review and Export", "Open a project media copy in a desktop application. Human session only.", '{"file": "clips/a.mp4", "app"?: "..."}', "session"),
+    ("GET", "/api/projects/{name}/external-edit", False, "Review and Export", "List active external edit sessions. Human session only.", "-", "sessions"),
+    ("POST", "/api/projects/{name}/external-edit/stop", False, "Review and Export", "Stop an external edit session. Human session only.", "-", "stopped"),
+    ("GET", "/api/external-apps", False, "Settings", "List approved desktop application names.", "-", "apps"),
+    ("PUT", "/api/external-apps", False, "Settings", "Set approved desktop application names.", '{"apps": ["..."]}', "apps"),
     ("GET", "/api/projects/{name}/exports", True, "Review and Export", "Rendered MP4s in the project's exports folder.", "-", '{"exports": [{file, bytes, when}]}'),
     ("POST", "/api/projects/{name}/audio", False, "Review and Export", "Upload music or a sound (mp3, wav, m4a, aac, ogg) to the project's audio folder. ?filename=song.mp3", "raw audio bytes (up to 25 MB)", '{"src", "name", "duration"}'),
     ("GET", "/api/projects/{name}/elements", True, "Review and Export", "Images the timeline can overlay: the uploaded elements plus the project stills.", "-", '{"elements": [{src, name, kind}]}'),
