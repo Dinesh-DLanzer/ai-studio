@@ -4,6 +4,7 @@ from pathlib import Path
 import re
 import shutil
 import time
+from copy import deepcopy
 
 from aistudio import editor as editor_mod, languages as lang_mod, project as project_mod
 from aistudio.schemas import load_doc
@@ -228,13 +229,24 @@ class StoryboardDomain:
 
     def edit_put(self, name, doc):
         p = self.ws.pdir(name)
+        raw_doc = deepcopy(doc)
         try:
             doc = editor_mod.clean(doc)
         except editor_mod.EditError as e:
             raise ServiceError(str(e)) from None
-        tmp = p / "edit.json.tmp"
-        tmp.write_text(json.dumps(doc, indent=2, ensure_ascii=False), encoding="utf-8")
-        tmp.replace(p / "edit.json")
+        def keep_extras(raw, normalized):
+            if isinstance(raw, dict) and isinstance(normalized, dict):
+                result = deepcopy(normalized)
+                for key, value in raw.items():
+                    result[key] = keep_extras(value, result[key]) if key in result else deepcopy(value)
+                return result
+            if isinstance(raw, list) and isinstance(normalized, list):
+                return [keep_extras(value, normalized[i]) if i < len(normalized) else deepcopy(value)
+                        for i, value in enumerate(raw)]
+            return normalized
+        normalized = doc
+        to_save = load_doc("edit", keep_extras(raw_doc, normalized))
+        project_mod.save_json(p, "edit.json", to_save)
         return doc
 
     def edit_export(self, name, progress=None):

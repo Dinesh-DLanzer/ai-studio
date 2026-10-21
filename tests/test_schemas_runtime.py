@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from aistudio import project
+from aistudio import editor, project
 from aistudio.schemas import load_doc
 from aistudio.schemas.migrations import CURRENT, migrate
 from aistudio.service import Workspace, ServiceError
@@ -32,6 +32,40 @@ class TestRuntimeSchemas(unittest.TestCase):
                          {**shots, "schema_version": 1})
         self.assertEqual(project.load_json(self.ws.pdir("demo"), "images.json"),
                          {**images, "schema_version": 1})
+
+    def test_unknown_fields_survive_edit_brief_and_todos(self):
+        edit = {"aspect": "9:16", "tracks": {}, "future": {"nested": True}}
+        brief = {"brand": "tea", "future": ["keep"]}
+        todos = {"manual": [{"id": "x", "title": "keep", "done": False, "future_item": 42}],
+                 "future": {"keep": True}}
+        for kind, value in (("edit", edit), ("brief", brief), ("todos", todos)):
+            with self.subTest(kind=kind):
+                self.assertEqual(load_doc(kind, value), {**value, "schema_version": 1})
+        p = self.ws.pdir("demo")
+        (p / "brief.json").write_text(json.dumps(brief), encoding="utf-8")
+        (p / "todos.json").write_text(json.dumps(todos), encoding="utf-8")
+        self.ws.brief_put("demo", {"brand": "tea"})
+        saved_brief = json.loads((p / "brief.json").read_text())
+        self.assertEqual(saved_brief["future"], ["keep"])
+        self.ws.todo_add("demo", "Another task")
+        saved_todos = json.loads((p / "todos.json").read_text())
+        self.assertTrue(saved_todos["future"]["keep"])
+        self.assertEqual(saved_todos["manual"][0]["future_item"], 42)
+        self.assertEqual(saved_todos["schema_version"], 1)
+        self.ws._apply_todo_md("demo", "## My tasks\n- [x] keep\n")
+        self.assertEqual(json.loads((p / "todos.json").read_text())["manual"][0]["future_item"], 42)
+
+    def test_edit_save_preserves_clean_output_and_versions_unknown_keys(self):
+        incoming = {"aspect": "1:1", "tracks": {
+            "video": [{"id": "clip", "src": "clips/clip.mp4", "in": 0, "out": 1, "future_clip": "keep"}],
+            "text": [], "audio": [], "future_tracks": True}, "future": {"keep": True}}
+        clean = self.ws.edit_put("demo", incoming)
+        saved = json.loads((self.ws.pdir("demo") / "edit.json").read_text())
+        self.assertEqual(clean, editor.clean(incoming))
+        self.assertEqual(saved["schema_version"], 1)
+        self.assertTrue(saved["future"]["keep"])
+        self.assertTrue(saved["tracks"]["future_tracks"])
+        self.assertEqual(saved["tracks"]["video"][0]["future_clip"], "keep")
 
     def test_v0_migration_stamps_and_preserves_content_without_mutation(self):
         original = {"shots": [], "future": {"a": 1}}

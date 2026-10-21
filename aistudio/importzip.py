@@ -35,7 +35,7 @@ MAGIC = {  # suffix -> check on the first 16 bytes
     ".wav": lambda b: b[:4] == b"RIFF" and b[8:12] == b"WAVE", ".m4a": lambda b: b[4:8] == b"ftyp", ".aac": lambda b: len(b) > 1 and b[0] == 0xFF and b[1] & 0xF0 == 0xF0 or b.startswith(b"ID3"),
     ".ogg": lambda b: b.startswith(b"OggS"),
 }
-JUNK = ("__MACOSX", ".DS_Store", "Thumbs.db", ".git")
+JUNK = ("__MACOSX", ".DS_Store", "Thumbs.db", ".git", ".history")
 KNOWN_JSON = ("shots.json", "images.json", "edit.json", "budget.json", "brief.json", "chat.json", "todos.json", "verify.json", "discarded.json", "sandbox.json", "proposals.json")
 
 
