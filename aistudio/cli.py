@@ -3,6 +3,9 @@
 Commands:
   python3 -m aistudio.cli serve                      Start the web UI
   python3 -m aistudio.cli projects [--json]          List projects with budget/spend
+  python3 -m aistudio.cli create <name> [--format ID] [--brand-kit ID]   Create a project
+  python3 -m aistudio.cli formats [--json]           List the project formats
+  python3 -m aistudio.cli brand-kits list|create|delete   Workspace brand kits
   python3 -m aistudio.cli overview <project> [--json] Project overview
   python3 -m aistudio.cli delete-project <p> [-y]    Move project to _trash
   python3 -m aistudio.cli pending <project> [--json] Proposals waiting for decision
@@ -80,6 +83,30 @@ def main(argv=None, ask=input, out=print):
 
     p_proj = sp.add_parser("projects", help="List projects")
     p_proj.add_argument("--json", action="store_true")
+
+    p_create = sp.add_parser("create", help="Create a project, optionally from a format and a brand kit")
+    p_create.add_argument("name")
+    p_create.add_argument("--format", default="", help="Format id (see 'aistudio formats')")
+    p_create.add_argument("--brand-kit", default="", help="Brand kit id (see 'aistudio brand-kits list')")
+    p_create.add_argument("--test-pipeline", action="store_true", help="Practice run: every step is simulated for free")
+    p_create.add_argument("--json", action="store_true")
+
+    p_formats = sp.add_parser("formats", help="List the project formats (aspect ratio, shots, safe area, caption, ...)")
+    p_formats.add_argument("--json", action="store_true")
+
+    p_kits = sp.add_parser("brand-kits", help="Workspace brand kits: list, create, delete")
+    ksp = p_kits.add_subparsers(dest="brand_kit_cmd", required=True)
+    k_list = ksp.add_parser("list", help="List the brand kits")
+    k_list.add_argument("--json", action="store_true")
+    k_create = ksp.add_parser("create", help="Create a brand kit (a logo file gives the palette)")
+    k_create.add_argument("name")
+    k_create.add_argument("--logo", default="", help="PNG, JPEG or WebP logo file")
+    k_create.add_argument("--style-words", default="", help="Shared style words for every shot")
+    k_create.add_argument("--json", action="store_true")
+    k_delete = ksp.add_parser("delete", help="Move a brand kit to brand_kits/_trash (never erases)")
+    k_delete.add_argument("kit_id")
+    k_delete.add_argument("-y", "--yes", action="store_true", help="Bypass interactive prompt")
+    k_delete.add_argument("--json", action="store_true")
 
     p_over = sp.add_parser("overview", help="Project overview")
     p_over.add_argument("project")
@@ -276,6 +303,60 @@ def main(argv=None, ask=input, out=print):
             else:
                 for p in res:
                     out(f"{p['name']:<24} shots {p['shots']:<3} spent ${p['spent']:<8} budget {'approved' if p['approved'] else 'none'}")
+
+        elif args.cmd == "create":
+            res = ws.create_project(args.name, test_pipeline=args.test_pipeline, format=args.format or None, brand_kit=args.brand_kit or None)
+            if is_json:
+                out(json.dumps({"name": res}, indent=2))
+            else:
+                bits = [f"Created project '{res}'"]
+                if args.format:
+                    bits.append(f"from format {args.format}")
+                if args.brand_kit:
+                    bits.append(f"with brand kit {args.brand_kit}")
+                out(" ".join(bits) + ".")
+
+        elif args.cmd == "formats":
+            from aistudio import formats as formats_mod
+            res = formats_mod.load_formats()
+            if is_json:
+                out(json.dumps({"formats": res}, indent=2, ensure_ascii=False))
+            else:
+                for f in res:
+                    out(f"{f['id']:<26} {f['label']:<22} {f['aspect_ratio']:<6} {f['shots']:>2} shots x {f['seconds_per_shot']}s  {f['brief']['length']}, {f['brief']['purpose']}")
+
+        elif args.cmd == "brand-kits":
+            from aistudio import brand_kits as kits_mod
+            if args.brand_kit_cmd == "list":
+                res = kits_mod.list_kits(ws.root)
+                if is_json:
+                    out(json.dumps({"kits": res}, indent=2, ensure_ascii=False))
+                else:
+                    for k in res:
+                        out(f"{k['id']:<26} {k['name']:<24} {len(k.get('palette') or [])} colours  {k.get('style_words', '')}")
+            elif args.brand_kit_cmd == "create":
+                logo = args.logo or None
+                if logo and not Path(logo).is_file():
+                    raise ServiceError(f"logo file not found: {logo}")
+                try:
+                    res = kits_mod.create_kit(ws.root, args.name, logo_path=logo, style_words=args.style_words)
+                except FileExistsError as e:
+                    raise ServiceError(str(e)) from None
+                if is_json:
+                    out(json.dumps(res, indent=2, ensure_ascii=False))
+                else:
+                    out(f"Created brand kit '{res['id']}' ({res['name']}).")
+            else:
+                if not getattr(args, "yes", False):
+                    out(f"Moving brand kit '{args.kit_id}' to brand_kits/_trash (restorable).")
+                    if ask("Type yes to confirm: ").strip().lower() != "yes":
+                        out("Not confirmed.")
+                        return 0
+                dest = kits_mod.delete_kit(ws.root, args.kit_id)
+                if is_json:
+                    out(json.dumps({"trash": str(dest)}, indent=2))
+                else:
+                    out(f"Brand kit '{args.kit_id}' moved to trash: {dest}")
 
         elif args.cmd == "overview":
             res = ws.overview(args.project)
