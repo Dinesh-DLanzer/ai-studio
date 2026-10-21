@@ -17,6 +17,7 @@ import { ReviewBadge, stem, type TabProps } from "../ProjectPage";
 import type { Shot } from "../types";
 import DirectionSection from "../components/Direction";
 import ShotModelPicker from "../components/ShotModelPicker";
+import ClipToolsPanel from "../components/ClipToolsPanel";
 
 const mmss = (s: number) => `0:${String(Math.round(s)).padStart(2, "0")}`;
 const money = (n?: number) => (n === undefined || n === null ? "-" : `$${n.toFixed(3)}`);
@@ -343,6 +344,8 @@ export function ShotsTab({ o, name, load, start, running }: TabProps) {
                 <DirectionSection project={name} shot={cur} stills={o.files.stills} onChange={(patch) => upd(cur.id, patch)}
                   savedKey={JSON.stringify([o.shots.shots.find((x) => x.id === cur.id)?.model, o.shots.shots.find((x) => x.id === cur.id)?.direction, o.shots.shots.find((x) => x.id === cur.id)?.end_frame, o.shots.shots.find((x) => x.id === cur.id)?.keyframes, o.shots.shots.find((x) => x.id === cur.id)?.first_frame])} />
               </RailCard>
+
+              <ClipToolsPanel project={name} />
 
               <RailCard title="Verification"><VerifyBar scope="shots" label="Shots" /></RailCard>
             </aside>

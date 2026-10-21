@@ -106,6 +106,21 @@ class TestEndToEnd(Base):
 
 
 class TestFailClosed(Base):
+    def test_clip_tools_route_reports_ai_tools_unavailable_without_video_provider(self):
+        from fastapi.testclient import TestClient
+        from server.app import create_app
+        from aistudio.providers import config
+        config.save_roles(self.ws.settings_dir, config.default_roles(), config.load_providers(self.ws.settings_dir))
+        client = TestClient(create_app(self.ws.root, token="human", static_dir="/nonexistent"))
+        key = client.post("/api/keys", json={"name": "agent"}, headers={"x-aistudio-token": "human"}).json()["key"]
+        response = client.get("/api/projects/demo/clip-tools", headers={"x-aistudio-token": key})
+        self.assertEqual(response.status_code, 200, response.text)
+        tools = {item["id"]: item for item in response.json()["tools"]}
+        for name in ("upscale_ai", "reframe_ai", "restyle", "replace", "motion_transfer", "character_swap"):
+            self.assertFalse(tools[name]["available"], name)
+            self.assertTrue(tools[name]["reason"], name)
+        self.assertTrue(__import__("server.api_docs", fromlist=["agent_allowed"]).agent_allowed("GET", "/api/projects/{name}/clip-tools"))
+
     def test_no_adapter_method_means_no_tool(self):
         with patch.object(FakeAdapter, "task_methods", frozenset()):
             with self.assertRaises(ServiceError) as e:

@@ -751,6 +751,11 @@ def create_app(root=None, token=None, rates_path=None, transport=None, static_di
     def consent_list(name: str):
         return {"consent": guard(ws.consent_list, name)}
 
+    @app.get("/api/projects/{name}/consent/provenance", dependencies=[api])
+    def consent_provenance(name: str):
+        from aistudio import consent
+        return {"unverified": guard(consent.unverified_media, ws.pdir(name))}
+
     @app.post("/api/projects/{name}/consent", dependencies=[api])
     async def consent_record(name: str, request: Request):
         human_session(request)
@@ -900,6 +905,48 @@ def create_app(root=None, token=None, rates_path=None, transport=None, static_di
     async def clip_tool(name: str, shot_id: str, request: Request):
         b = await request.json()
         return guard(ws.clip_tool, name, b.get("tool"), shot_id, **{k: v for k, v in b.items() if k in ("prompt", "reference", "subject", "seconds", "scale", "aspect_ratio", "target")})
+
+    @app.get("/api/projects/{name}/clip-tools", dependencies=[api])
+    def clip_tools(name: str):
+        from aistudio import tools as local_tools
+        from aistudio.domain.spec import AI_TOOLS
+        from aistudio.providers import config as provider_config
+        local_ids = ("reframe_local", "upscale_local", "interpolate", "speed", "loop", "stabilize")
+        available_local = set(local_tools.available())
+        result = []
+        for tool_id in local_ids:
+            ready = tool_id in available_local
+            result.append({"id": tool_id, "kind": "local", "available": ready,
+                           "reason": None if ready else ("ffmpeg is not installed" if not __import__("shutil").which("ffmpeg") else "required FFmpeg filter is unavailable"),
+                           "consent": "Source consent is checked when required"})
+        runner = ws.runner()
+        entries = runner.resolve("video", ws.pdir(name))
+        catalog = ws.catalog()
+        for tool_id, task in AI_TOOLS.items():
+            capable = False
+            reasons = []
+            for entry in entries:
+                if entry.get("problem"):
+                    reasons.append(str(entry["problem"]))
+                    continue
+                try:
+                    adapter = provider_config.adapter_class(entry["ptype"])
+                    if task not in adapter.task_methods:
+                        reasons.append(f"{entry['model']} adapter does not implement {task}")
+                        continue
+                    profile = catalog.profile(entry["provider"]["id"], entry["ptype"], entry["model"], entry.get("card"))
+                    why = catalog.missing(profile, entry["ptype"], {"task": task})
+                    if why:
+                        reasons.append(f"{entry['model']} profile does not declare {task}")
+                        continue
+                    capable = True
+                    break
+                except Exception:
+                    reasons.append("provider capability could not be verified")
+            result.append({"id": tool_id, "kind": "ai", "available": capable,
+                           "reason": None if capable else ("; ".join(dict.fromkeys(reasons)) or f"No enabled video model declares and implements {task}"),
+                           "consent": "Named subject consent required" if tool_id in ("motion_transfer", "character_swap") else "Source consent is checked when required"})
+        return {"tools": result}
 
     @app.post("/api/projects/{name}/audio/tool", dependencies=[api])
     async def audio_tool(name: str, request: Request):

@@ -12,6 +12,7 @@ const VIEWS = ["front", "three-quarter", "profile", "full-body", "expression"];
 const THRESHOLD = 0.6;     // the server flags identity scores below this (character_check.DRIFT_THRESHOLD)
 interface Consent { subject: string; statement: string; date: string; kind: string }
 interface Drift { scores?: Record<string, number>; summary?: string; when?: string }
+interface UnverifiedFile { file: string; sha: string }
 
 /** Cast: identity sheet, versions, drift and consent for one character. Everything that costs money only creates a batch or proposal for the human to approve. */
 export default function CastPanel({ project, spec, stills, hasMaster, onBatch, openProposal, reload }: {
@@ -19,11 +20,14 @@ export default function CastPanel({ project, spec, stills, hasMaster, onBatch, o
 }) {
   const toast = useToast();
   const [consent, setConsent] = useState<Consent[]>([]); const [drift, setDrift] = useState<Drift | null>(null);
+  const [unverified, setUnverified] = useState<UnverifiedFile[]>([]);
   const [subject, setSubject] = useState(""); const [statement, setStatement] = useState(""); const [kind, setKind] = useState("real_person");
   const [count, setCount] = useState("2"); const [busy, setBusy] = useState(false);
   const base = `/api/projects/${encodeURIComponent(project)}`;
   const loadConsent = useCallback(() => api<{ consent: Consent[] }>("GET", `${base}/consent`).then((r) => setConsent(r.consent)).catch(() => {}), [base]);
+  const loadProvenance = useCallback(() => api<{ unverified: UnverifiedFile[] }>("GET", `${base}/consent/provenance`).then((r) => setUnverified(r.unverified)), [base]);
   useEffect(() => { void loadConsent(); }, [loadConsent]);
+  useEffect(() => { void loadProvenance(); }, [loadProvenance]);
   useEffect(() => {
     setDrift(null);
     fetch(fileUrl(project, `checks/${spec.id}.json`)).then((r) => (r.ok ? r.json() : null)).then(setDrift).catch(() => {});
@@ -52,6 +56,11 @@ export default function CastPanel({ project, spec, stills, hasMaster, onBatch, o
     await api("POST", `${base}/consent`, { subject: subject.trim(), statement: statement.trim(), kind });
     toast("ok", `Consent recorded for ${subject.trim()}.`); setSubject(""); setStatement(""); await loadConsent();
   });
+  const clearForUse = (item: UnverifiedFile) => run(async () => {
+    if (!(await confirmDialog(`I confirm this file does not show a real person: ${item.file}. This records human clearance for these exact file bytes.`, { title: "Clear file for use?", ok: "I confirm" }))) return;
+    await api("POST", `${base}/consent/clear`, { sha: item.sha, clearance: "not_a_real_person" });
+    toast("ok", `${item.file} is cleared for use.`); await loadProvenance();
+  });
 
   return (
     <RailCard title={<span className="flex items-center gap-2"><Users size={15} aria-hidden />Cast: {spec.id}</span>} sub="Identity sheet, versions, drift and consent">
@@ -63,6 +72,7 @@ export default function CastPanel({ project, spec, stills, hasMaster, onBatch, o
               <li key={v} className="min-w-0 text-center">
                 <div className="thumb aspect-square">{made && e ? <img src={fileUrl(project, e.file)} alt={`${spec.id} ${v} view`} /> : <div className="grid h-full place-items-center text-[0.6rem] text-slate-500">none</div>}</div>
                 <span className="mt-0.5 block truncate text-[0.62rem] text-slate-400" title={v}>{v}{made ? "" : " (missing)"}</span>
+                {e && unverified.some((f) => f.file === e.file) && <span className="tag tag-amber mt-1 inline-flex" title="This file lacks verified provenance or human clearance">Unverified</span>}
               </li>
             ))}
           </ul>
@@ -120,6 +130,14 @@ export default function CastPanel({ project, spec, stills, hasMaster, onBatch, o
             </div>
           </form>
           <p className="mt-1 text-[0.68rem] text-slate-400">Only you can record consent here. Agents and the crew cannot.</p>
+          {!!unverified.length && <div className="mt-3 border-t border-slate-800 pt-3">
+            <h5 className="mb-2 text-xs font-semibold text-amber-300">Unverified files</h5>
+            <ul className="space-y-2">{unverified.map((item) => <li key={item.sha} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-800 px-2 py-1.5">
+              <span className="min-w-0 truncate text-xs" title={item.file}>{item.file} <span className="tag tag-amber ml-1">Unverified</span></span>
+              <Button size="sm" variant="outline" disabled={busy} onClick={() => void clearForUse(item)}>Clear for use</Button>
+            </li>)}</ul>
+            <p className="mt-1 text-[0.68rem] text-slate-400">Clearing records your confirmation that the selected file does not show a real person, for its current bytes only.</p>
+          </div>}
         </section>
       </div>
     </RailCard>

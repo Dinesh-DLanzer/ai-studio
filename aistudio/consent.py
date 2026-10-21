@@ -205,6 +205,21 @@ def _unverified_shas(pdir):
     return {digest for digest, (path, _meta) in metadata.items() if digest not in verified}
 
 
+def unverified_media(pdir):
+    """List unverified project media by relative file and current SHA for the human clearance UI."""
+    shas = _unverified_shas(pdir)
+    out = []
+    for path in _project_media(pdir):
+        digest = _sha(path)
+        if digest in shas:
+            try:
+                rel = path.relative_to(Path(pdir)).as_posix()
+            except ValueError:
+                continue
+            out.append({"file": rel, "sha": digest})
+    return sorted(out, key=lambda item: item["file"])
+
+
 def _inherits_bound(meta, marked, bound):
     """A derived file inherits consent only when every marked input it was made from has consent bound to it."""
     hit = [x for x in _parents(meta) if x in marked or x in bound]
