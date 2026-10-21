@@ -138,7 +138,7 @@ TOOLS = {
         lambda ws, a: ws.edit_export(a["name"]),
     ),
     "unregistered_stills": ("Find unregistered images in the stills folder that can be added to project assets.", S(name=STR), lambda ws, a: ws.unregistered_stills(a["name"])),
-    "import_stills": ("Import unregistered stills into project assets (images.json). Free.", S(name=STR, items={"type": "array"}), lambda ws, a: ws.import_stills(a["name"], a["items"])),
+    "import_stills": ("Import unregistered stills into project assets (images.json). Free.", S(name=STR, items={"type": "array"}), lambda ws, a: ws.import_stills(a["name"], a["items"], is_agent=True)),
     "upload_image": (
         "Upload or import an image file (from a local file path or base64 string) into project assets (stills/ and images.json). Free.",
         S(
@@ -158,6 +158,7 @@ TOOLS = {
             kind=a.get("kind"),
             replace=bool(a.get("replace", False)),
             prompt=a.get("prompt", ""),
+            is_agent=True,
         ),
     ),
     "analyze_character": ("Propose a paid multi-angle consistency review on a character asset image. Nothing is spent; a human must approve the returned review proposal before it can run.", S(name=STR, rel=STR), lambda ws, a: ws.analyze_character_image(a["name"], a["rel"])),

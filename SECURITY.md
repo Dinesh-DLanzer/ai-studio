@@ -80,6 +80,8 @@ AI Studio runs **on your own machine** and calls paid AI APIs with **your own ke
 - Do not expose the server to a network. If you change the bind address, add real authentication first.
 - Live grant capabilities are intentionally kept in memory and fail closed after a server restart; the consumed approval cannot be replayed.
 - AI clips can contain unwanted people, garbled text, or logos: always review frames and listen to audio yourself. The vision check is advisory.
+- Consent is judged on the exact bytes sent. If a marked photo is re-encoded or cropped *and* saved under a name no marked asset uses, nothing links it to the marked person (no perceptual matching); a human must mark it again. Files uploaded by a human and never marked are used as the human declared; files uploaded by an agent or paired device need a human "Clear for use" before they are sent.
+- The session token also travels in media URLs (`?token=`) so images and video can load in the page, and in the start-up URL. It never leaves 127.0.0.1, but do not share URLs, HAR files or screenshots of the network tab.
 - Face/voice recognition is not performed; the `real_person` flag and clearances are human declarations only.
 - Provider adapters are tested against recorded fixtures, not live accounts, except where stated. Check a new provider with one cheap request first.
 - Provider prices and model availability change; verify before large runs.

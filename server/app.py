@@ -719,7 +719,7 @@ def create_app(root=None, token=None, rates_path=None, transport=None, static_di
         data = await request.body()
         if len(data) > 25_000_000:
             raise HTTPException(413, "file too large")
-        guard(ws.add_file, name, rel, data, bool(replace), request.state.scope == "agent")
+        guard(ws.add_file, name, rel, data, bool(replace), request.state.scope in ("agent", "device"))
         return {"ok": True}
 
     @app.post("/api/projects/{name}/characters/{aid}/identity-sheet", dependencies=[api])
@@ -761,7 +761,7 @@ def create_app(root=None, token=None, rates_path=None, transport=None, static_di
     async def consent_record(name: str, request: Request):
         human_session(request)
         b = await request.json()      # agent=False in api_docs: an API key never reaches here
-        return guard(ws.consent_record, name, b.get("subject"), b.get("statement"), b.get("kind", "real_person"), b.get("asset_id"), b.get("sha"))
+        return guard(ws.consent_record, name, b.get("subject"), b.get("statement"), b.get("kind", "real_person"), b.get("asset_id"), b.get("sha"), b.get("voice_id"))
 
     @app.post("/api/projects/{name}/consent/clear", dependencies=[api])
     async def consent_clear(name: str, request: Request):
@@ -1117,7 +1117,7 @@ def create_app(root=None, token=None, rates_path=None, transport=None, static_di
 
     @app.post("/api/projects/{name}/stills/import", dependencies=[api])
     async def import_stills(name: str, request: Request):
-        return guard(ws.import_stills, name, (await request.json()).get("items", []))
+        return guard(ws.import_stills, name, (await request.json()).get("items", []), is_agent=request.state.scope in ("agent", "device"))
 
     # ---------------------------------------------------------------- providers, models, roles (settings v2)
     def auth_header(request: Request):

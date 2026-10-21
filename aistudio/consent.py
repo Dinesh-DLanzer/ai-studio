@@ -4,6 +4,7 @@ Writing is HUMAN-SESSION ONLY: the only caller is the web route marked agent=Fal
 (tests/test_cast.py pins that). Reading is free. Generation with an asset marked `real_person: true` is refused without a matching entry.
 """
 import json
+import unicodedata
 import hashlib
 import hmac
 import os
@@ -93,7 +94,7 @@ def read(pdir):
     return [x for x in data if isinstance(x, dict)] if isinstance(data, list) else []
 
 
-def record(pdir, subject, statement, kind="real_person", when=None, sha=None):
+def record(pdir, subject, statement, kind="real_person", when=None, sha=None, voice_id=None):
     """Append one consent entry. HUMAN channel only (never wire this to MCP, the crew or an agent route).
     With `sha` the consent is bound to those exact file bytes (the only kind that satisfies a file marked by mark_real_person)."""
     subject, statement = str(subject or "").strip(), str(statement or "").strip()
@@ -105,6 +106,8 @@ def record(pdir, subject, statement, kind="real_person", when=None, sha=None):
     entry = {"subject": subject, "statement": statement, "date": when or _date.today().isoformat(), "kind": kind}
     if sha:
         entry["sha"] = str(sha)
+    if voice_id and kind == "voice":
+        entry["voice_id"] = str(voice_id).strip()        # binds the consent to this exact voice, not just to a name
     items.append(entry)
     project_mod.save_json(Path(pdir), FILE, items)
     return entry
@@ -113,6 +116,25 @@ def record(pdir, subject, statement, kind="real_person", when=None, sha=None):
 def has(pdir, subject, kind="real_person"):
     s = str(subject or "").strip().lower()
     return any(x.get("kind") == kind and str(x.get("subject", "")).strip().lower() == s for x in read(pdir))
+
+
+def require_voice(pdir, subject, voice_id, declared_cloned):
+    """Voice consent cannot be dodged by a caller's claim. A voice id a human bound to a person always needs that person's consent (whatever
+    `cloned` says); a declared clone needs consent for the named subject, and that consent must not be bound to a different voice."""
+    records = [x for x in read(pdir) if x.get("kind") == "voice"]
+    owners = {str(x.get("subject", "")).strip() for x in records if voice_id and x.get("voice_id") == voice_id}
+    if owners:
+        return                                          # consent exists for this exact voice
+    if declared_cloned:
+        mine = [x for x in records if str(x.get("subject", "")).strip().lower() == str(subject or "").strip().lower()]
+        if not mine:
+            require(pdir, subject, "voice")             # raises the standard message
+        if not any(not x.get("voice_id") or x.get("voice_id") == voice_id for x in mine):
+            raise ServiceError(f"consent for {subject} is bound to a different voice than '{voice_id}'; a human must record consent for this voice")
+
+
+def voice_bound_to_someone(pdir, voice_id):
+    return bool(voice_id) and any(x.get("kind") == "voice" and x.get("voice_id") == voice_id for x in read(pdir))
 
 
 def require(pdir, subject, kind="real_person"):
@@ -300,10 +322,23 @@ def require_verified_shas(pdir, shas):
     require_shas(pdir, shas)
 
 
+def _norm(text):
+    """macOS and Windows file names are case-insensitive and may use NFD; compare ids and paths in one canonical form."""
+    return unicodedata.normalize("NFC", str(text or "")).casefold()
+
+
 def _asset_ids_for(rel):
     """Asset ids a media file can stand for: stills/<id>.png, <id>.v2.png, <id>_edit_a1.png, <id>_extended.mp4, <id>_final_a1.mp4."""
     stem = Path(str(rel)).stem
     return {stem, stem.split(".v")[0], stem.split("_edit_a")[0], stem.split("_extended")[0], stem.split("_final_a")[0]}
+
+
+def _agent_uploaded(path):
+    try:
+        meta = json.loads(Path(str(path) + ".meta.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    return meta.get("agent_upload") is True and meta.get("sha") == _sha(Path(path))      # the record is bound to these exact bytes
 
 
 def require_inputs(pdir, files):
@@ -315,7 +350,7 @@ def require_inputs(pdir, files):
     p = Path(pdir)
     paths = [Path(f) for f in files if f]
     records = read(p)
-    marked_assets = {x.get("asset") for x in records if x.get("kind") == "real_person_sha" and x.get("asset")}
+    marked_assets = {_norm(x.get("asset")) for x in records if x.get("kind") == "real_person_sha" and x.get("asset")}
     known = {x.get("sha") for x in records if x.get("sha") and x.get("kind") in ("real_person", "voice", "real_person_sha", "not_a_real_person_sha")}
     known |= real_person_shas(p)
     shas, ids = [], set()
@@ -329,8 +364,11 @@ def require_inputs(pdir, files):
             rel = f.resolve().relative_to(p.resolve()).as_posix()
         except ValueError:
             rel = f.name
-        here = _asset_ids_for(rel) | {i.get("id") for i in images if i.get("out") == rel}
-        ids |= here
+        here = {_norm(x) for x in _asset_ids_for(rel)} | {_norm(i.get("id")) for i in images if _norm(i.get("out")) == _norm(rel)}
+        ids |= {i.get("id") for i in images if _norm(i.get("id")) in here}
+        if sha not in known and _agent_uploaded(f):
+            raise ServiceError(f"{rel} was uploaded by an agent or paired device. A human must look at it and press Clear for use (or record consent) "
+                               "before it can be sent to a provider.")
         if sha not in known and here & marked_assets:
             raise ServiceError(f"{rel} was marked as a real person but its file bytes have changed since. A human must mark it again, clear it, or record consent "
                                "for the new file before it can be used.")

@@ -359,11 +359,11 @@ class Workspace(SettingsMixin):
     def unregistered_stills(self, name):
         return self._storyboard.unregistered_stills(name)
 
-    def import_stills(self, name, items):
-        return self._storyboard.import_stills(name, items)
+    def import_stills(self, name, items, is_agent=False):
+        return self._storyboard.import_stills(name, items, is_agent=is_agent)
 
-    def upload_image(self, name, aid=None, path=None, data=None, kind=None, replace=False, prompt="", real_person=False, subject=""):
-        return self._storyboard.upload_image(name, aid=aid, path=path, data=data, kind=kind, replace=replace, prompt=prompt, real_person=real_person, subject=subject)
+    def upload_image(self, name, aid=None, path=None, data=None, kind=None, replace=False, prompt="", real_person=False, subject="", is_agent=False):
+        return self._storyboard.upload_image(name, aid=aid, path=path, data=data, kind=kind, replace=replace, prompt=prompt, real_person=real_person, subject=subject, is_agent=is_agent)
 
     def consent_list(self, name):
         from aistudio import consent
@@ -405,11 +405,11 @@ class Workspace(SettingsMixin):
             raise ServiceError(f"asset {asset_id} has no file to bind consent to")
         return _sha(f)
 
-    def consent_record(self, name, subject, statement, kind="real_person", asset_id=None, sha=None):
+    def consent_record(self, name, subject, statement, kind="real_person", asset_id=None, sha=None, voice_id=None):
         """HUMAN session only (the one route is agent=False). Not an MCP/crew tool. With asset_id the consent is bound to that file's bytes."""
         from aistudio import consent
         digest = self._asset_sha(name, asset_id) if asset_id else sha
-        return consent.record(self.pdir(name), subject, statement, kind, sha=digest)
+        return consent.record(self.pdir(name), subject, statement, kind, sha=digest, voice_id=voice_id)
 
     def consent_mark(self, name, asset_id):
         """HUMAN session only: mark the asset's current file bytes as a real person, so consent bound to those bytes is required whatever the flag says."""

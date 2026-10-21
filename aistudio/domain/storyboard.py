@@ -118,7 +118,7 @@ class StoryboardDomain:
             out.append({"file": f.name, "suggested_id": cand, "suggested_kind": self._guess_kind(f.stem, f.name in ff), "used_by_shots": f.name in ff})
         return out
 
-    def import_stills(self, name, items):
+    def import_stills(self, name, items, is_agent=False):
         """Register existing images as assets. Each file is renamed to <id>.<ext> so the asset id and file name match (nothing is deleted)."""
         p = self.ws.pdir(name)
         doc = self.ws._read(p, "images.json", {"style": "", "images": []})
@@ -143,7 +143,7 @@ class StoryboardDomain:
         for src, aid, kind, dst in plan:
             if dst.name != src.name:
                 src.rename(dst)
-            project_mod.save_json(p, dst.relative_to(p).as_posix() + ".meta.json", {"unverified": True, "source": "import_stills"})
+            project_mod.save_json(p, dst.relative_to(p).as_posix() + ".meta.json", {"unverified": True, "agent_upload": bool(is_agent), "source": "import_stills"})
             for s in shots["shots"]:
                 if s.get("first_frame") and Path(s["first_frame"]).name == src.name:
                     s["first_frame"] = f"stills/{dst.name}"
@@ -154,7 +154,7 @@ class StoryboardDomain:
         self.ws._changed(name, "assets", "shots")
         return self.ws.overview(name)
 
-    def upload_image(self, name, aid=None, path=None, data=None, kind=None, replace=False, prompt="", real_person=False, subject=""):
+    def upload_image(self, name, aid=None, path=None, data=None, kind=None, replace=False, prompt="", real_person=False, subject="", is_agent=False):
         """Import an image file or base64 data into project assets (stills/<id>.<ext> and images.json)."""
         p = self.ws.pdir(name)
         if not path and not data:
@@ -192,7 +192,7 @@ class StoryboardDomain:
             from aistudio import consent as consent_mod
             consent_mod.require(p, subject or aid)
         # Let add_file validate image format, normalize to PNG/JPEG, handle replace, and write to stills/<aid>.<ext>
-        self.ws.add_file(name, f"stills/{aid}.png", raw, replace=bool(replace))
+        self.ws.add_file(name, f"stills/{aid}.png", raw, replace=bool(replace), is_agent=is_agent)
 
         # Check what file was actually written (e.g. .png, .jpg)
         written = None

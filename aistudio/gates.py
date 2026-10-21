@@ -1,6 +1,7 @@
 """E13: spending gates. Pure functions, no I/O. Raises GateError with a clear message; returns None when allowed."""
 STOP_LOSS = 1.30
 MAX_ATTEMPTS = 3
+IMAGE_MAX_ATTEMPTS = 6      # generous (stills are cheap and people iterate) but finite: repeated image calls cannot run away
 
 
 class GateError(Exception):

@@ -455,3 +455,38 @@ class TestConsentOnResolvedInputs(TestHardeningConsent):
         self.ws.consent_record("demo", "Actor", "ok again", asset_id="actor")
         self.ws.propose("demo", "clip", "s01")
         self.assertTrue(new_sha)
+
+    def test_a_different_letter_case_or_unicode_form_does_not_dodge_the_changed_bytes_check(self):
+        self._marked_actor()
+        self.ws.consent_record("demo", "Actor", "ok", asset_id="actor")
+        self._images()
+        (self.p / "stills" / "actor.png").write_bytes(self.png("red", (7, 7)))          # bytes changed after consent
+        consent_error = "changed|consent|clearance"
+        for spelling in ("stills/Actor.png", "stills/ACTOR.png", "./stills/actor.png"):
+            with self.assertRaisesRegex(ServiceError, consent_error):
+                consent.require_inputs(self.p, [self.p / spelling])
+
+    def test_agent_uploaded_photo_needs_a_human_clear_before_it_is_sent(self):
+        self.ws.add_file("demo", "stills/guest.png", self.png("blue"), is_agent=True)
+        self._images({"id": "guest", "kind": "other", "out": "stills/guest.png", "prompt": "p", "refs": []},
+                     {"id": "bg", "kind": "background", "out": "stills/bg.png", "prompt": "p", "refs": ["guest"]})
+        with self.assertRaisesRegex(ServiceError, "agent or paired device"):
+            self.ws.propose("demo", "image", "bg")
+        self.ws.consent_clear("demo", asset_id="guest", clearance="not_a_real_person")
+        self.ws.propose("demo", "image", "bg")                                     # a human looked at it and cleared it
+
+    def test_a_human_upload_is_not_blocked_by_the_agent_rule(self):
+        self.ws.add_file("demo", "stills/mine.png", self.png("green"))
+        self._images({"id": "mine", "kind": "other", "out": "stills/mine.png", "prompt": "p", "refs": []},
+                     {"id": "bg", "kind": "background", "out": "stills/bg.png", "prompt": "p", "refs": ["mine"]})
+        self.ws.propose("demo", "image", "bg")
+
+    def test_voice_consent_cannot_be_dodged_by_the_callers_claim(self):
+        consent.record(self.p, "Narrator", "ok", kind="voice", voice_id="voice-xyz")
+        for opts in ({"cloned": False}, {"cloned": False, "voice_subject": "Someone Else"}):
+            self.ws.propose("demo", "tts", "s01", options={"text": "hello", "voice_id": "voice-xyz", **opts})     # consent exists for this exact voice
+        consent.record(self.p, "Narrator Two", "ok", kind="voice", voice_id="other-voice")
+        with self.assertRaisesRegex(ServiceError, "different voice"):
+            self.ws.propose("demo", "tts", "s01", options={"text": "hello", "voice_id": "voice-xyz-2", "cloned": True, "voice_subject": "Narrator Two"})
+        with self.assertRaisesRegex(ServiceError, "no consent record"):
+            self.ws.propose("demo", "tts", "s01", options={"text": "hello", "voice_id": "clone-1", "cloned": True, "voice_subject": "Nobody Recorded"})

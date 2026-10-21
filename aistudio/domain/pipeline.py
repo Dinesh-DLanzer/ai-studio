@@ -296,8 +296,9 @@ class PipelineDomain:
             raise ServiceError("tts needs a voice_id")
         cloned = bool(options.get("cloned") or (kind == "tts" and voice.get("cloned")) or kind == "voice_clone" or task == "voice_clone")
         subject = str(options.get("voice_subject") or options.get("subject") or voice_id).strip()
-        if (kind in ("tts", "voice_clone") or task == "voice_clone") and cloned:
-            consent_mod.require(p, subject, "voice")
+        if kind in ("tts", "voice_clone") or task == "voice_clone":
+            if cloned or consent_mod.voice_bound_to_someone(p, voice_id):      # a voice a human bound to a person needs consent whatever the caller says
+                consent_mod.require_voice(p, subject, voice_id, cloned)
         files, duration = [], 0
         for key in (("source",) if kind == "transcribe" else ("video", "audio") if kind == "lipsync" else ()):
             f = self._source_file(p, options.get(key), key)
@@ -566,7 +567,8 @@ class PipelineDomain:
                           if (r.get("shot") == base or str(r.get("shot", "")).startswith(base + ".v")) and r.get("stage") == stage)
             gate_attempts = max(attempts, len(family))      # variants of a shot count toward the shot's attempt cap (they cannot multiply it)
             try:
-                gates.check_run(b, costlog.spent(p) + project_lock.reserved(p), price, gate_attempts if kind in ("clip", "image_edit", "clip_extend", *AI_TOOLS) else 0, override=override)
+                gates.check_run(b, costlog.spent(p) + project_lock.reserved(p), price, gate_attempts if kind in ("clip", "image_edit", "clip_extend", *AI_TOOLS) else (gate_attempts if kind == "image" else 0),
+                                 max_attempts=gates.IMAGE_MAX_ATTEMPTS if kind == "image" else None, override=override)
                 request_digest = approvals.request_hash(kind, target, model, price, payload)
                 grant = approvals.consume(p, pid, request_digest)
                 project_lock.reserve(p, pid, price, actor=grant.actor, shot=ledger, stage=stage, attempt=attempts + 1,
