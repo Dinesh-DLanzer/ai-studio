@@ -932,6 +932,34 @@ def create_app(root=None, token=None, rates_path=None, transport=None, static_di
         b = await request.json()
         return guard(ws.model_add, pid, b.get("id"), b.get("capability"))
 
+    # ---------------------------------------------------------------- ComfyUI workflows (plan 25)
+    @app.get("/api/comfy/workflows", dependencies=[api])
+    def comfy_workflows_list(request: Request):
+        human_session(request)
+        return {"workflows": guard(ws.comfy_workflows_list)}
+
+    @app.get("/api/comfy/workflows/{wf_id}", dependencies=[api])
+    def comfy_workflows_get(wf_id: str, request: Request):
+        human_session(request)
+        return guard(ws.comfy_workflows_get, wf_id)
+
+    @app.post("/api/comfy/workflows", dependencies=[api])
+    async def comfy_workflows_add(request: Request):
+        human_session(request)
+        b = await request.json()
+        return guard(ws.comfy_workflows_add, b.get("workflow"), b.get("manifest"))
+
+    @app.post("/api/comfy/workflows/validate", dependencies=[api])
+    async def comfy_workflows_validate(request: Request):
+        human_session(request)
+        b = await request.json()
+        return guard(ws.comfy_workflows_validate, b.get("workflow"), b.get("manifest"))
+
+    @app.delete("/api/comfy/workflows/{wf_id}", dependencies=[api])
+    def comfy_workflows_delete(wf_id: str, request: Request):
+        human_session(request)
+        return guard(ws.comfy_workflows_delete, wf_id)
+
     @app.get("/api/models", dependencies=[api])
     def models_all(capability: str = ""):
         return guard(ws.models_all, capability or None)
