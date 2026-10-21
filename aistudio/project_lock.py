@@ -1,4 +1,5 @@
 """Cross-process project spend lock and short-lived spend reservations."""
+import errno
 import json
 import math
 import os
@@ -28,7 +29,9 @@ def _backend():
             try:
                 msvcrt.locking(fh.fileno(), msvcrt.LK_LOCK, 1)
                 return
-            except OSError:
+            except OSError as error:
+                if error.errno not in (errno.EACCES, errno.EDEADLK, errno.EAGAIN):   # contention only; a real failure must not spin forever
+                    raise
                 time.sleep(0.05)
 
     def release(fh):

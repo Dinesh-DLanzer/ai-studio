@@ -63,12 +63,25 @@ AI Studio runs **on your own machine** and calls paid AI APIs with **your own ke
 - Timeline and asset consent is strictly enforced: videos containing assets marked `real_person` or marked SHAs cannot be uploaded without recorded consent.
 - API keys, MCP, crew, recipes, and batches cannot upload.
 
+## Media provenance and clearance (fail closed)
+- A file counts as **verified** only when the server can prove where it came from: pipeline output with a grant, an editor render, a local tool output, or a derived file whose every input is verified. Each such file carries a `.meta.json` lineage record signed with a server-held HMAC key (kept in the OS keychain or the 0600 secrets file, never in a project), so a hand-written, copied or edited record is worthless.
+- Everything else is **unverified**: uploads, imports, files returned by external editors, and anything outside the known folders. Registering a file in `images.json` or `shots.json` does not make it verified. Unverified files cannot be used for consent-gated work (face and voice tasks, character swap, motion transfer, replace or restyle with a person, voice cloning, library promotion, YouTube upload) until a **human** clears the exact file bytes in the page ("Clear for use": not a real person, or a recorded consent bound to that file).
+- An editor render inherits the real-person mark from any input clip, and is verified only when every input is. A re-encoded or cropped copy made outside the app has new bytes and no lineage, so it is unverified. Zip import discards imported lineage and consent files.
+- Clearance and consent routes are human-session only. API keys, device tokens, MCP, crew and recipes cannot create them, and `confirm=true` is never accepted.
+
+## Paired devices
+- A paired device (for example an editor panel) gets a revocable `aisd_` token from a short human-confirmed pairing code. It can read project media and create proposals, but it cannot approve or execute anything, change settings, record consent or upload. Tokens are accepted only in a header, never in a URL, and are stored hashed.
+
+## Hosted mode (foundation only, not a supported deployment)
+- With `AISTUDIO_HOSTED` set, project folders, locks, spend reservations, approvals and trash live under `<root>/tenants/<tenant_id>/`, tenant ids are validated (no separators, `..` or symlinks), and the request context fails closed when no tenant is set. The local single-user layout is unchanged. Hosted authentication, organisation management and Postgres are **not implemented**; do not expose a hosted deployment to the internet. See `docs/adr-hosted-multitenant.md`.
+
 ## Known limits
 - This is a single-user local tool. A hostile process running as you on the same machine can read project metadata and the external local state. The fallback HMAC secret is kept in the OS keychain when available (or the 0600 external secrets file); challenge codes are never stored in a project. The approval design stops accidents and agent self-approval, not a malicious local user.
 - Do not expose the server to a network. If you change the bind address, add real authentication first.
 - Live grant capabilities are intentionally kept in memory and fail closed after a server restart; the consumed approval cannot be replayed.
 - AI clips can contain unwanted people, garbled text, or logos: always review frames and listen to audio yourself. The vision check is advisory.
-- Face/voice recognition is not performed; the `real_person` flag is a human declaration only.
+- Face/voice recognition is not performed; the `real_person` flag and clearances are human declarations only.
+- Provider adapters are tested against recorded fixtures, not live accounts, except where stated. Check a new provider with one cheap request first.
 - Provider prices and model availability change; verify before large runs.
 - The vision check cannot hear audio or understand all languages; it is a second pair of eyes, not a judge.
 

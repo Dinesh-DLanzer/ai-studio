@@ -306,6 +306,21 @@ class TestHardeningConsent(unittest.TestCase):
         self.assertEqual(allowed.status_code, 200, allowed.text)
         consent.require_verified_shas(self.p, [sha])
 
+    def test_provenance_route_lists_unverified_media_and_is_read_only_for_agents(self):
+        from fastapi.testclient import TestClient
+        from server.app import create_app
+        client = TestClient(create_app(self.root, token="human", static_dir="/nonexistent"))
+        key = client.post("/api/keys", json={"name": "agent"}, headers={"x-aistudio-token": "human"}).json()["key"]
+        media = self.p / "stills" / "outside-copy.png"
+        media.write_bytes(b"unverified media")
+        sha = _sha(media)
+        route = "/api/projects/demo/consent/provenance"
+        response = client.get(route, headers={"x-aistudio-token": "human"})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertIn({"file": "stills/outside-copy.png", "sha": sha}, response.json()["unverified"])
+        self.assertEqual(client.get(route, headers={"x-aistudio-token": key}).status_code, 403)
+        self.assertFalse(__import__("server.api_docs", fromlist=["agent_allowed"]).agent_allowed("GET", "/api/projects/{name}/consent/provenance"))
+
     def test_consent_checked_for_references_of_ordinary_clip_generation(self):
         ref_file = self.p / "stills" / "actor.png"
         ref_file.write_bytes(b"ACTOR-BYTES")
