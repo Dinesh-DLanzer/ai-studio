@@ -4,7 +4,7 @@ import * as Dialog from "@radix-ui/react-dialog";
 import * as Menu from "@radix-ui/react-dropdown-menu";
 import {
   ChevronDown, Clapperboard, Download, FlaskConical, Github, Star, Command as CmdIcon, Film, FolderOpen, HelpCircle, Home, Image as ImageIcon,
-  LayoutGrid, Library, Menu as MenuIcon, MessageCircle, Pencil, Plus, Search, Settings, Trash2, Users, Wand2, Wallet, X,
+  LayoutGrid, Library, Menu as MenuIcon, MessageCircle, Pencil, Plus, Search, Settings, Trash2, Users, Wand2, Wallet, X, BookOpen, Send,
 } from "lucide-react";
 import { api } from "../api";
 import { RenameButton, RenameDialog } from "../Rename";
@@ -27,7 +27,9 @@ const NAV = [
   { key: "assets", label: "Assets", icon: ImageIcon, count: "assets" as const },
   { key: "shots", label: "Shots", icon: Film, count: "shots" as const },
   { key: "crew", label: "Crew", icon: Users },
+  { key: "recipes", label: "Recipes", icon: BookOpen },
   { key: "review", label: "Review & Export", icon: Clapperboard },
+  { key: "publish", label: "Publish", icon: Send },
   { key: "costs", label: "Costs", icon: Wallet },
   { key: "discarded", label: "Discarded", icon: Trash2 },
 ];

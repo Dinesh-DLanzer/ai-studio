@@ -1,0 +1,34 @@
+import { useEffect, useState } from "react";
+import { Download, History, MessageSquare, Upload } from "lucide-react";
+import { api, getToken } from "../api";
+import { Badge, Button, Card, Field, Input, Label, PageHeader, Select } from "../ui";
+import { PageBody } from "../app/Shell";
+import type { TabProps } from "../ProjectPage";
+
+type Comment = { id: string; target: string; time?: number; author?: string; text: string; status: string; created?: number };
+export default function ReviewPage({ name, o }: Pick<TabProps, "name" | "o">) {
+  const [comments, setComments] = useState<Comment[]>([]); const [target, setTarget] = useState("edit"); const [text, setText] = useState(""); const [author, setAuthor] = useState("User");
+  const [error, setError] = useState(""); const [message, setMessage] = useState(""); const [busy, setBusy] = useState(false); const [historyOpen, setHistoryOpen] = useState(false);
+  const [documents] = useState(["Story.md", "brief.md", "TODO.md"]); const [doc, setDoc] = useState("Story.md"); const [file, setFile] = useState<File | null>(null);
+  const refresh = async () => { const r = await api<{ comments: Comment[] }>("GET", `/api/projects/${name}/comments`); setComments(r.comments || []); };
+  useEffect(() => { refresh().catch((e) => setError(e.message)); }, [name]);
+  const mutate = async (method: string, body: any, suffix = "") => { setBusy(true); setError(""); try { await api(method, `/api/projects/${name}/comments${suffix}`, body); await refresh(); } catch (e: any) { setError(e.message); } finally { setBusy(false); } };
+  const add = async () => { if (!text.trim()) return; await mutate("POST", { target, text: text.trim(), author }); if (!error) setText(""); };
+  const exportPackage = async () => { setBusy(true); setError(""); try { const r = await fetch(`/api/projects/${name}/review-package`, { method: "POST", headers: { "x-aistudio-token": getToken(), "content-type": "application/json" }, body: "{}" }); if (!r.ok) throw new Error((await r.text()) || "Could not export package"); const blob = await r.blob(); const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = url; a.download = `${name}-review.zip`; a.click(); URL.revokeObjectURL(url); setMessage(`Review package downloaded: ${name}-review.zip`); } catch (e: any) { setError(e.message); } finally { setBusy(false); } };
+  const importFeedback = async () => { if (!file) return; setBusy(true); setError(""); try { const r = await fetch(`/api/projects/${name}/comments/import-feedback`, { method: "POST", headers: { "x-aistudio-token": getToken(), "content-type": "application/json" }, body: await file.text() }); const data = await r.json(); if (!r.ok) throw new Error(data.detail || "Import failed"); setMessage(`Merged ${data.imported} comment${data.imported === 1 ? "" : "s"}; ${data.total} total comments.`); setFile(null); await refresh(); } catch (e: any) { setError(e.message); } finally { setBusy(false); } };
+  return <PageBody><div className="space-y-4">
+    <PageHeader title="Review" accent="Feedback" icon={<MessageSquare size={24} />} sub="Collect notes on the edit, individual shots, and assets." right={<Button variant="outline" onClick={() => setHistoryOpen(true)}><History size={15} />Document history</Button>} />
+    {error && <p role="alert" className="text-sm text-red-300">{error}</p>}{message && <p role="status" className="text-sm text-slate-300">{message}</p>}
+    <Card title="Add a comment"><div className="grid gap-3 md:grid-cols-[1fr_1fr]"><div><Label>Target</Label><Select aria-label="Target" value={target} onChange={(e) => setTarget(e.target.value)}><option value="edit">Full edit</option>{o.shots.shots.map((s) => <option key={s.id} value={`shot:${s.id}`}>Shot: {s.id}</option>)}{o.images.images.map((a) => <option key={a.id} value={`asset:${a.id}`}>Asset: {a.id}</option>)}</Select></div><div><Label>Author</Label><Input aria-label="Author" value={author} onChange={(e) => setAuthor(e.target.value)} /></div><div className="md:col-span-2"><Label>Comment</Label><Field aria-label="Comment" rows={3} value={text} onChange={(e) => setText(e.target.value)} /></div></div><Button className="mt-3" onClick={add} disabled={busy || !text.trim()}>Add comment</Button></Card>
+    <Card title="Comments" sub={`${comments.length} total`}>
+      {!comments.length ? <p className="text-sm text-slate-400">No comments yet.</p> : <ul className="space-y-3">{comments.map((c) => <li key={c.id} className="rounded-xl border border-slate-800 p-3">
+        <div className="flex flex-wrap items-center gap-2"><b>{c.author || "Reviewer"}</b><Badge tone={c.status === "resolved" ? "green" : "amber"}>{c.status || "open"}</Badge><span className="text-xs text-slate-400">{c.target}{c.time != null ? ` · ${c.time}s` : ""}</span><div className="ml-auto flex gap-2">
+          <Button size="sm" variant="outline" disabled={busy} onClick={() => mutate("PATCH", { id: c.id, action: c.status === "resolved" ? "reopen" : "resolve" })}>{c.status === "resolved" ? "Reopen" : "Resolve"}</Button><Button size="sm" variant="danger" disabled={busy} onClick={() => mutate("DELETE", { id: c.id })}>Delete</Button>
+        </div></div><p className="mt-2 whitespace-pre-wrap text-sm">{c.text}</p>
+      </li>)}</ul>}
+    </Card>
+    <div className="grid gap-4 lg:grid-cols-2"><Card title="Export review package" sub="Downloads a self-contained ZIP with the video, shot list, frames, and open comments."><Button variant="pink" onClick={exportPackage} disabled={busy}><Download size={14} />Export review package</Button></Card>
+      <Card title="Import feedback" sub="Choose reviewer feedback.json to merge its comments into this project."><div className="flex flex-wrap items-end gap-3"><div><Label>Feedback JSON file</Label><Input aria-label="Feedback JSON file" type="file" accept="application/json,.json" onChange={(e) => setFile(e.target.files?.[0] || null)} /></div><Button variant="outline" onClick={importFeedback} disabled={!file || busy}><Upload size={14} />Import feedback</Button></div></Card></div>
+    {historyOpen && <div role="dialog" aria-modal="true" aria-label="Document history" className="fixed inset-0 z-50 grid place-items-center bg-black/70 p-4"><section className="w-full max-w-lg rounded-2xl border border-slate-800 bg-slate-900 p-5"><div className="flex items-center justify-between"><h2 className="text-lg font-bold">Document history</h2><Button size="sm" variant="outline" onClick={() => setHistoryOpen(false)}>Close</Button></div><div className="mt-3"><Label>Document</Label><Select aria-label="Document" value={doc} onChange={(e) => setDoc(e.target.value)}>{documents.map((d) => <option key={d}>{d}</option>)}</Select></div><p className="mt-4 rounded-xl border border-amber-400/30 bg-amber-400/5 p-3 text-sm text-amber-100">History and restore routes are not available on this server yet. No versions can be listed or restored.</p></section></div>}
+  </div></PageBody>;
+}
