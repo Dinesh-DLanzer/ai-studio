@@ -58,6 +58,15 @@ class TestSpendSafetyRegressions(unittest.TestCase):
         self.assertAlmostEqual(float(rows[0]["cost"]), 0.036)
         self.assertEqual(project_lock.reserved(self.p), 0)
 
+    def test_corrupt_reservations_fail_closed_and_remain_for_recovery(self):
+        prop = self.approved()
+        reservation_path = self.p / "spend_reservations.json"
+        reservation_path.write_text("{broken")
+        with patch.object(self.ws.runner(), "image", side_effect=AssertionError("provider called")):
+            with self.assertRaises(RuntimeError):
+                self.ws.execute("demo", prop["id"])
+        self.assertEqual(reservation_path.read_text(), "{broken")
+
     def test_failed_log_write_keeps_reservation(self):
         prop = self.approved()
         with patch.object(costlog, "append_log", side_effect=OSError("log unavailable")):

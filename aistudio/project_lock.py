@@ -1,5 +1,6 @@
 """Cross-process project spend lock and short-lived spend reservations."""
 import json
+import math
 import os
 import time
 from contextlib import contextmanager
@@ -30,11 +31,24 @@ def lock(pdir):
 
 def read_reservations(pdir):
     path = Path(pdir) / "spend_reservations.json"
-    try:
-        rows = json.loads(path.read_text(encoding="utf-8")) if path.exists() else []
-        return rows if isinstance(rows, list) else []
-    except (OSError, ValueError):
+    if not path.exists():
         return []
+    try:
+        rows = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as error:
+        raise RuntimeError("Spend reservations are unreadable; refusing unsafe execution") from error
+    if not isinstance(rows, list):
+        raise RuntimeError("Spend reservations are invalid; refusing unsafe execution")
+    for row in rows:
+        if not isinstance(row, dict) or not row.get("proposal_id"):
+            raise RuntimeError("Spend reservations are invalid; refusing unsafe execution")
+        try:
+            price = float(row.get("price", 0) or 0)
+        except (TypeError, ValueError) as error:
+            raise RuntimeError("Spend reservations are invalid; refusing unsafe execution") from error
+        if not math.isfinite(price) or price < 0:
+            raise RuntimeError("Spend reservations are invalid; refusing unsafe execution")
+    return rows
 
 
 def write_reservations(pdir, rows):
