@@ -794,6 +794,28 @@ def create_app(root=None, token=None, rates_path=None, transport=None, static_di
         b = await request.json() if (await request.body()) else {}
         return guard(ws.voiceover_plan, name, b.get("voice"), actor="local")
 
+    @app.get("/api/voices", dependencies=[api])
+    def voices_list(request: Request):
+        human_session(request)
+        return {
+            "voices": [
+                {"id": "alloy", "name": "Alloy (Neutral)", "provider": "openai", "gender": "neutral"},
+                {"id": "echo", "name": "Echo (Warm)", "provider": "openai", "gender": "male"},
+                {"id": "fable", "name": "Fable (Expressive)", "provider": "openai", "gender": "male"},
+                {"id": "onyx", "name": "Onyx (Deep)", "provider": "openai", "gender": "male"},
+                {"id": "nova", "name": "Nova (Energetic)", "provider": "openai", "gender": "female"},
+                {"id": "shimmer", "name": "Shimmer (Clear)", "provider": "openai", "gender": "female"},
+                {"id": "21m00Tcm4TlvDq8ikWAM", "name": "Rachel (Calm)", "provider": "elevenlabs", "gender": "female"},
+                {"id": "AZnzlk1XvdvUeBnXmlld", "name": "Domi (Strong)", "provider": "elevenlabs", "gender": "female"},
+                {"id": "EXAVITQu4vr4xnSDxMaL", "name": "Bella (Soft)", "provider": "elevenlabs", "gender": "female"},
+                {"id": "ErXwobaYiN019PkySvjV", "name": "Antoni (Smooth)", "provider": "elevenlabs", "gender": "male"},
+                {"id": "MF3mGyEYCl7XYWbV9V6O", "name": "Elli (Emotional)", "provider": "elevenlabs", "gender": "female"},
+                {"id": "TxGEqnHWrfWFTfGW9XjX", "name": "Josh (Narrative)", "provider": "elevenlabs", "gender": "male"},
+                {"id": "ananya", "name": "Ananya (Tamil & Indian English)", "provider": "sarvam", "language": "ta-IN"},
+                {"id": "aravind", "name": "Aravind (Tamil & Indian English)", "provider": "sarvam", "language": "ta-IN"},
+            ]
+        }
+
     @app.get("/api/projects/{name}/spec/{kind}/{target}", dependencies=[api])
     def spec(name: str, kind: str, target: str):
         return guard(ws.spec, name, kind, target)
