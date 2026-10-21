@@ -15,7 +15,8 @@ export const getToken = () => sessionStorage.getItem(KEY) || "";
 
 export class ApiError extends Error {
   status: number;
-  constructor(status: number, message: string) { super(message); this.status = status; }
+  data?: any; // structured error payload, e.g. budget_diff
+  constructor(status: number, message: string, data?: any) { super(message); this.status = status; this.data = data; }
 }
 
 export async function api<T = any>(method: string, path: string, body?: unknown): Promise<T> {
@@ -25,7 +26,7 @@ export async function api<T = any>(method: string, path: string, body?: unknown)
     body: body !== undefined ? JSON.stringify(body) : undefined,
   });
   const data = await r.json().catch(() => ({}));
-  if (!r.ok) throw new ApiError(r.status, (data as any).detail || (data as any).error || r.statusText);
+  if (!r.ok) throw new ApiError(r.status, (data as any).detail || (data as any).error || r.statusText, data);
   return data as T;
 }
 

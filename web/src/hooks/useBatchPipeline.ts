@@ -1,8 +1,7 @@
 import { useState } from "react";
 import { api } from "../api";
-import { execAndWait, type Running } from "../Proposal";
 import { useToast } from "../toast";
-import type { Proposal } from "../types";
+import type { Running } from "../Proposal";
 
 export interface PlanItem {
   kind: "image" | "clip";
@@ -10,9 +9,16 @@ export interface PlanItem {
   label: string;
   price: number;
   model: string;
+  status?: string;
+  error?: string;
+  changes?: string[];
 }
 
+/** A batch frozen by the server. The human approves exactly this list and total (batch_hash); the server runs it. */
 export interface Plan {
+  id: string;
+  batch_hash: string;
+  status: string;
   items: PlanItem[];
   total: number;
   budget: {
@@ -36,12 +42,13 @@ export function useBatchPipeline({ project, running, reloadAll, load }: UseBatch
   const [batch, setBatch] = useState<{ i: number; total: number; label: string } | null>(null);
 
   const working = clicking || !!batch || Object.keys(running).length > 0;
+  const base = `/api/projects/${project}/batches`;
 
   const openPlan = async () => {
     if (working) return;
     setClicking(true);
     try {
-      setPlan(await api<Plan>("GET", `/api/projects/${project}/generate-all`));
+      setPlan(await api<Plan>("POST", base));
     } catch (e: any) {
       toast("error", e.message);
     } finally {
@@ -49,49 +56,34 @@ export function useBatchPipeline({ project, running, reloadAll, load }: UseBatch
     }
   };
 
-  /** One human approval for the whole list (exact prices shown first); runs each item through propose / approve / execute. */
+  /** The approve button: the human approves the batch, the server runs it, the browser only polls. */
   const runAll = async () => {
-    const items = plan?.items || [];
+    if (!plan) return;
+    const { id, batch_hash } = plan;
     setPlan(null);
-    let done = 0;
-    const errors: string[] = [];
+    let last: Plan | null = null;
     try {
-      for (const [i, it] of items.entries()) {
-        setBatch({ i: i + 1, total: items.length, label: it.label });
-        try {
-          const prop = await api<Proposal>("POST", `/api/projects/${project}/proposals`, { kind: it.kind, target: it.target });
-          await api("POST", `/api/projects/${project}/proposals/${prop.id}/approve`, { code: prop.code });
-          const msg = await execAndWait(project, prop.id, false);
-          if (msg.startsWith("Provider error")) {
-            errors.push(`${it.label}: ${msg}`);
-            continue;
-          }
-          done++;
-          try {
-            reloadAll();
-          } catch {
-            /* ignore */
-          }
-          await load().catch(() => {});
-        } catch (itemErr: any) {
-          errors.push(`${it.label}: ${itemErr.message}`);
-          console.warn(`[runAll] ${it.label} error:`, itemErr);
-        }
+      await api(`POST`, `${base}/${id}/approve`, { batch_hash });
+      await api("POST", `${base}/${id}/run`);
+      for (;;) {
+        await new Promise((r) => setTimeout(r, 1500));
+        last = await api<Plan>("GET", `${base}/${id}`);
+        const done = last.items.filter((x) => x.status === "done").length;
+        const cur = last.items.find((x) => x.status === "running");
+        setBatch({ i: Math.min(done + 1, last.items.length), total: last.items.length, label: cur?.label || "" });
+        reloadAll();
+        if (last.status !== "approved" && last.status !== "running") break;
       }
-      if (errors.length === 0) {
-        toast("ok", `Generated ${done} item${done === 1 ? "" : "s"}.`);
-      } else {
-        toast(done > 0 ? "ok" : "error", `Generated ${done} of ${items.length} item${items.length === 1 ? "" : "s"}${errors.length ? ` (${errors.length} failed)` : ""}.`);
-      }
+      const done = last.items.filter((x) => x.status === "done").length;
+      const stopped = last.items.find((x) => x.status === "needs_reapproval" || x.status === "error");
+      if (last.status === "done") toast("ok", `Generated ${done} item${done === 1 ? "" : "s"}.`);
+      else if (stopped) toast("error", `Stopped after ${done} of ${last.items.length}: ${stopped.label} ${stopped.status === "needs_reapproval" ? `changed (${(stopped.changes || []).join(", ")}); review and approve a new batch` : `failed: ${stopped.error || ""}`}`);
+      else toast("error", `Batch ${last.status}.`);
     } catch (e: any) {
-      toast("error", `Stopped after ${done} of ${items.length}: ${e.message}`);
+      toast("error", e.message);
     } finally {
       setBatch(null);
-      try {
-        reloadAll();
-      } catch {
-        /* ignore */
-      }
+      reloadAll();
       await load().catch(() => {});
     }
   };

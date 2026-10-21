@@ -9,20 +9,32 @@ from aistudio.domain.common import ServiceError
 from aistudio.providers import base as pbase
 
 
+class BudgetStale(ServiceError):
+    """The approved budget no longer matches the plan; .diff is the structured difference for the UI."""
+
+    def __init__(self, diff):
+        est = lambda v: "?" if v is None else f"${v:.2f}"
+        super().__init__(f"Budget out of date: estimate now {est(diff['new_estimate'])} (approved {est(diff['approved_estimate'])}). Re-approve.")
+        self.diff = diff
+
+
 class CostDomain:
     def __init__(self, ws):
         self.ws = ws
 
+    def plan_snapshot(self, p):
+        """Only what changes price or count. Prompt wording is excluded: each proposal binds its prompt via request_hash."""
+        shots = self.ws._read(p, "shots.json", {"shots": []})
+        images = self.ws._read(p, "images.json", {"images": []})
+        res, audio = shots.get("final_resolution", "720p"), shots.get("audio", False)
+        return {
+            "shots": {s["id"]: {"seconds": s.get("seconds"), "resolution": s.get("resolution") or res, "audio": s.get("audio", audio), "model": s.get("model")}
+                      for s in shots.get("shots", [])},
+            "images": {i["id"]: {"kind": i.get("kind"), "refs": len(i.get("refs", []))} for i in images.get("images", [])},
+        }
+
     def fingerprints(self, p):
         """Return hashes binding a budget approval to the current plan and price cards."""
-        raw_shots = self.ws._read(p, "shots.json", {"shots": []})
-        raw_images = self.ws._read(p, "images.json", {"images": []})
-        shot_keys = ("id", "seconds", "prompt", "resolution", "audio", "first_frame", "model")
-        image_keys = ("id", "kind", "out", "prompt", "refs", "aspect_ratio")
-        docs = {
-            "shots": {k: v for k, v in raw_shots.items() if k != "shots"} | {"shots": [{k: s.get(k) for k in shot_keys} for s in raw_shots.get("shots", [])]},
-            "images": {k: v for k, v in raw_images.items() if k != "images"} | {"images": [{k: i.get(k) for k in image_keys} for i in raw_images.get("images", [])]},
-        }
         roles = {}
         for role in ("image", "video", "vision"):
             try:
@@ -31,22 +43,58 @@ class CostDomain:
                 roles[role] = []
         canon = lambda value: json.dumps(value, sort_keys=True, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
         return {
-            "plan_hash": hashlib.sha256(canon(docs)).hexdigest(),
+            "plan_hash": hashlib.sha256(canon(self.plan_snapshot(p))).hexdigest(),
             "pricing_hash": hashlib.sha256(canon(roles)).hexdigest(),
         }
+
+    @staticmethod
+    def plan_diff(old, new):
+        """Per-field differences between two plan snapshots, for the approve dialog."""
+        out = []
+        for kind in ("shots", "images"):
+            o, n = old.get(kind, {}), new.get(kind, {})
+            if len(o) != len(n):
+                out.append({"field": f"{kind}_count", "id": "", "from": len(o), "to": len(n)})
+            for k in sorted(set(o) | set(n)):
+                if k not in o or k not in n:
+                    out.append({"field": kind[:-1], "id": k, "from": "present" if k in o else None, "to": "present" if k in n else None})
+                    continue
+                for field in sorted(set(o[k]) | set(n[k])):
+                    if o[k].get(field) != n[k].get(field):
+                        out.append({"field": "refs" if field == "refs" else field, "id": k, "from": o[k].get(field), "to": n[k].get(field)})
+        return out
+
+    def stale_budget(self, p, b):
+        """None when the approval still matches the plan and prices, else a structured diff (legacy budgets without hashes pass)."""
+        if not b.get("plan_hash"):
+            return None
+        now = self.fingerprints(p)
+        if b.get("plan_hash") == now["plan_hash"] and b.get("pricing_hash") == now["pricing_hash"]:
+            return None
+        diff = self.plan_diff(b.get("plan") or {}, self.plan_snapshot(p)) if b.get("plan") else []
+        if b.get("pricing_hash") != now["pricing_hash"]:
+            diff.append({"field": "pricing", "id": "", "from": "approved price cards", "to": "current price cards"})
+        try:
+            current = self._current_estimate(p)["estimate"]
+        except (ServiceError, KeyError, ValueError):
+            current = None
+        return {"changes": diff, "approved_estimate": b.get("estimate"), "new_estimate": current}
 
     def rates(self):
         return json.loads(self.ws.rates_path.read_text(encoding="utf-8"))
 
-    def estimate(self, name, failure=0.2):
-        p = self.ws.pdir(name)
+    def _current_estimate(self, p, failure=0.2):
         shots, images = self.ws._read(p, "shots.json"), self.ws._read(p, "images.json", {"images": []})
         existing = {i["id"] for i in images["images"] if (p / i["out"]).exists()}
+        return self._estimate(p, shots, images, existing, failure)
+
+    def estimate(self, name, failure=0.2):
+        p = self.ws.pdir(name)
         try:
-            est = self._estimate(p, shots, images, existing, failure)
+            est = self._current_estimate(p, failure)
         except (KeyError, ValueError) as e:
             raise ServiceError(f"cannot estimate: {e}") from None
-        b = {**est, "approved": False, "created": datetime.now().isoformat(timespec="seconds"), **self.fingerprints(p)}
+        b = {**est, "approved": False, "created": datetime.now().isoformat(timespec="seconds"), **self.fingerprints(p), "plan": self.plan_snapshot(p)}
         project_mod.save_json(p, "budget.json", b)
         return b
 
@@ -71,7 +119,7 @@ class CostDomain:
         p = self.ws.pdir(name)
         b = self.ws._read(p, "budget.json") or (_ for _ in ()).throw(ServiceError("run estimate first"))
         if not b.get("plan_hash") or not b.get("pricing_hash"):
-            b.update(self.fingerprints(p))
+            b.update(self.fingerprints(p), plan=self.plan_snapshot(p))
         b["approved"] = True
         project_mod.save_json(p, "budget.json", b)
         return b

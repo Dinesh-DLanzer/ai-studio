@@ -7,25 +7,56 @@ from contextlib import contextmanager
 from pathlib import Path
 
 
+def _backend():
+    """(acquire, release) for the platform file lock, or None when neither fcntl nor msvcrt exists."""
+    try:
+        import fcntl
+        return (lambda fh: fcntl.flock(fh.fileno(), fcntl.LOCK_EX)), (lambda fh: fcntl.flock(fh.fileno(), fcntl.LOCK_UN))
+    except ImportError:
+        pass
+    try:
+        import msvcrt
+    except ImportError:
+        return None
+
+    def acquire(fh):
+        fh.seek(0)
+        while True:  # LK_LOCK gives up after ~10s with OSError; keep waiting like flock does
+            try:
+                msvcrt.locking(fh.fileno(), msvcrt.LK_LOCK, 1)
+                return
+            except OSError:
+                time.sleep(0.05)
+
+    def release(fh):
+        fh.seek(0)
+        msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, 1)
+    return acquire, release
+
+
 @contextmanager
 def lock(pdir):
     """Serialize gate/approval/reservation state for one project across processes."""
+    backend = _backend()
+    if backend is None:
+        raise RuntimeError("Project spend lock unavailable; refusing unsafe execution")
+    acquire, release = backend
     path = Path(pdir) / ".spend.lock"
     path.parent.mkdir(parents=True, exist_ok=True)
     fh = path.open("a+")
     try:
         try:
-            import fcntl
-            fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
-        except (ImportError, OSError) as error:
+            acquire(fh)
+        except OSError as error:
             raise RuntimeError("Project spend lock unavailable; refusing unsafe execution") from error
-        yield
-    finally:
         try:
-            import fcntl
-            fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
-        except (ImportError, OSError):
-            pass
+            yield
+        finally:
+            try:
+                release(fh)
+            except OSError:
+                pass
+    finally:
         fh.close()
 
 

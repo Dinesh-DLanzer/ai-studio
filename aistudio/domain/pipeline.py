@@ -6,6 +6,7 @@ import shutil
 import tempfile
 
 from aistudio import activity, approvals, chat as chat_mod, costlog, editor as editor_mod, frames as frames_mod, gates, palette as palette_mod, project as project_mod, project_lock, roles as roles_mod
+from aistudio.domain.costs import BudgetStale
 from aistudio.domain.common import REVIEW_PRICE, ServiceError, _ident, _sha
 from aistudio.providers import base as pbase
 from aistudio import character_check
@@ -123,29 +124,29 @@ class PipelineDomain:
         queue = self.production_progress(name)["queue"]
         if not queue:
             raise ServiceError("nothing is left to generate (or the budget is not approved yet)")
-        img_price = vid_price = None
-        img_model = None
         items = []
         for it in queue:
-            if it["kind"] == "image":
-                if img_price is None:
-                    e = self.ws._primary("image", p)
-                    img_price = self.ws.pricing().image_price(e["card"])
-                    if img_price is None:
-                        raise ServiceError(f"No price set for {e['model']}. Set it in Settings > Model Configuration before generating images.")
-                    img_model = e["model"]
-                items.append({**it, "price": img_price, "model": img_model})
-            else:
-                shot, doc, res, audio, _ = self._clip_spec_loose(p, it["target"])
-                e = self.ws._primary("video", p)
-                price = self.ws.runner().video_price(e, {"seconds": shot["seconds"], "resolution": res, "audio": audio})
-                if price is None:
-                    raise ServiceError(f"No price for {e['model']} at {res} ({shot['seconds']}s). Set it in Settings > Model Configuration.")
-                items.append({**it, "price": price, "model": e["model"]})
+            price, model = self._item_price(p, it["kind"], it["target"])
+            items.append({**it, "price": price, "model": model})
         b = self.ws._read(p, "budget.json", {})
         total = round(sum(x["price"] for x in items), 6)
         spent = round(costlog.spent(p), 6)
         return {"items": items, "total": total, "budget": {"estimate": b.get("estimate"), "stop_loss": b.get("stop_loss"), "spent": spent}}
+
+    def _item_price(self, p, kind, target):
+        """(price, model) of one image or clip as the primary model would charge now; inputs need not exist yet."""
+        if kind == "image":
+            e = self.ws._primary("image", p)
+            price = self.ws.pricing().image_price(e["card"])
+            if price is None:
+                raise ServiceError(f"No price set for {e['model']}. Set it in Settings > Model Configuration before generating images.")
+            return price, e["model"]
+        shot, doc, res, audio, _ = self._clip_spec_loose(p, target)
+        e = self.ws._primary("video", p)
+        price = self.ws.runner().video_price(e, {"seconds": shot["seconds"], "resolution": res, "audio": audio})
+        if price is None:
+            raise ServiceError(f"No price for {e['model']} at {res} ({shot['seconds']}s). Set it in Settings > Model Configuration.")
+        return price, e["model"]
 
     def _clip_spec_loose(self, p, shot_id):
         """Like _clip_spec but the first frame may not exist yet (it is made earlier in the same run)."""
@@ -292,9 +293,9 @@ class PipelineDomain:
             kind, target = prop["kind"], prop["shot"]
             payload, model, price = self._payload_and_price(name, kind, target, prop.get("options"))
             b = self.ws._read(p, "budget.json", {})
-            current_fingerprints = self.ws._costs.fingerprints(p)
-            if b.get("plan_hash") and (b.get("plan_hash") != current_fingerprints["plan_hash"] or b.get("pricing_hash") != current_fingerprints["pricing_hash"]):
-                raise ServiceError("budget approval is stale after a plan or price change; estimate again and ask the human to approve it")
+            stale = self.ws._costs.stale_budget(p, b)
+            if stale:
+                raise BudgetStale(stale)
             rows = costlog.read_log(p)
             stage = {"clip": "final", "image": "image", "image_edit": "image_edit", "clip_extend": "clip_extend", "review": "vision"}[kind]
             pending = [r for r in project_lock.read_reservations(p) if r.get("shot") == target and r.get("stage") == stage]

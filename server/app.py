@@ -93,6 +93,8 @@ def create_app(root=None, token=None, rates_path=None, transport=None, static_di
         try:
             return fn(*a, **kw)
         except ServiceError as e:
+            if hasattr(e, "diff"):
+                return JSONResponse({"detail": str(e), "budget_diff": e.diff}, status_code=400)
             raise HTTPException(400, str(e)) from None
 
     @app.get("/api/health")
@@ -141,6 +143,40 @@ def create_app(root=None, token=None, rates_path=None, transport=None, static_di
     @app.get("/api/projects/{name}/generate-all", dependencies=[api])
     def generate_all_plan(name: str):
         return guard(ws.generate_all_plan, name)
+
+    @app.post("/api/projects/{name}/batches", dependencies=[api])
+    def create_batch(name: str, request: Request):
+        return guard(ws.batches.create, name, "api-key" if getattr(request.state, "scope", "session") == "agent" else "local")
+
+    @app.get("/api/projects/{name}/batches", dependencies=[api])
+    def list_batches(name: str):
+        return {"batches": guard(ws.batches.list, name)}
+
+    @app.get("/api/projects/{name}/batches/{bid}", dependencies=[api])
+    def get_batch(name: str, bid: str):
+        return guard(ws.batches.get, name, bid)
+
+    @app.post("/api/projects/{name}/batches/{bid}/approve", dependencies=[api])
+    async def approve_batch(name: str, bid: str, request: Request):
+        return guard(ws.batches.approve, name, bid, str((await request.json()).get("batch_hash", "")))
+
+    @app.post("/api/projects/{name}/batches/{bid}/run", dependencies=[api])
+    def run_batch(name: str, bid: str):
+        guard(ws.batches.get, name, bid)
+        jid = uuid.uuid4().hex[:10]
+        with lock:
+            jobs[jid] = {"status": "running"}
+
+        def work():
+            try:
+                res = ws.batches.run(name, bid)
+                with lock:
+                    jobs[jid] = {"status": "done", "result": res}
+            except Exception as e:   # the batch file already records the failure
+                with lock:
+                    jobs[jid] = {"status": "error", "error": f"{type(e).__name__}: {e}"}
+        threading.Thread(target=work, daemon=True).start()
+        return {"job": jid}
 
     @app.get("/api/projects/{name}", dependencies=[api])
     def overview(name: str):
@@ -284,7 +320,7 @@ def create_app(root=None, token=None, rates_path=None, transport=None, static_di
                     jobs[jid] = {"status": "done", "result": res}
             except ServiceError as e:
                 with lock:
-                    jobs[jid] = {"status": "error", "error": str(e)}
+                    jobs[jid] = {"status": "error", "error": str(e), **({"budget_diff": e.diff} if hasattr(e, "diff") else {})}
             except Exception as e:   # provider/network failure: report, never crash the server
                 with lock:
                     jobs[jid] = {"status": "error", "error": f"{type(e).__name__}: {e}"}

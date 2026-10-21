@@ -240,6 +240,9 @@ def _sanitise(dest):
     if pf.exists():
         pf.unlink()
         notes.append("Approvals and pending paid actions from the zip were dropped (proposals.json). Approve spending again here.")
+    if (dest / "batches").is_dir():
+        shutil.rmtree(dest / "batches")
+        notes.append("Batch plans from the zip were dropped. Create and approve a new batch here.")
     bf = dest / "budget.json"
     if bf.exists():
         b = json.loads(bf.read_text(encoding="utf-8"))
