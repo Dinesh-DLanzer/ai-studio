@@ -1,5 +1,6 @@
 """Project domain: project lifecycle, files, metadata, trash, asset/shot renaming, and discard/restore."""
 import csv
+import hashlib
 from pathlib import Path
 import re
 import shutil
@@ -371,3 +372,202 @@ class ProjectDomain:
             raise ServiceError(str(e)) from None
         self.ws._changed(name, "assets", "shots")
         return out
+
+    def list_media(self, name, approved=True):
+        p = self.ws.pdir(name)
+        shots_doc = self.ws._read(p, "shots.json", {"shots": []})
+        images_doc = self.ws._read(p, "images.json", {"images": []})
+
+        media = []
+        seen_paths = set()
+
+        def _file_info(rel_path):
+            f = p / rel_path
+            if not f.is_file():
+                return None
+            st = f.stat()
+            sha = hashlib.sha256(f.read_bytes()).hexdigest()
+            return st.st_size, sha
+
+        # 1. Clips
+        shots = shots_doc.get("shots", [])
+        for idx, sh in enumerate(shots):
+            sid = sh.get("id") or f"shot_{idx+1}"
+            is_approved = bool(sh.get("final_ok") or sh.get("approved"))
+            if approved and not is_approved:
+                continue
+            clip_rel = sh.get("final_clip")
+            if not clip_rel or not (p / clip_rel).is_file():
+                candidates = sorted(p.glob(f"clips/{sid}_final_*.mp4"))
+                if candidates:
+                    clip_rel = f"clips/{candidates[-1].name}"
+                elif (p / f"clips/{sid}.mp4").is_file():
+                    clip_rel = f"clips/{sid}.mp4"
+                else:
+                    continue
+            if clip_rel in seen_paths:
+                continue
+            info = _file_info(clip_rel)
+            if not info:
+                continue
+            seen_paths.add(clip_rel)
+            size, sha = info
+            media.append({
+                "id": f"clip_{sid}",
+                "name": Path(clip_rel).name,
+                "kind": "clip",
+                "type": "clip",
+                "size": size,
+                "sha": sha,
+                "path": clip_rel,
+                "relPath": clip_rel,
+                "src": clip_rel,
+                "download_path": f"/files/{name}/{clip_rel}",
+                "url": f"/files/{name}/{clip_rel}",
+                "approved": is_approved,
+                "shot_id": sid,
+                "order": idx + 1,
+            })
+
+        if not approved and (p / "clips").is_dir():
+            for f in sorted((p / "clips").glob("*.mp4")):
+                rel = f"clips/{f.name}"
+                if rel not in seen_paths:
+                    info = _file_info(rel)
+                    if info:
+                        seen_paths.add(rel)
+                        size, sha = info
+                        media.append({
+                            "id": f"clip_{f.stem}",
+                            "name": f.name,
+                            "kind": "clip",
+                            "type": "clip",
+                            "size": size,
+                            "sha": sha,
+                            "path": rel,
+                            "relPath": rel,
+                            "src": rel,
+                            "download_path": f"/files/{name}/{rel}",
+                            "url": f"/files/{name}/{rel}",
+                            "approved": False,
+                            "order": len(media) + 1,
+                        })
+
+        # 2. Stills
+        for idx, img in enumerate(images_doc.get("images", [])):
+            img_id = img.get("id") or f"still_{idx+1}"
+            rel = img.get("out") or f"stills/{img_id}.png"
+            if rel in seen_paths:
+                continue
+            info = _file_info(rel)
+            if not info:
+                for ext in (".png", ".jpg", ".jpeg", ".webp"):
+                    c = f"stills/{img_id}{ext}"
+                    info = _file_info(c)
+                    if info:
+                        rel = c
+                        break
+            if not info or rel in seen_paths:
+                continue
+            seen_paths.add(rel)
+            size, sha = info
+            media.append({
+                "id": f"still_{img_id}",
+                "name": Path(rel).name,
+                "kind": "still",
+                "type": "still",
+                "size": size,
+                "sha": sha,
+                "path": rel,
+                "relPath": rel,
+                "src": rel,
+                "download_path": f"/files/{name}/{rel}",
+                "url": f"/files/{name}/{rel}",
+                "approved": True,
+                "order": len(media) + 1,
+            })
+
+        for sh in shots:
+            sid = sh.get("id")
+            for k in ("first_frame", "end_frame", "still"):
+                rel = sh.get(k)
+                if not rel or rel in seen_paths:
+                    continue
+                if not rel.startswith("stills/"):
+                    rel = f"stills/{rel}"
+                info = _file_info(rel)
+                if not info or rel in seen_paths:
+                    continue
+                seen_paths.add(rel)
+                size, sha = info
+                media.append({
+                    "id": f"still_{sid}_{k}",
+                    "name": Path(rel).name,
+                    "kind": "still",
+                    "type": "still",
+                    "size": size,
+                    "sha": sha,
+                    "path": rel,
+                    "relPath": rel,
+                    "src": rel,
+                    "download_path": f"/files/{name}/{rel}",
+                    "url": f"/files/{name}/{rel}",
+                    "approved": True,
+                    "shot_id": sid,
+                    "order": len(media) + 1,
+                })
+
+        if not approved and (p / "stills").is_dir():
+            for f in sorted((p / "stills").glob("*")):
+                if f.is_file() and not f.name.startswith("."):
+                    rel = f"stills/{f.name}"
+                    if rel not in seen_paths:
+                        info = _file_info(rel)
+                        if info:
+                            seen_paths.add(rel)
+                            size, sha = info
+                            media.append({
+                                "id": f"still_{f.stem}",
+                                "name": f.name,
+                                "kind": "still",
+                                "type": "still",
+                                "size": size,
+                                "sha": sha,
+                                "path": rel,
+                                "relPath": rel,
+                                "src": rel,
+                                "download_path": f"/files/{name}/{rel}",
+                                "url": f"/files/{name}/{rel}",
+                                "approved": False,
+                                "order": len(media) + 1,
+                            })
+
+        # 3. Audio
+        if (p / "audio").is_dir():
+            for idx, f in enumerate(sorted((p / "audio").glob("*"))):
+                if f.is_file() and not f.name.startswith(".") and f.suffix.lower() in (".mp3", ".wav", ".m4a", ".aac", ".ogg"):
+                    rel = f"audio/{f.name}"
+                    if rel in seen_paths:
+                        continue
+                    info = _file_info(rel)
+                    if not info:
+                        continue
+                    seen_paths.add(rel)
+                    size, sha = info
+                    media.append({
+                        "id": f"audio_{f.stem}",
+                        "name": f.name,
+                        "kind": "audio",
+                        "type": "audio",
+                        "size": size,
+                        "sha": sha,
+                        "path": rel,
+                        "relPath": rel,
+                        "src": rel,
+                        "download_path": f"/files/{name}/{rel}",
+                        "url": f"/files/{name}/{rel}",
+                        "approved": True,
+                        "order": len(media) + 1,
+                    })
+
+        return media

@@ -279,6 +279,77 @@ class StoryboardDomain:
         except editor_mod.EditError as e:
             raise ServiceError(str(e)) from None
 
+    def export_ae_script(self, name):
+        """Generate an After Effects ExtendScript file that imports media and builds a comp. Project-contained. Free."""
+        from aistudio.ae_script import build_ae_script
+        p = self.ws.pdir(name)
+        doc = self.ws._read(p, "edit.json") or editor_mod.default_edit(p, self.ws._read(p, "shots.json", {"shots": []}))
+        clean_doc = editor_mod.clean(doc)
+        video = clean_doc["tracks"].get("video") or []
+        if not video:
+            raise ServiceError("at least one clip is required for After Effects export")
+
+        spans = editor_mod.timeline_spans(video)
+        clips = []
+        base_dir = Path(p).resolve()
+        for item, (si, so, ri, ro, td) in zip(video, spans):
+            clip_path = (base_dir / item["src"]).resolve()
+            try:
+                clip_path.relative_to(base_dir)
+            except ValueError:
+                raise ServiceError(f"clip path escapes project directory: {item['src']}")
+            clips.append({
+                "src": item["src"],
+                "in": si,
+                "out": so,
+                "start": ri,
+            })
+
+        captions = []
+        subs = clean_doc["tracks"].get("subtitles") or {}
+        for c in subs.get("cues") or []:
+            if c.get("text"):
+                captions.append({
+                    "text": str(c["text"]),
+                    "start": float(c["start"]),
+                    "end": float(c["end"]),
+                })
+
+        if not captions:
+            for t in clean_doc["tracks"].get("text") or []:
+                if t.get("text"):
+                    captions.append({
+                        "text": str(t["text"]),
+                        "start": float(t["start"]),
+                        "end": float(t["end"]),
+                    })
+
+        if not captions:
+            shots_doc = self.ws._read(p, "shots.json", {"shots": []})
+            cursor = 0.0
+            for sh in shots_doc.get("shots", []):
+                dur = float(sh.get("seconds") or 4.0)
+                vo = sh.get("voiceover") or sh.get("caption") or sh.get("prompt")
+                if vo:
+                    captions.append({
+                        "text": str(vo),
+                        "start": cursor,
+                        "end": cursor + dur,
+                    })
+                cursor += dur
+
+        if not captions:
+            dur = max(ro for _, _, _, ro, _ in spans) if spans else 4.0
+            captions.append({
+                "text": name,
+                "start": 0.0,
+                "end": min(dur, 4.0),
+            })
+
+        aspect = clean_doc.get("aspect", "9:16")
+        fps = clean_doc.get("fps", 24)
+        return build_ae_script(name, aspect, fps, clips, captions, str(base_dir))
+
     def export_fcpxml(self, name):
         """The timeline as Final Cut Pro XML (text).  Free."""
         p, doc = self._edit_for_export(name)
