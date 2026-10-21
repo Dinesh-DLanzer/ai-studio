@@ -1,0 +1,6 @@
+{
+  "id": "tiny-video",
+  "task": "image_to_video",
+  "inputs": {"prompt": ["10", "text"], "start_frame": ["11", "image"], "seconds": ["20", "length", "frames@16"]},
+  "profile": {"durations": [3, 5], "resolutions": ["480p"], "frames": {"start": true, "end": false}, "camera": {"mode": "prompt"}}
+}

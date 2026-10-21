@@ -34,6 +34,9 @@ PROVIDER_TYPES = {
     "runway": {"label": "Runway", "sub": "Gen-3/Gen-4 video generation", "adapter": "runway.RunwayAdapter", "fields": ["api_key"], "base_url": False},
     "kling": {"label": "Kling", "sub": "Kling AI video generation", "adapter": "kling.KlingAdapter", "fields": ["access_key", "secret_key"], "base_url": False},
     "replicate": {"label": "Replicate", "sub": "Open source image and video models", "adapter": "replicate.ReplicateAdapter", "fields": ["api_key"], "base_url": False},
+    "whisper_cpp": {"label": "whisper.cpp (local)", "sub": "Local, free speech-to-text with word timestamps (needs the whisper.cpp binary and a model file)", "adapter": "whisper_cpp.WhisperCppAdapter", "fields": ["binary", "model_path"], "base_url": False},
+    "sync": {"label": "sync.so", "sub": "Lip sync: match the lips in a video to an audio track", "adapter": "sync_so.SyncAdapter", "fields": ["api_key"], "base_url": False},
+    "comfyui": {"label": "ComfyUI", "sub": "Local image and video engine", "adapter": "comfyui.ComfyUIAdapter", "fields": [], "base_url": True},
     "chatgpt": {"label": "ChatGPT (Subscription)", "sub": "Use your ChatGPT Plus/Pro plan (sign-in) for chat, vision, verify and images", "adapter": "chatgpt.ChatGPTAdapter", "fields": [], "base_url": False, "auth_type": "oauth"},
     "codex_cli": {"label": "Codex CLI", "sub": "Your signed-in Codex terminal agent (chat, vision). Runs on your plan", "adapter": "cli_agent.CodexCLIAdapter", "fields": [], "base_url": False, "auth_type": "local", "binary": "codex"},
     "opencode_cli": {"label": "OpenCode CLI", "sub": "Your OpenCode terminal agent and its models (chat, vision)", "adapter": "cli_agent.OpenCodeCLIAdapter", "fields": [], "base_url": False, "auth_type": "local", "binary": "opencode"},
@@ -41,6 +44,13 @@ PROVIDER_TYPES = {
     "agy_cli": {"label": "Antigravity CLI", "sub": "Your signed-in Antigravity terminal agent: Gemini, Claude and more (chat)", "adapter": "cli_agent.AntigravityCLIAdapter", "fields": [], "base_url": False, "auth_type": "local", "binary": "agy"},
     "custom": {"label": "Custom (OpenAI-compatible)", "sub": "Any server with /chat/completions", "adapter": "openai.OpenAIAdapter", "fields": ["api_key"], "base_url": True},
     "fake": {"label": "Built-in test", "sub": "Free, offline, for trying things out", "adapter": "fake.FakeAdapter", "fields": [], "base_url": False},
+    "elevenlabs": {"label": "ElevenLabs", "sub": "TTS, voice clone, SFX, music, transcription (Scribe)", "adapter": "elevenlabs.ElevenLabsAdapter", "fields": ["api_key"], "base_url": False},
+    "google_cloud_tts": {"label": "Google Cloud TTS", "sub": "Neural TTS with Tamil (ta-IN) voices", "adapter": "google_cloud_tts.GoogleCloudTTSAdapter", "fields": ["api_key"], "base_url": False},
+    "azure_speech": {"label": "Azure Speech", "sub": "TTS (SSML, neural voices) + fast transcription", "adapter": "azure_speech.AzureSpeechAdapter", "fields": ["api_key", "region"], "base_url": False},
+    "sarvam": {"label": "Sarvam AI", "sub": "Bulbul TTS + Saaras STT (Indian languages, Tamil ta-IN)", "adapter": "sarvam.SarvamAdapter", "fields": ["api_key"], "base_url": False},
+    "stability": {"label": "Stability AI", "sub": "Stable Audio: music and sound effects", "adapter": "stability.StabilityAdapter", "fields": ["api_key"], "base_url": False},
+    "cartesia": {"label": "Cartesia", "sub": "Fast text-to-speech and voice cloning", "adapter": "cartesia.CartesiaAdapter", "fields": ["api_key"], "base_url": False},
+    "fal": {"label": "fal.ai", "sub": "One key for many hosted models: music, SFX, lip sync, speech, image, video", "adapter": "fal.FalAdapter", "fields": ["api_key"], "base_url": False},
 }
 
 
@@ -64,11 +74,17 @@ def provider_types():
             for t, m in PROVIDER_TYPES.items()]
 
 
-def build_adapter(provider, secrets, transport=None):
-    """provider = one entry of providers.json; secrets = a SecretStore. Returns a ready adapter."""
+def build_adapter(provider, secrets, transport=None, workflows_dir=None):
+    """provider = one entry of providers.json; secrets = a SecretStore. Returns a ready adapter.
+
+    workflows_dir is the folder the local engines look in (the ComfyUI workflow manifests); it is only
+    used by the providers that read files from disk.
+    """
     ref = provider.get("secret_ref") or provider["id"]
     conn = {"id": provider["id"], "type": provider["type"], "base_url": provider.get("base_url") or "",
             "secret": secrets.get(ref) if provider["type"] != "fake" else {}}
+    if workflows_dir:
+        conn["workflows_dir"] = str(workflows_dir)
     if PROVIDER_TYPES[provider["type"]].get("auth_type") == "oauth":
         conn["on_secret"] = lambda fresh: secrets.set(ref, fresh)      # a refreshed OAuth session is saved back
     return adapter_class(provider["type"])(conn, transport=transport) if transport else adapter_class(provider["type"])(conn)

@@ -1,0 +1,16 @@
+{
+  "id": "testimonial",
+  "label": "Testimonial",
+  "aspect_ratio": "9:16",
+  "shots": 5,
+  "seconds_per_shot": 5,
+  "resolution": "1080p",
+  "audio": true,
+  "safe_area": {"top": 0.1, "bottom": 0.2, "left": 0.05, "right": 0.05},
+  "caption": {"font": "Poppins", "size": 38, "weight": 500, "y": 0.75, "bg": "#000000AA"},
+  "cta": {"text": "Try it Today", "last_seconds": 3},
+  "loudness": -16,
+  "brief": {"length": "25 seconds", "purpose": "advertising"},
+  "suggested_models": {"video": ["google/veo-3.1-lite", "runway/gen-3-alpha-turbo"]},
+  "notes": "Platform margins must be re-verified against current platform guidelines"
+}

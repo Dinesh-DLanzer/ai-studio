@@ -1,0 +1,20 @@
+{
+  "id": "youtube-shorts",
+  "label": "YouTube Shorts",
+  "container": "mp4",
+  "video_codec": "libx264",
+  "pixel_format": "yuv420p",
+  "crf": 23,
+  "max_bitrate_kbps": 8000,
+  "audio_codec": "aac",
+  "audio_bitrate_kbps": 128,
+  "sample_rate": 48000,
+  "aspect_ratios": ["9:16"],
+  "max_seconds": 60,
+  "min_seconds": 1,
+  "loudness_lufs": -14,
+  "caption_mode": "burn_in",
+  "thumbnail": {"w": 1080, "h": 1920},
+  "safe_area": {"top": 0.1, "bottom": 0.2},
+  "notes": "Conservative export defaults; platform limits must be re-verified against current platform docs before release."
+}

@@ -1,0 +1,20 @@
+{
+  "id": "x",
+  "label": "X",
+  "container": "mp4",
+  "video_codec": "libx264",
+  "pixel_format": "yuv420p",
+  "crf": 23,
+  "max_bitrate_kbps": 8000,
+  "audio_codec": "aac",
+  "audio_bitrate_kbps": 128,
+  "sample_rate": 48000,
+  "aspect_ratios": ["16:9", "1:1", "9:16"],
+  "max_seconds": 140,
+  "min_seconds": 1,
+  "loudness_lufs": -14,
+  "caption_mode": "sidecar_srt",
+  "thumbnail": {"w": 1280, "h": 720},
+  "safe_area": {"top": 0.05, "bottom": 0.1},
+  "notes": "Conservative export defaults; platform limits must be re-verified against current platform docs before release."
+}
