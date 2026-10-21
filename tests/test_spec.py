@@ -55,6 +55,20 @@ class TestLookupOrder(unittest.TestCase):
         self.assertEqual(end()["source"], "user")
         self.assertEqual(validate_profile(end()), [])
 
+    def test_missing_end_frame_and_refs_by_adapter(self):
+        cat = catalog_mod.Catalog(Path(tempfile.mkdtemp()))
+        need = {"task": "image_to_video", "end_frame": True, "refs": 2}
+        veo = cat.profile("g", "google", "veo-3.1-generate-preview")
+        self.assertIsNone(catalog_mod.missing(veo, "google", need))
+        self.assertIn("reference", catalog_mod.missing(veo, "google", {"refs": 4}))
+        self.assertIn("reference", catalog_mod.missing(cat.profile("g", "google", "veo-3.1-lite-generate-preview"), "google", {"refs": 1}))
+        self.assertIn("keyframe", catalog_mod.missing({**veo, "frames": {**veo["frames"], "keyframes": 2}}, "google", {"keyframes": 2}))
+        for ptype, model in (("kling", "kling-v2"), ("runway", "gen4_turbo"), ("openrouter", "google/veo-3.1")):
+            self.assertTrue(catalog_mod.missing(cat.profile("x", ptype, model), ptype, need), ptype)
+        # an adapter that cannot send refs is refused even when the profile allows them
+        permissive = {**veo, "frames": {**veo["frames"], "end": True}, "references": {"max": 3, "roles": []}}
+        self.assertIn("reference", catalog_mod.missing(permissive, "kling", {"task": "image_to_video", "refs": 1}))
+
     def test_validate_profile_rejects_bad_values(self):
         self.assertTrue(validate_profile({"camera": {"mode": "native"}}))       # native needs a param
         self.assertTrue(validate_profile({"audio": "loud"}))

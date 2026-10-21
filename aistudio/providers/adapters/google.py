@@ -1,6 +1,14 @@
 """Google Gemini API (Google AI Studio key): chat, vision, image generation and Veo video.  Standard library only.
 
-NOTE: request/response shapes below are from the public Gemini API; they must be re-checked against the live docs before release.
+Veo request shape re-verified 2026-10-21 at ai.google.dev/gemini-api/docs/veo (REST examples):
+  instances[0] = {prompt, image, lastFrame, referenceImages:[{image, referenceType:"asset"}]}; every image is {"inlineData":{"mimeType","data"}}
+  (the docs show inlineData, not bytesBase64Encoded, so the start image uses inlineData too). parameters = aspectRatio 16:9|9:16,
+  resolution 720p|1080p|4k, durationSeconds 4|6|8 (8 required for reference images, 1080p, 4k, extension).
+  lastFrame must be used with image; referenceImages up to 3, not on Veo 3.1 Lite. Agrees with plan 13 notes.
+  UNVERIFIED, so refused rather than sent: referenceImages together with image/lastFrame (docs are silent). Not sent: personGeneration
+  (docs say allow_adult only for image/interpolation/reference modes; left at the API default), numberOfVideos, camera (Veo has none).
+  Other notes: the docs say the veo-3.1 *-preview ids shut down 2026-10-22 (replacement: GA Veo 3.1 on the Gemini Enterprise Agent Platform).
+  NOTE: other request/response shapes below are from the public Gemini API; re-check against the live docs before release.
 Subclass of aistudio.providers.base.Adapter (read its docstring first: transport, errors, result shapes).
   type = "google" ; capabilities = {"chat","vision","image","video"} ; default_base_url = "https://generativelanguage.googleapis.com/v1beta"
   Header on EVERY request: {"x-goog-api-key": self.secret["api_key"]}.  URLs are base_url + path.
@@ -39,13 +47,14 @@ video_download(job): GET /{job_id} again to find the uri (same path as above; ra
 """
 import base64
 
-from aistudio.providers.base import Adapter, Retryable, b64_of, mime_of
+from aistudio.providers.base import Adapter, Rejected, Retryable, b64_of, mime_of
 
 
 class GoogleAdapter(Adapter):
     type = "google"
     capabilities = frozenset({"chat", "vision", "image", "video"})
     default_base_url = "https://generativelanguage.googleapis.com/v1beta"
+    request_features = frozenset({"end_frame", "refs"})
 
     def _headers(self):
         return {"x-goog-api-key": self.secret["api_key"]}
@@ -159,14 +168,38 @@ class GoogleAdapter(Adapter):
                         "cost": None, "model": model}
         raise Retryable("no image in response")
 
+    @staticmethod
+    def _veo_image(path):
+        return {"inlineData": {"mimeType": mime_of(path), "data": b64_of(path)}}
+
     def video_submit(self, model, req):
+        first, last, refs = req.get("first_frame"), req.get("last_frame"), list(req.get("refs") or [])
+        seconds = int(req["seconds"])
+        if req.get("camera_native"):
+            raise Rejected("Veo has no native camera parameters; put the camera wording in the prompt")
+        if last and not first:
+            raise Rejected("Veo needs a start image to use an end frame")
+        if refs:
+            if "lite" in model:
+                raise Rejected("Veo 3.1 Lite does not accept reference images")
+            if len(refs) > 3:
+                raise Rejected("Veo accepts at most 3 reference images, %d given" % len(refs))
+            if seconds != 8:
+                raise Rejected("Veo reference images need an 8 second clip, %d given" % seconds)
+            if first or last:
+                raise Rejected("Veo reference images together with a start or end frame are not verified, so they are not sent")
+        if req["resolution"] in ("1080p", "4k") and seconds != 8:
+            raise Rejected("Veo %s needs an 8 second clip, %d given" % (req["resolution"], seconds))
         inst = {"prompt": req["prompt"]}
-        first_frame = req.get("first_frame")
-        if first_frame:
-            inst["image"] = {"bytesBase64Encoded": b64_of(first_frame), "mimeType": mime_of(first_frame)}
+        if first:
+            inst["image"] = self._veo_image(first)
+        if last:
+            inst["lastFrame"] = self._veo_image(last)
+        if refs:
+            inst["referenceImages"] = [{"image": self._veo_image(r), "referenceType": "asset"} for r in refs]
         body = {"instances": [inst],
                 "parameters": {"aspectRatio": req["aspect_ratio"],
-                               "durationSeconds": int(req["seconds"]),
+                               "durationSeconds": seconds,
                                "resolution": req["resolution"]}}
         data = self.transport("POST", self.base_url + "/models/%s:predictLongRunning" % model,
                               headers=self._headers(), body=body)

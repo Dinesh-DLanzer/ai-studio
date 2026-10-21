@@ -151,6 +151,27 @@ class TestDirectionIsBoundToApproval(unittest.TestCase):
         self.assertEqual(self.payload(ws)["prompt"], "p")           # free-text camera already lives in the prompt text; direction is ignored when it is set
 
 
+class TestReferencesAreBoundToApproval(unittest.TestCase):
+    def test_clip_payload_binds_reference_bytes(self):
+        from aistudio import approvals
+        from aistudio.domain.pipeline import PipelineDomain
+        import tempfile
+        ws, p = make(self, {"fk|vid-a": {"references": {"max": 3}}})
+        (p / "stills").mkdir(exist_ok=True)
+        (p / "stills" / "person.png").write_bytes(b"one")
+        ws.put_images("demo", {"images": [{"id": "person", "kind": "character", "out": "stills/person.png", "prompt": "p", "refs": []}]})
+        shots(ws, ("s1", 4, {"refs": ["person"]}))
+        payload = ws._pipeline._payload_and_price("demo", "clip", "s1")[0]
+        self.assertEqual([r["path"] for r in payload["refs"]], ["stills/person.png"])
+        before = approvals.request_hash("clip", "s1", "vid-a", 0.4, payload)
+        dest = Path(tempfile.mkdtemp())
+        PipelineDomain._snapshot_inputs(p, dest, payload)                 # unchanged bytes are copied
+        (p / "stills" / "person.png").write_bytes(b"two")
+        self.assertNotEqual(before, approvals.request_hash("clip", "s1", "vid-a", 0.4, ws._pipeline._payload_and_price("demo", "clip", "s1")[0]))
+        with self.assertRaisesRegex(ServiceError, "changed after approval"):
+            PipelineDomain._snapshot_inputs(p, dest, payload)             # the old approval cannot run the new file
+
+
 class TestDirectionFailsClosed(unittest.TestCase):
     def test_keyframes_are_refused_when_the_model_or_adapter_cannot_send_them(self):
         ws, p = make(self)

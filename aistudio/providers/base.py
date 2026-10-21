@@ -16,7 +16,7 @@ ADAPTER interface (a method an adapter does not support raises Unsupported):
     chat(model, messages, opts=None) -> {"text","usage":{"input","output"},"cost":float|None,"model"}
     vision(model, prompt, images, opts=None) -> same shape as chat     (images = local file paths)
     image(model, prompt, refs=(), aspect_ratio="9:16", opts=None) -> {"bytes","usage":{},"cost":float|None,"model"}
-    video_submit(model, req) -> {"job_id","model"}       req = {"prompt","seconds","resolution","aspect_ratio","audio","first_frame"(path|None)}
+    video_submit(model, req) -> {"job_id","model"}       req = {"prompt","seconds","resolution","aspect_ratio","audio","first_frame"(path|None), optional "last_frame"(path), "refs"(list of paths), "camera_native"}
     video_poll(job) -> {"status":"pending"|"done"|"failed","error":str|None,"cost":float|None}      job = {"job_id","model"}
     video_download(job) -> bytes
 `cost` is the provider-REPORTED dollar cost, or None when the provider does not report one (pricing.py then computes it).
