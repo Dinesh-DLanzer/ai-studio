@@ -8,7 +8,7 @@ from datetime import date as _date
 from pathlib import Path
 
 from aistudio import project as project_mod
-from aistudio.domain.common import ServiceError
+from aistudio.domain.common import ServiceError, _sha
 
 FILE = "consent.json"
 KINDS = ("real_person", "voice")
@@ -74,13 +74,103 @@ def mark_real_person(pdir, asset_id, sha, subject=""):
 
 
 def real_person_shas(pdir):
-    return {x["sha"] for x in read(pdir) if x.get("kind") == "real_person_sha" and x.get("sha")}
+    marked = {x["sha"] for x in read(pdir) if x.get("kind") == "real_person_sha" and x.get("sha")}
+    if not marked:
+        return marked
+    p = Path(pdir)
+    changed = True
+    while changed:
+        changed = False
+        # 1. Scan .meta.json files in project media dirs
+        for sub in ("stills", "clips", "videos", "audio"):
+            d = p / sub
+            if not d.is_dir():
+                continue
+            for meta_file in d.glob("*.meta.json"):
+                try:
+                    meta = json.loads(meta_file.read_text(encoding="utf-8"))
+                except Exception:
+                    continue
+                source_shas = set()
+                if meta.get("source_sha"):
+                    source_shas.add(meta["source_sha"])
+                if meta.get("params", {}).get("source_sha"):
+                    source_shas.add(meta["params"]["source_sha"])
+                for r in meta.get("refs", []):
+                    if isinstance(r, dict) and r.get("sha"):
+                        source_shas.add(r["sha"])
+                if any(s in marked for s in source_shas):
+                    media_name = meta_file.name[:-10]
+                    media_file = meta_file.parent / media_name
+                    if media_file.is_file():
+                        h = _sha(media_file)
+                        if h and h not in marked:
+                            marked.add(h)
+                            changed = True
+        # 2. Check <stem>.v<k> where base <stem> has sha in marked
+        for sub in ("stills", "clips", "videos"):
+            d = p / sub
+            if not d.is_dir():
+                continue
+            for f in d.glob("*"):
+                if f.is_file() and not f.name.endswith(".meta.json") and ".v" in f.name:
+                    base_stem = f.name.split(".v")[0]
+                    base_file = d / f"{base_stem}{f.suffix}"
+                    if base_file.is_file():
+                        base_h = _sha(base_file)
+                        if base_h in marked:
+                            h = _sha(f)
+                            if h and h not in marked:
+                                marked.add(h)
+                                changed = True
+    return marked
 
 
 def require_shas(pdir, shas):
     """Refuse when a file whose sha a human marked as a real person has no sha-bound consent entry."""
     marked = real_person_shas(pdir)
     bound = {x.get("sha") for x in read(pdir) if x.get("kind") == "real_person" and x.get("sha")}
+    
+    # Expand bound consent to derived files whose source_sha has bound consent
+    p = Path(pdir)
+    changed = True
+    while changed:
+        changed = False
+        for sub in ("stills", "clips", "videos", "audio"):
+            d = p / sub
+            if not d.is_dir():
+                continue
+            for meta_file in d.glob("*.meta.json"):
+                try:
+                    meta = json.loads(meta_file.read_text(encoding="utf-8"))
+                except Exception:
+                    continue
+                source_shas = set()
+                if meta.get("source_sha"):
+                    source_shas.add(meta["source_sha"])
+                if meta.get("params", {}).get("source_sha"):
+                    source_shas.add(meta["params"]["source_sha"])
+                for r in meta.get("refs", []):
+                    if isinstance(r, dict) and r.get("sha"):
+                        source_shas.add(r["sha"])
+                if any(s in bound for s in source_shas):
+                    media_name = meta_file.name[:-10]
+                    media_file = meta_file.parent / media_name
+                    if media_file.is_file():
+                        h = _sha(media_file)
+                        if h and h not in bound:
+                            bound.add(h)
+                            changed = True
+            for f in d.glob("*"):
+                if f.is_file() and not f.name.endswith(".meta.json") and ".v" in f.name:
+                    base_stem = f.name.split(".v")[0]
+                    base_file = d / f"{base_stem}{f.suffix}"
+                    if base_file.is_file() and _sha(base_file) in bound:
+                        h = _sha(f)
+                        if h and h not in bound:
+                            bound.add(h)
+                            changed = True
+
     for sha in shas:
         if sha in marked and sha not in bound:
             raise ServiceError("a file marked as a real person has no consent bound to it. A human must record consent for these exact file bytes "

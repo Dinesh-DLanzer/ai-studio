@@ -298,15 +298,25 @@ def _fill(template, values):
 def _consent(ws, p, policy, rels):
     """Same rule as pipeline._require_consent: an asset flagged real_person needs a human-recorded consent. A 'required' recipe also needs
     at least one image that a human flagged as a real person (a typed name is never a face target)."""
+    p = Path(p)
     doc = ws._read(p, "images.json", {"images": []})
     by_out = {i.get("out"): i for i in doc.get("images", []) if isinstance(i, dict)}
     by_id = {i.get("id"): i for i in doc.get("images", []) if isinstance(i, dict)}
     ids, flagged = [], False
+    shas = []
     for rel in rels:
         asset = by_out.get(rel) or by_id.get(Path(rel).stem)
         ids += [Path(rel).stem] + ([asset["id"]] if asset else [])
         flagged = flagged or bool(asset and asset.get("real_person"))
+        f = p / rel
+        if f.is_file():
+            shas.append(_sha(f))
+    marked = consent_mod.real_person_shas(p)
+    if any(s in marked for s in shas):
+        flagged = True
     consent_mod.require_assets(p, doc, ids)
+    if shas:
+        consent_mod.require_shas(p, shas)
     if policy == "required" and not flagged:
         raise RecipeError("this recipe involves a real person: add the photo as an asset marked real_person with the subject's name, and have a human "
                           "record their consent first. Nothing was planned.")

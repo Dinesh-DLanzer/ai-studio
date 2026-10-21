@@ -188,14 +188,35 @@ class PipelineDomain:
     def _require_consent(self, p, kind, target):
         """Generation touching an asset marked real_person is refused without a human-recorded consent entry (propose AND execute)."""
         doc = self.ws._read(p, "images.json", {"images": []})
+        shas = []
         if kind == "image":
             spec = next((i for i in doc["images"] if i.get("id") == target), {})
             ids = [target, *spec.get("refs", [])]
+            if spec.get("out") and (p / spec["out"]).is_file():
+                shas.append(_sha(p / spec["out"]))
+            for r in spec.get("refs", []):
+                ref_img = next((i for i in doc["images"] if i.get("id") == r), None)
+                ref_path = p / str(ref_img["out"]) if ref_img and ref_img.get("out") else (p / "stills" / f"{r}.png")
+                if ref_path.is_file():
+                    shas.append(_sha(ref_path))
         else:
             shot = next((s for s in self.ws._read(p, "shots.json", {"shots": []})["shots"] if s["id"] == target), {})
             ids = [r.get("id") if isinstance(r, dict) else str(r) for r in shot.get("refs") or []]
             ids += [Path(shot[k]).stem for k in ("first_frame", "end_frame") if shot.get(k)]
+            for r in shot.get("refs") or []:
+                rid = r.get("id") if isinstance(r, dict) else str(r)
+                ref_img = next((i for i in doc["images"] if i.get("id") == rid), None)
+                ref_path = p / str(ref_img["out"]) if ref_img and ref_img.get("out") else (p / "stills" / f"{rid}.png")
+                if ref_path.is_file():
+                    shas.append(_sha(ref_path))
+            for k in ("first_frame", "end_frame"):
+                if shot.get(k):
+                    cand = p / shot[k]
+                    if cand.is_file():
+                        shas.append(_sha(cand))
         consent_mod.require_assets(p, doc, ids)
+        if shas:
+            consent_mod.require_shas(p, shas)
 
     def _require_source_consent(self, p, kind, target, options):
         """Editing, extending or restyling a real person's asset needs the same human-recorded consent, and consent is also bound to the file bytes:
@@ -265,9 +286,9 @@ class PipelineDomain:
             voice_id = str(voice.get("voice_id", ""))
         if kind == "tts" and not voice_id:
             raise ServiceError("tts needs a voice_id")
-        cloned = bool(options.get("cloned") or (kind == "tts" and voice.get("cloned")))
-        subject = str(options.get("voice_subject") or voice_id).strip()
-        if kind == "tts" and cloned:
+        cloned = bool(options.get("cloned") or (kind == "tts" and voice.get("cloned")) or kind == "voice_clone" or task == "voice_clone")
+        subject = str(options.get("voice_subject") or options.get("subject") or voice_id).strip()
+        if (kind in ("tts", "voice_clone") or task == "voice_clone") and cloned:
             consent_mod.require(p, subject, "voice")
         files, duration = [], 0
         for key in (("source",) if kind == "transcribe" else ("video", "audio") if kind == "lipsync" else ()):

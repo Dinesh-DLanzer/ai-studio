@@ -1,5 +1,6 @@
 """Free, local FFmpeg clip tools. Commands are always passed as argv lists."""
 from functools import lru_cache
+import json
 import shutil
 import subprocess
 import tempfile
@@ -127,11 +128,27 @@ def run_local(tool, src, dst, params, project_dir, runner=subprocess.run):
     if output == source:
         raise ValueError("output cannot overwrite the source")
 
+    def _write_meta(out_path):
+        try:
+            from aistudio.domain.common import _sha
+            from datetime import datetime, timezone
+            meta = {
+                "tool": tool,
+                "source": str(source.relative_to(root).as_posix() if source.is_relative_to(root) else source),
+                "source_sha": _sha(source),
+                "params": params,
+                "created": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            }
+            Path(str(out_path) + ".meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
+        except Exception:
+            pass
+
     common = ["ffmpeg", "-y", "-nostdin", "-hide_banner", "-loglevel", "error"]
     still_output = destination.suffix.lower() in {".png", ".jpg", ".jpeg", ".webp", ".tif", ".tiff"}
     if tool == "loop":
         argv = [*common, "-stream_loop", str(params["times"] - 1), "-i", str(source), "-c", "copy", str(output)]
         _run(runner, argv)
+        _write_meta(output)
         return output
     if tool == "stabilize":
         with tempfile.TemporaryDirectory(prefix="aistudio-vidstab-") as td:
@@ -140,6 +157,7 @@ def run_local(tool, src, dst, params, project_dir, runner=subprocess.run):
             _run(runner, detect)
             transform = [*common, "-i", str(source), "-vf", f"vidstabtransform=input={trf}:smoothing=10", "-c:v", "libx264", "-c:a", "copy", str(output)]
             _run(runner, transform)
+        _write_meta(output)
         return output
     if tool == "reframe_local" and params["mode"] == "blur-pad":
         w, h = _ASPECTS[params["aspect"]]
@@ -170,4 +188,5 @@ def run_local(tool, src, dst, params, project_dir, runner=subprocess.run):
             argv += ["-c:v", "libx264", "-c:a", "copy"]
         argv.append(str(output))
     _run(runner, argv)
+    _write_meta(output)
     return output
