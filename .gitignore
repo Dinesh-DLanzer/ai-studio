@@ -35,3 +35,6 @@ _import_tmp/
 # private analysis notes: keep local
 /docs/AI_STUDIO_ANALYSIS.md
 !.claude/skills/run-plan/
+
+web/node_modules
+.venv
