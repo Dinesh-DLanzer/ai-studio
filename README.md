@@ -29,9 +29,10 @@ Describe your idea to **Tara**, the built-in producer. She interviews you, write
 | **Storyboard to assets** | `Story.md` becomes the shot list and the asset list: shared style, character and background master images, one scene frame per shot. Upload your own images or generate them. |
 | **Clips, one at a time** | Every clip shows its exact price first. Watch it, listen, approve it or discard it (nothing is ever erased). |
 | **A real video editor** | Reorder, trim, split, 36 transitions, text bubbles, music with fades, then export one MP4 with ffmpeg. Free. |
-| **Bring your own providers** | OpenRouter, Google, OpenAI, Anthropic, Runway, Kling, Replicate or any OpenAI-compatible server, with ordered fallback chains per job. |
+| **Bring your own providers** | OpenRouter, OpenCode, OpenAI, Anthropic, Google, Runway, Kling, Replicate, ComfyUI, ChatGPT (subscription), Codex CLI, OpenCode CLI, Claude Code CLI, Antigravity CLI, ElevenLabs, Hedra, HeyGen, Tavus, Google Cloud TTS, Azure Speech, Sarvam AI, Stability AI, Cartesia, fal.ai, whisper.cpp (local), sync.so, or any OpenAI-compatible server, with ordered fallback chains per job. |
 | **Test projects** | Practise the whole workflow with placeholders: free, no key, no network. |
 | **Agents and API** | Claude Code, OpenCode or your own scripts connect through MCP or an HTTP API with revocable keys. They propose; you approve. |
+| **Recipes (one-click tools)** | Product ad, product showcase, explainer from script, talking head ad, face swap, outfit swap, headshot, photo to cinematic clip, product placement, upscale and reframe pack. Each is a declarative data file that creates one awaiting-approval batch. |
 
 ## See it
 
@@ -64,7 +65,6 @@ git clone https://github.com/Dinesh-DLanzer/ai-studio && cd ai-studio
 
 *(On Windows, you can also double-click `start.bat` or run `.\start.bat`).*
 
-
 It prints `http://127.0.0.1:8765/?token=...`. Open that link. The token is your session key, so keep it private.
 
 **First run.** Everything is set up inside the app: no `.env` file, no environment variable for keys, no config file. With no provider connected you are asked how to begin:
@@ -84,10 +84,11 @@ Keys are write-only (never shown again) and stored in your OS keychain, or a pri
 4. **Characters and places, then scene frames.** Generate or upload. The server refuses a frame before its characters and a clip before its frame.
 5. **Clips.** One per shot, each with its price, up to 3 final attempts per shot.
 6. **Approve or discard**, then **Review & Export**.
+7. **Recipes (optional).** Pick a one-click tool (e.g. product ad, explainer, talking head) and run it as one awaiting-approval batch.
 
 The checklist under the chat shows exactly where you are. **Generate all** lists everything left with exact prices; you approve once and the items run in order, stopping at the first problem.
 
-![Approve a paid action](docs/img/approve-dialog.png)
+![Waiting for your decision](docs/img/waiting-for-decision.png)
 
 ## Safety model
 
@@ -98,8 +99,6 @@ Spending money on AI is the risky part, so the rules live in the engine, not in 
 - **Tara cannot generate, approve or upload anything.** She is told the project's real state every turn, and the page's checklist is the source of truth.
 - Agents and API keys can propose but never approve. Tara can suggest an action card but never approves or executes it. Provider keys are write-only.
 - The server binds to `127.0.0.1`, needs a token, and rejects foreign Host and Origin headers. See [SECURITY.md](SECURITY.md) for the honest limits.
-
-![Waiting for your decision](docs/img/waiting-for-decision.png)
 
 ## Agents and the HTTP API
 
@@ -170,8 +169,16 @@ node web/e2e/demo-gif.mjs                # re-record docs/img/demo.gif
 ## Project layout
 
 ```
-aistudio/      engine: project files, cost log, discard, rates, budget, approvals, gates,
-               providers, editor/export, import, API keys, service layer, MCP, CLI
+aistudio/      engine: domain (projects, storyboard, pipeline, characters, costs, todos, chat, agents, spec, verify)
+               providers/adapters (config, base, openrouter, google, openai, anthropic, runway, kling, replicate,
+                                 elevenlabs, hedra, heygen, tavus, google_cloud_tts, azure_speech, sarvam, stability,
+                                 cartesia, fal, whisper_cpp, sync_so, comfyui, chatgpt, cli_agent, custom, fake)
+               catalog/spec/pricing (recipes, camera_presets, agents, formats, rates, models, capabilities)
+               approvals/gates/locks/jobs (approvals, gates, costlog, jobs, consent, secrets)
+               crew (stages, agents, runtime)
+               recipes (plan, validate, run)
+               library (search)
+               service.py (facade), service layer
 server/        local web API (FastAPI) and its endpoint descriptions (api_docs.py)
 web/           React + Tailwind UI (npm run build -> web/dist); web/e2e has the browser tests
 assets/fonts/  fonts used by the editor (SIL Open Font License, see THIRD_PARTY_NOTICES.md)

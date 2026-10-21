@@ -9,11 +9,21 @@
 
 ## Agent Capabilities (Approval by Design)
 Terminal agents (OpenCode, Codex, Claude Code, Antigravity CLI) can inspect projects, edit documents, estimate, create proposals, and execute proposals that a human has already approved. They cannot approve budgets, proposals or clips.
-- **Story & Assets**: `convert_story`, `update_shots`, `update_images`, `import_stills`, `upload_image`
-- **Budget & Proposals**: `estimate`, human approval requests via `approve_budget`/`approve_proposal`, `propose`, `reject_proposal`, `run_proposal`
-- **Shot Approvals**: `approve_shot`, `discard`, `restore`
-- **Project Management**: `create_project`, `delete_project` (moves to `_trash`), `list_trash`, `restore_trash`, `export_project`
-- **Timeline Editing**: `get_edit`, `update_edit`, `export_edit`
+
+### Free read tools
+- `get_project`, `read_doc`, `get_brief`, `get_model_setup`, `get_todos`, `get_verification`, `get_proposal`, `get_spec`, `get_costs`, `list_providers`, `production_progress`, `get_batch`, `get_edit`, `unregistered_stills`, `list_recipes`
+
+### Free write tools
+- `write_doc`, `update_brief`, `rename_asset`, `rename_shot`, `convert_story`, `update_shots`, `update_images`, `update_edit`, `import_stills`, `add_todo`, `toggle_todo`, `remove_todo`, `export_edit`, `export_project`
+
+### Paid tools (create proposals for human approval)
+- `propose`, `analyze_character`, `edit_still`, `extend_clip`, `clip_tool`, `generate_all_plan`, `build_identity_sheet`
+
+### Approval tools (human-only via MCP elicitation or one-time fallback code; agents NEVER call these)
+- `estimate`, `approve_budget`, `approve_proposal`, `approve_batch`, `approve_shot`, `run_proposal`, `run_batch`, `reject_proposal`, `set_max_attempts`, `discard`, `restore`
+
+### Human-only tools (never available to crew agents; MCP/HTTP only for humans)
+- `list_projects`, `create_project`, `delete_project`, `list_trash`, `restore_trash`, `upload_image`, `list_jobs`, `get_job`, `list_crew_runs`, `get_crew_run`, `search_library`, `plan_recipe`
 
 ### Human approval and MCP elicitation
 For high-impact or spending operations:
@@ -34,4 +44,13 @@ For high-impact or spending operations:
 - `aistudio/domain/pipeline.py`: Proposal queue, batch generation plans.
 - `aistudio/domain/characters.py`: Character multi-angle vision checks.
 - `aistudio/domain/costs.py`: Pricing, budget estimation, cost log.
+- `aistudio/domain/batches.py`: Batch creation, approval, and execution.
+- `aistudio/domain/agents.py`: Crew agent definitions and execution.
+- `aistudio/domain/spec.py`: Generation spec resolution (model, price, capabilities).
+- `aistudio/domain/verify.py`: Rule and AI verification.
+- `aistudio/domain/todos.py`: TODO list management.
+- `aistudio/domain/common.py`: Shared utilities and errors.
 - `aistudio/schemas/`: Typed Pydantic models for all project JSON files.
+- `aistudio/recipes.py`: Recipe validation, planning, and execution.
+- `aistudio/crew/`: Studio crew agents, stages, and runtime.
+- `aistudio/providers/config.py`: Provider types, role chains, and adapter loading.
