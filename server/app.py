@@ -907,7 +907,9 @@ def create_app(root=None, token=None, rates_path=None, transport=None, static_di
         if not source.is_file():
             raise HTTPException(404, "clip not found")
         try:
-            result = local_tools.run_local(tool, source, source, params, root)
+            from aistudio import project_lock
+            with project_lock.lock(root):          # two requests must not pick the same .v<k> file
+                result = local_tools.run_local(tool, source, source, params, root)
         except (ValueError, OSError) as exc:
             raise HTTPException(400, str(exc)) from exc
         return {"file": str(result.relative_to(root)), "tool": tool, "cost": 0}
