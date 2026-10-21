@@ -27,7 +27,7 @@ class ProjectDomain:
 
     def list_projects(self):
         out = []
-        for p in sorted((self.ws.root / "projects").iterdir()):
+        for p in sorted((self.ws.project_root / "projects").iterdir()):
             if p.is_dir():
                 b = self.ws._read(p, "budget.json", {})
                 shots = self.ws._read(p, "shots.json", {"shots": []})["shots"]
@@ -45,7 +45,7 @@ class ProjectDomain:
 
     def create_project(self, name, test_pipeline=False, format=None, brand_kit=None):
         try:
-            p = project_mod.create_project(self.ws.root / "projects", _ident(name, "project name"), format=format or None, brand_kit=brand_kit or None,
+            p = project_mod.create_project(self.ws.project_root / "projects", _ident(name, "project name"), format=format or None, brand_kit=brand_kit or None,
                                            kit_root=self.ws.root / "brand_kits")
         except (ValueError, FileExistsError) as e:
             raise ServiceError(str(e)) from None
@@ -160,7 +160,7 @@ class ProjectDomain:
         if fn == "Story.md":
             self.ws._changed(name, "story")
 
-    def add_file(self, name, rel, data, replace=False):
+    def add_file(self, name, rel, data, replace=False, is_agent=False):
         """Upload a still: stills/<id>.<ext>."""
         p = self.ws.pdir(name)
         rp = Path(rel)
@@ -175,7 +175,9 @@ class ProjectDomain:
             raise ServiceError("an image with that id exists; use Replace (the old one is kept in Discarded)")
         for old in existing:
             self.discard(name, old.relative_to(p).as_posix(), "replaced by an upload")
-        (p / "stills" / f"{rp.stem}.{ext}").write_bytes(data)
+        written = p / "stills" / f"{rp.stem}.{ext}"
+        written.write_bytes(data)
+        project_mod.save_json(p, written.relative_to(p).as_posix() + ".meta.json", {"unverified": True, "source": "upload", "sha": hashlib.sha256(data).hexdigest()})
         self.ws._changed(name, "assets", "shots")
 
     def brief_get(self, name):
@@ -246,7 +248,7 @@ class ProjectDomain:
     def rename_project(self, name, new):
         _ident(new, "new project name")
         src = self.ws.pdir(name)
-        dst = self.ws.root / "projects" / new
+        dst = self.ws.project_root / "projects" / new
         if dst.exists():
             raise ServiceError(f"a project called {new} already exists")
         src.rename(dst)
@@ -254,18 +256,18 @@ class ProjectDomain:
 
     def import_project(self, zip_path, name=None, filename=""):
         """Create a project from a zip made by Export Project."""
-        tmp_root = self.ws.root / "_import_tmp"
+        tmp_root = self.ws.project_root / "_import_tmp"
         tmp_root.mkdir(exist_ok=True)
         z, root, _ = importzip_mod.inspect(zip_path)
         z.close()
         name = (name or "").strip() or importzip_mod.derive_name(filename, root)
         if not importzip_mod.NAME_RE.match(name):
             raise importzip_mod.ImportError_(f"Invalid project name {name!r}: use letters, numbers, - and _ (up to 64).")
-        if (self.ws.root / "projects" / name).exists():
+        if (self.ws.project_root / "projects" / name).exists():
             raise importzip_mod.ImportError_(f"A project called {name} already exists. Choose another name.")
         folder, notes = importzip_mod.extract_and_validate(zip_path, tmp_root)
         try:
-            dst = importzip_mod.install(self.ws.root, folder, name)
+            dst = importzip_mod.install(self.ws.project_root, folder, name)
         except Exception:
             shutil.rmtree(folder, ignore_errors=True)
             raise
@@ -288,16 +290,16 @@ class ProjectDomain:
         if confirm != name and confirm != real_name and conf_str not in ("yes", "true", real_name.lower(), name.lower()):
             raise ServiceError(f"type the project name ('{real_name}') or 'yes' to confirm")
         try:
-            return {"trash": trash_mod.move_to_trash(self.ws.root, real_name), "name": real_name}
+            return {"trash": trash_mod.move_to_trash(self.ws.project_root, real_name), "name": real_name}
         except trash_mod.TrashError as e:
             raise ServiceError(str(e)) from None
 
     def trash_list(self):
-        return trash_mod.list_trash(self.ws.root)
+        return trash_mod.list_trash(self.ws.project_root)
 
     def trash_restore(self, tid, as_name=None):
         try:
-            return {"name": trash_mod.restore(self.ws.root, tid, as_name)}
+            return {"name": trash_mod.restore(self.ws.project_root, tid, as_name)}
         except trash_mod.TrashError as e:
             raise ServiceError(str(e)) from None
 

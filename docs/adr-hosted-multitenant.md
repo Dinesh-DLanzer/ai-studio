@@ -1,8 +1,12 @@
 # ADR: Hosted organisation based multi tenant tier
 
 **Status:** accepted for exploration; this ADR records the approved direction, not deployment approval.  
-**Scope:** plan 27 stage 2 foundation. The current application remains local, single user, loopback only.  
+**Scope:** plan 27 stage 2 foundation. Local mode remains single user and keeps its existing project layout. Hosted-mode filesystem partitioning is implemented as a foundation; hosted identity, organization management, and Postgres are not implemented.
 **Decision date:** 2026-10-20
+
+**Implemented in the filesystem foundation:** hosted project folders, project locks, proposal and spend-reservation files, import staging, and trash resolve below `tenants/<tenant_id>/`; tenant ids are validated and symlinked tenant roots are refused. Local mode continues to use `projects/` and its existing trash layout. These checks partition storage only; they do not authenticate the request context.
+
+**Still required before hosted use:** authenticated tenant and actor context, organization and membership management, and a Postgres backend with tenant-aware access controls. The hosted filesystem foundation does not complete any of those items.
 
 ## Context
 
@@ -22,7 +26,7 @@ Use PostgreSQL for hosted durable rows, with **Row Level Security (RLS)** polici
 
 Store project media in S3 compatible object storage under tenant scoped prefixes. Issue short lived signed URLs only after authorization. Encrypt provider credentials separately per organisation using KMS envelope encryption. Secrets must not be shared across tenants. Add tenant aware audit records for membership, key, project, approval, policy and data lifecycle changes.
 
-**Project and Lock Partitioning:** Projects and filesystem locks (`project_lock.lock`) are currently flat filesystem paths without tenant partitioning. Before hosted mode is enabled, projects and lock coordination must be explicitly tenant-partitioned (e.g. `<tenant_id>/<project>` hierarchy or tenant-scoped distributed locks) so that concurrent tenants cannot collide, access each other's projects, or block one another.
+**Project and Lock Partitioning:** In hosted mode, project folders (and therefore project lock, approval, and spend reservation files) live under `<root>/tenants/<tenant_id>/projects/<project>`. Trash also lives under that tenant root. The request context validates tenant ids and rejects traversal and symlink tenant roots. Local mode keeps `<root>/projects` and the existing trash layout. This filesystem partitioning is a foundation only: it does not authenticate callers or replace database row level security.
 
 ### Spending and billing
 
@@ -45,15 +49,15 @@ Migrate by importing each existing project using the project zip format into an 
 
 - Local installs remain supported and default to `local` / `local` without identity setup.
 - The code has basic role and spend policy vocabulary, but hosted authorization is not active.
-- Tenant ids and actor ids are groundwork; they are not a substitute for RLS or a security boundary.
+- Tenant ids and actor ids are groundwork; filesystem paths are tenant partitioned in hosted mode, but they are not a substitute for authenticated identity or database RLS.
 - Hosted launch needs a network architecture, identity integration, Postgres and object storage implementations, operational audit controls, and a reviewed data migration path.
 
 ## Open decisions
 
-1. OIDC provider support and the conditions for SAML; session and account recovery design.
-2. Whether roles are inherited from the organisation, workspace, or both, and the exact permission matrix.
+1. Authentication and OIDC provider support, SAML conditions, sessions, and account recovery.
+2. Organization management, membership lifecycle, role inheritance, and the exact permission matrix.
 3. Hosting target: managed cloud versus self hosted Docker or Helm; region and data residency needs.
-4. Postgres driver, migration tool, connection pooling, RLS policy design, and tenant context propagation to pooled connections.
+4. Postgres driver, migration tool, connection pooling, RLS policy design, and tenant context propagation to pooled connections. SQLite remains the only implemented database backend.
 5. Queue implementation and worker isolation model; Postgres backed jobs remain the first candidate.
 6. S3 compatible object store, retention and backup policy, signed URL limits, and tenant deletion retention window.
 7. KMS provider, key rotation, recovery, and per organisation envelope key lifecycle.

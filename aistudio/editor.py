@@ -19,6 +19,7 @@ The same edit also leaves the app as Final Cut Pro XML (`export_fcpxml`), a CMX 
 (`export_srt` / `export_vtt`) and a zip bundle for Canva and Google Vids (`export_bundle`).
 """
 import json
+import hashlib
 import os
 import re
 import shutil
@@ -868,6 +869,12 @@ def render(pdir, edit, progress=None, options=None):
                 raise EditError(str(e)) from None
             shutil.move(str(loud), str(part))
         shutil.move(str(part), str(final))
+        refs = [{"path": rel, "sha": hashlib.sha256((pdir / rel).read_bytes()).hexdigest()}
+                for rel in files if (pdir / rel).is_file()]
+        from aistudio import consent
+        consent.write_lineage(pdir, final, {"editor_render": True, "refs": refs},
+                              source_sha=(refs[0].get("sha", "") if refs else ""), kind="editor_render",
+                              source_shas=[r["sha"] for r in refs])
         if progress:
             progress(100.0)
         return f"exports/{final.name}"

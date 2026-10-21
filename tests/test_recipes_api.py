@@ -30,6 +30,7 @@ class TestRecipeRoutes(unittest.TestCase):
         self.p = self.app.state.ws.pdir("demo")
         (self.p / "stills").mkdir(exist_ok=True)
         (self.p / "stills" / "product.png").write_bytes(PNG)
+        HERM.register_test_media(self.p, "stills/product.png")
         self.url = "/api/projects/demo/recipes/product-ad-9x16/plan"
 
     def test_list_is_readable_by_an_api_key_and_flags_unavailable(self):
@@ -69,6 +70,7 @@ class TestRecipeTools(unittest.TestCase):
         self.ws.create_project("demo", test_pipeline=True)
         (self.ws.pdir("demo") / "stills").mkdir(exist_ok=True)
         (self.ws.pdir("demo") / "stills" / "product.png").write_bytes(PNG)
+        HERM.register_test_media(self.ws.pdir("demo"), "stills/product.png")
 
     def test_crew_can_list_but_never_plan_approve_or_run(self):
         self.assertEqual(R.cost_class("list_recipes"), "free")

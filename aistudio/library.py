@@ -242,8 +242,9 @@ def stats(root):
 
 
 def _require_consent(pdir, src, meta):
-    """Real-person assets travel only with a human-recorded consent entry (aistudio/consent.py) in the project that is the source or target."""
     from aistudio import consent
+    consent.require_verified_shas(pdir, [_sha(src)])
+    """Real-person assets travel only with a human-recorded consent entry (aistudio/consent.py) in the project that is the source or target."""
     stem = Path(src).stem.split(".v")[0]
     flagged = bool(meta.get("real_person"))
     try:

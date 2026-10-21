@@ -32,6 +32,7 @@ class TestProposalOnlyPaidTools(unittest.TestCase):
         (self.p / "stills" / "character.png").write_bytes(b"PNG")
         (self.p / "clips").mkdir(exist_ok=True)
         (self.p / "clips" / "s01_final_a1.mp4").write_bytes(b"FAKEMP4")
+        HERM.register_test_media(self.p, "stills/s01.png", "stills/character.png", "clips/s01_final_a1.mp4")
 
     def budget(self):
         self.ws.estimate("demo", 0.2)

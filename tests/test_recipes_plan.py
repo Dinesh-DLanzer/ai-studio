@@ -22,6 +22,7 @@ class Base(unittest.TestCase):
         self.p = self.ws.pdir("demo")
         (self.p / "stills").mkdir(exist_ok=True)
         (self.p / "stills" / "product.png").write_bytes(PNG)
+        HERM.register_test_media(self.p, "stills/product.png")
 
     def approve_everything_human(self, batch):
         """What the human does: estimate + approve the budget, then approve the batch at its hash."""

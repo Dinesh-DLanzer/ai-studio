@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-import tests._hermetic  # noqa: F401
+import tests._hermetic as HERM  # noqa: F401
 from aistudio import jobs, youtube
 from aistudio.secrets import SecretStore
 
@@ -91,11 +91,9 @@ class YouTubeTests(unittest.TestCase):
         self.store.set("youtube", {"client_id": "client", "client_secret": "oauth-secret", "access_token": "access-secret",
                                     "refresh_token": "refresh-secret", "expires_at": "9999999999"})
         job = {"payload": {"file": "exports/youtube/platform/demo.mp4", "sha256": digest, "privacy": "private", "title": "Title", "tags": [], "category_id": "22", "thumbnail": "exports/thumbnails/missing.png"}}
-        result = youtube.upload_job(self.store, project, job, lambda _pct: None, self.transport.request)
-        self.assertEqual(result["video_id"], "video-123")
-        self.assertIn("thumbnail_error", result)
-        upload_meta = next(c for c in self.transport.calls if "uploadType=resumable" in c[1])
-        self.assertEqual(json.loads(upload_meta[3])["snippet"]["title"], "Title")
+        with self.assertRaisesRegex(ValueError, "thumbnail sha256 is required"):
+            youtube.upload_job(self.store, project, job, lambda _pct: None, self.transport.request)
+        self.assertFalse(any("uploadType=resumable" in c[1] for c in self.transport.calls))
 
     def test_preview_requires_exported_contained_file_and_preflight(self):
         project = self.root / "projects" / "demo"
@@ -104,6 +102,7 @@ class YouTubeTests(unittest.TestCase):
         out = project / "exports" / "youtube" / "platform" / "demo.mp4"
         out.parent.mkdir(parents=True)
         out.write_bytes(b"video")
+        HERM.register_test_media(project, "exports/youtube/platform/demo.mp4")
         preview = youtube.preview(project, "youtube", preflight=[], channel_title="Test Channel")
         self.assertEqual(preview["sha256"], hashlib.sha256(b"video").hexdigest())
         with self.assertRaisesRegex(ValueError, "preflight"):
@@ -147,7 +146,7 @@ class YouTubeTests(unittest.TestCase):
         class Runner:
             def submit(self, *_a, **_kw): self.fail("must not queue")
         with self.assertRaisesRegex(ValueError, "typed title"):
-            youtube.queue_upload(WS(), "demo", "youtube", confirm_title="wrong", preflight=[], runner=Runner())
+            youtube.queue_upload(WS(), "demo", "youtube", confirm_title="wrong", sha256="a" * 64, preflight=[], runner=Runner())
         with self.assertRaisesRegex(ValueError, "preflight"):
             youtube.preview(project, "youtube", preflight=[{"level": "error"}], channel_title="Test Channel")
 

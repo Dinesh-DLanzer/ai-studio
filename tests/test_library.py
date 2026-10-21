@@ -52,6 +52,9 @@ class LibraryTests(unittest.TestCase):
             library._ensure_fts = original
 
     def test_incremental_promote_use_and_remix(self):
+        from aistudio import consent
+        from aistudio.domain.common import _sha
+        consent.clear_sha(self.project, _sha(self.project / "stills" / "hero.png"), "not_a_real_person")
         row = library.index_output(self.root, "demo", "stills/hero.png")
         self.assertIsNotNone(row)
         promoted = library.promote(self.root, "demo", "stills/hero.png")
@@ -112,11 +115,12 @@ class LibraryConsentAndAccessTests(unittest.TestCase):
         from aistudio import consent, library
         with self.assertRaises(Exception):
             library.promote(self.root, "a", "stills/maya.png")
-        consent.record(self.pa, "Maya", "I agree", kind="real_person")
+        from aistudio.domain.common import _sha
+        consent.record(self.pa, "Maya", "I agree", kind="real_person", sha=_sha(self.pa / "stills" / "maya.png"))
         item = library.promote(self.root, "a", "stills/maya.png")
         with self.assertRaises(Exception):
             library.use_in_project(self.root, item["id"], "b", "image")      # the TARGET project needs its own consent
-        consent.record(self.pb, "Maya", "I agree", kind="real_person")
+        consent.record(self.pb, "Maya", "I agree", kind="real_person", sha=_sha(self.pa / "stills" / "maya.png"))
         self.assertTrue(library.use_in_project(self.root, item["id"], "b", "image"))
 
     def test_a_hand_written_consent_dict_no_longer_approves_anything(self):

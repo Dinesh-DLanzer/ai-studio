@@ -12,7 +12,7 @@ import os
 from pathlib import Path
 import threading
 
-from aistudio import activity, catalog as catalog_mod, kind as kind_mod, migrate as migrate_mod, pricing as pricing_mod, roles as roles_mod, secrets as secrets_mod
+from aistudio import activity, catalog as catalog_mod, context as context_mod, kind as kind_mod, migrate as migrate_mod, pricing as pricing_mod, roles as roles_mod, secrets as secrets_mod
 from aistudio.domain.agents import AgentDomain
 from aistudio.domain.characters import CharacterDomain
 from aistudio.domain.chat import ChatDomain
@@ -47,7 +47,8 @@ class Workspace(SettingsMixin):
         self.catalog_fetch = catalog_fetch
         self._verify_lock, self._verify_running, self._catalog_cache = threading.Lock(), set(), None
         self.root = Path(root)
-        (self.root / "projects").mkdir(parents=True, exist_ok=True)
+        if not context_mod.is_hosted():
+            (self.root / "projects").mkdir(parents=True, exist_ok=True)
         self.rates_path = Path(rates_path) if rates_path else (self.root / "rates.json" if (self.root / "rates.json").exists() else REPO / "rates.json")
         self.transport = transport
         self.settings_dir = self.root / "settings"
@@ -143,17 +144,35 @@ class Workspace(SettingsMixin):
 
     def pdir(self, name):
         _ident(name, "project name")
-        p = self.root / "projects" / name
-        if p.is_symlink() or (p.is_dir() and p.resolve().parent != (self.root / "projects").resolve()):
+        projects_dir = self.project_root / "projects"
+        p = projects_dir / name
+        if p.is_symlink() or (p.is_dir() and p.resolve().parent != projects_dir.resolve()):
             raise ServiceError(f"refusing project {name}: a project folder must be a real folder inside projects/")
         if not p.is_dir():
-            projs_dir = self.root / "projects"
+            projs_dir = projects_dir
             if projs_dir.is_dir():
                 matches = [d for d in projs_dir.iterdir() if d.is_dir() and not d.name.startswith(("_", ".")) and (d.name.lower() == name.lower() or d.name.lower().startswith(name.lower()))]
                 if len(matches) == 1 and not matches[0].is_symlink():
                     return matches[0]
             raise ServiceError(f"no such project: {name}")
         return p
+
+    @property
+    def project_root(self):
+        if not context_mod.is_hosted():
+            return self.root
+        ctx = context_mod.get_context()
+        tenant_id = context_mod.validate_tenant_id(ctx.tenant_id)
+        tenants = self.root / "tenants"
+        tenant = tenants / tenant_id
+        if tenants.is_symlink() or tenant.is_symlink():
+            raise RuntimeError("tenant project root must not be a symlink")
+        tenants.mkdir(parents=True, exist_ok=True)
+        tenant.mkdir(exist_ok=True)
+        if tenant.resolve().parent != tenants.resolve():
+            raise RuntimeError("tenant project root escapes tenant storage")
+        (tenant / "projects").mkdir(exist_ok=True)
+        return tenant
 
     def _read(self, pdir, fn, default=None):
         f = pdir / fn
@@ -184,8 +203,8 @@ class Workspace(SettingsMixin):
     def put_text(self, name, fn, text):
         return self._projects.put_text(name, fn, text)
 
-    def add_file(self, name, rel, data, replace=False):
-        return self._projects.add_file(name, rel, data, replace=replace)
+    def add_file(self, name, rel, data, replace=False, is_agent=False):
+        return self._projects.add_file(name, rel, data, replace=replace, is_agent=is_agent)
 
     def brief_get(self, name):
         return self._projects.brief_get(name)
@@ -386,15 +405,22 @@ class Workspace(SettingsMixin):
             raise ServiceError(f"asset {asset_id} has no file to bind consent to")
         return _sha(f)
 
-    def consent_record(self, name, subject, statement, kind="real_person", asset_id=None):
+    def consent_record(self, name, subject, statement, kind="real_person", asset_id=None, sha=None):
         """HUMAN session only (the one route is agent=False). Not an MCP/crew tool. With asset_id the consent is bound to that file's bytes."""
         from aistudio import consent
-        return consent.record(self.pdir(name), subject, statement, kind, sha=self._asset_sha(name, asset_id) if asset_id else None)
+        digest = self._asset_sha(name, asset_id) if asset_id else sha
+        return consent.record(self.pdir(name), subject, statement, kind, sha=digest)
 
     def consent_mark(self, name, asset_id):
         """HUMAN session only: mark the asset's current file bytes as a real person, so consent bound to those bytes is required whatever the flag says."""
         from aistudio import consent
         return consent.mark_real_person(self.pdir(name), asset_id, self._asset_sha(name, asset_id))
+
+    def consent_clear(self, name, asset_id=None, clearance="", sha=None):
+        """Human session only: clear exact file bytes as not depicting a real person."""
+        from aistudio import consent
+        digest = self._asset_sha(name, asset_id) if asset_id else sha
+        return consent.clear_sha(self.pdir(name), digest, clearance)
 
     def edit_get(self, name):
         return self._storyboard.edit_get(name)

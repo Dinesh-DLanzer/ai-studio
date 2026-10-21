@@ -119,6 +119,9 @@ class CharacterDomain:
         """Create a character-review proposal; analysis runs only after human approval."""
         p = self.ws.pdir(name)
         img_path = resolve_character_image(p, rel)
+        from aistudio import consent
+        from aistudio.domain.common import _sha
+        consent.require_verified_shas(p, [_sha(img_path)])
         return self.ws.propose(name, "review", img_path.stem, options={
             "review_type": "character", "file": img_path.relative_to(p.resolve()).as_posix(),
         })

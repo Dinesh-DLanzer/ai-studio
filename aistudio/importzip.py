@@ -230,6 +230,11 @@ def _safe(dest, fn):
 def _sanitise(dest):
     """Remove everything that could carry an approval from another computer.  Returns notes for the user."""
     notes = []
+    lineage = [path for path in Path(dest).rglob("*.meta.json") if path.is_file()]
+    for path in lineage:
+        path.unlink()
+    if lineage:
+        notes.append("Imported media lineage was dropped; a human must clear unverified media before consent-sensitive use.")
     real, test = kind_mod.evidence(dest)
     sb = dest / "sandbox.json"
     if sb.exists() and real:

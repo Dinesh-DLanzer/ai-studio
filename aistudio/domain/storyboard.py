@@ -143,6 +143,7 @@ class StoryboardDomain:
         for src, aid, kind, dst in plan:
             if dst.name != src.name:
                 src.rename(dst)
+            project_mod.save_json(p, dst.relative_to(p).as_posix() + ".meta.json", {"unverified": True, "source": "import_stills"})
             for s in shots["shots"]:
                 if s.get("first_frame") and Path(s["first_frame"]).name == src.name:
                     s["first_frame"] = f"stills/{dst.name}"

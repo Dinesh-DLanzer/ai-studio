@@ -180,6 +180,9 @@ def export_for(ws, project, preset_id):
     proc = subprocess.run([ffmpeg, "-y", "-nostdin", "-hide_banner", "-loglevel", "error", *delivery.ffmpeg_args(preset, rendered, video)], capture_output=True, text=True)
     if proc.returncode:
         raise ValueError("preset transcode failed: " + (proc.stderr or "ffmpeg error")[-500:])
+    from aistudio.domain.common import _sha
+    from aistudio import consent
+    consent.write_lineage(pdir, video, {"refs": [{"path": rendered.relative_to(pdir).as_posix(), "sha": _sha(rendered)}]}, source_sha=_sha(rendered), kind="publish_render")
     probe = editor.probe(video)
     issues = delivery.preflight(preset, probe or {}, edit)
     metadata = get(ws, project)
@@ -187,6 +190,7 @@ def export_for(ws, project, preset_id):
     platform_dir = outdir / "platform"
     platform_dir.mkdir(exist_ok=True)
     shutil.copy2(video, platform_dir / video.name)
+    consent.write_lineage(pdir, platform_dir / video.name, {"refs": [{"path": rendered.relative_to(pdir).as_posix(), "sha": _sha(rendered)}]}, source_sha=_sha(video), kind="publish_platform")
     if preset["caption_mode"] == "sidecar_srt":
         cues = edit.get("tracks", {}).get("subtitles", {}).get("cues", [])
         (platform_dir / "captions.srt").write_text(editor.export_srt(cues), encoding="utf-8")
@@ -218,4 +222,7 @@ def choose_thumbnail(ws, project, source, at_seconds=0):
     proc = subprocess.run([shutil.which("ffmpeg") or "ffmpeg", "-y", "-nostdin", "-ss", str(at_seconds), "-i", str(source_path), "-frames:v", "1", str(folder / name)], capture_output=True, text=True)
     if proc.returncode:
         raise ValueError("thumbnail extraction failed: " + (proc.stderr or "ffmpeg error")[-300:])
+    from aistudio.domain.common import _sha
+    from aistudio import consent
+    consent.write_lineage(pdir, folder / name, {"tool": "thumbnail_extract"}, source_sha=_sha(source_path), kind="thumbnail_extract")
     return f"exports/thumbnails/{name}"

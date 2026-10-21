@@ -72,6 +72,7 @@ class TestAudioPipeline(unittest.TestCase):
         video.parent.mkdir(parents=True, exist_ok=True)
         subprocess.run(["ffmpeg", "-v", "error", "-f", "lavfi", "-i", "sine=frequency=440:duration=1", "-y", str(audio)], check=True)
         subprocess.run(["ffmpeg", "-v", "error", "-f", "lavfi", "-i", "color=c=black:s=64x64:d=1", "-y", str(video)], check=True)
+        HERM.register_test_media(self.p, "clips/source.mp4", "audio/voice.wav")
         proposal = self.ws.propose("audio", "lipsync", "source", options={"video": "clips/source.mp4", "audio": "audio/voice.wav"})
         with self.assertRaises(Exception):
             self.ws.execute("audio", proposal["id"])
@@ -98,6 +99,7 @@ class TestAudioPipeline(unittest.TestCase):
         video.parent.mkdir(parents=True, exist_ok=True)
         subprocess.run(["ffmpeg", "-v", "error", "-f", "lavfi", "-i", "sine=frequency=440:duration=2", "-y", str(audio)], check=True)
         subprocess.run(["ffmpeg", "-v", "error", "-f", "lavfi", "-i", "color=c=black:s=64x64:d=2", "-f", "lavfi", "-i", "sine=frequency=440:duration=2", "-shortest", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-y", str(video)], check=True)
+        HERM.register_test_media(self.p, "clips/source.mp4", "audio/source.wav")
         cards = {"kind": "audio", "per_1k_chars": 0.1, "per_minute": 0.06, "per_run": 0.25, "per_second": 0.02}
         (self.ws.settings_dir / "models.json").write_text(json.dumps({"prices": {"fake|fake/audio": cards}}), encoding="utf-8")
         requests = [

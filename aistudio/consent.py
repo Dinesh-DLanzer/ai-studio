@@ -4,6 +4,10 @@ Writing is HUMAN-SESSION ONLY: the only caller is the web route marked agent=Fal
 (tests/test_cast.py pins that). Reading is free. Generation with an asset marked `real_person: true` is refused without a matching entry.
 """
 import json
+import hashlib
+import hmac
+import os
+import re
 from datetime import date as _date
 from pathlib import Path
 
@@ -12,6 +16,72 @@ from aistudio.domain.common import ServiceError, _sha
 
 FILE = "consent.json"
 KINDS = ("real_person", "voice")
+LINEAGE_SECRET = "media-lineage-hmac"
+
+
+def _lineage_key():
+    """Use the existing external secret store; project files never carry the signing key."""
+    from aistudio.secrets import SecretStore
+    import secrets
+    store = SecretStore()
+    fields = store.get(LINEAGE_SECRET)
+    if not fields.get("secret"):
+        store.set(LINEAGE_SECRET, {"secret": secrets.token_urlsafe(32)})
+        fields = store.get(LINEAGE_SECRET)
+    return fields["secret"].encode("utf-8")
+
+
+def _parents(meta):
+    """Every input a derived file was made from: source_shas (several inputs, e.g. an editor render) or the single source_sha."""
+    many = meta.get("source_shas")
+    if isinstance(many, list) and many:
+        return sorted({x for x in many if isinstance(x, str) and x})
+    return [meta["source_sha"]] if meta.get("source_sha") else []
+
+
+def _lineage_signature(sha, source_sha, kind, source_shas=None):
+    body = {"sha": sha, "source_sha": source_sha or "", "kind": kind or ""}
+    if source_shas:
+        body["source_shas"] = sorted(source_shas)     # only present for multi-input files, so older signatures stay valid
+    value = json.dumps(body, sort_keys=True, separators=(",", ":"))
+    return hmac.new(_lineage_key(), value.encode("utf-8"), hashlib.sha256).hexdigest()
+
+
+def write_lineage(pdir, path, meta, source_sha=None, kind=None, source_shas=None):
+    """Write server-authenticated lineage for a media file produced by a trusted tool."""
+    path = Path(path)
+    digest = _sha(path)
+    if not digest:
+        raise ServiceError("cannot record lineage for unreadable media")
+    meta = dict(meta)
+    source_sha = source_sha if source_sha is not None else meta.get("source_sha", "")
+    kind = kind if kind is not None else meta.get("kind", "")
+    source_shas = sorted({x for x in (source_shas or []) if x}) or None
+    meta.update({"source_sha": source_sha or "", "kind": kind or "", "sha": digest,
+                 "lineage_hmac": _lineage_signature(digest, source_sha, kind, source_shas)})
+    if source_shas:
+        meta["source_shas"] = source_shas
+    else:
+        meta.pop("source_shas", None)
+    project_mod.save_json(Path(pdir), path.relative_to(Path(pdir)).as_posix() + ".meta.json", meta)
+    return meta
+
+
+def _trusted_lineage(path, meta):
+    digest = _sha(path)
+    if not digest or meta.get("sha") != digest or not meta.get("lineage_hmac"):
+        return False
+    many = meta.get("source_shas")
+    expected = _lineage_signature(digest, meta.get("source_sha", ""), meta.get("kind", ""), many if isinstance(many, list) else None)
+    return hmac.compare_digest(str(meta["lineage_hmac"]), expected)
+
+
+def _lineage_files(pdir):
+    for directory, dirs, names in os.walk(Path(pdir), followlinks=False):
+        dirs[:] = [d for d in dirs if not (Path(directory) / d).is_symlink()]
+        for name in names:
+            if name.endswith(".meta.json"):
+                yield Path(directory) / name
 
 
 def read(pdir):
@@ -73,6 +143,74 @@ def mark_real_person(pdir, asset_id, sha, subject=""):
     return {"asset": asset_id, "sha": sha}
 
 
+def clear_sha(pdir, sha, clearance):
+    """Record a human-reviewed clearance for exact media bytes."""
+    sha = str(sha or "").strip().lower()
+    if not re.fullmatch(r"[0-9a-f]{64}", sha):
+        raise ServiceError("a valid file sha is required")
+    if clearance != "not_a_real_person":
+        raise ServiceError("clearance must be not_a_real_person")
+    items = read(pdir)
+    if not any(x.get("kind") == "not_a_real_person_sha" and x.get("sha") == sha for x in items):
+        items.append({"kind": "not_a_real_person_sha", "sha": sha, "date": _date.today().isoformat()})
+        project_mod.save_json(Path(pdir), FILE, items)
+    return {"sha": sha, "clearance": clearance}
+
+
+def _project_media(pdir):
+    p = Path(pdir)
+    files = []
+    for directory, dirs, names in os.walk(p, followlinks=False):
+        dirs[:] = [d for d in dirs if not (Path(directory) / d).is_symlink()]
+        for name in names:
+            path = Path(directory) / name
+            if not name.endswith(".meta.json") and (path.is_file() or path.is_symlink()):
+                files.append(path)
+    return files
+
+
+def _unverified_shas(pdir):
+    """Find media without authenticated provenance or an explicit human clearance."""
+    verified = set()
+    verified.update(x.get("sha") for x in read(pdir)
+                    if x.get("sha") and (x.get("kind") in ("real_person", "voice", "real_person_sha", "not_a_real_person_sha")))
+    pipeline_kinds = {"image", "clip", "image_edit", "clip_extend", "upscale_ai", "reframe_ai", "restyle", "replace", "motion_transfer", "character_swap", "review", "tts", "music", "sfx", "lipsync", "transcribe"}
+    files = _project_media(pdir)
+    metadata = {}
+    for path in files:
+        meta_file = path.with_name(path.name + ".meta.json")
+        try:
+            meta = json.loads(meta_file.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            meta = {}
+        digest = _sha(path)
+        if digest:
+            metadata[digest] = (path, meta)
+    changed = True
+    while changed:
+        changed = False
+        for digest, (path, meta) in metadata.items():
+            if digest in verified or meta.get("unverified"):
+                continue
+            source_sha = meta.get("source_sha")
+            pipeline_output = (meta.get("kind") in pipeline_kinds and isinstance(meta.get("spec_hash"), str)
+                               and re.fullmatch(r"[0-9a-f]{64}", meta["spec_hash"])
+                               and meta.get("target") and meta.get("created") and meta.get("actor") is not None
+                               and isinstance(meta.get("cost"), (int, float)))
+            signed = _trusted_lineage(path, meta)
+            parents = _parents(meta)
+            if signed and (pipeline_output or (parents and all(x in verified for x in parents))):    # every input must be verified
+                verified.add(digest)
+                changed = True
+    return {digest for digest, (path, _meta) in metadata.items() if digest not in verified}
+
+
+def _inherits_bound(meta, marked, bound):
+    """A derived file inherits consent only when every marked input it was made from has consent bound to it."""
+    hit = [x for x in _parents(meta) if x in marked or x in bound]
+    return bool(hit) and all(x in bound for x in hit if x in marked) and any(x in bound for x in hit)
+
+
 def real_person_shas(pdir):
     marked = {x["sha"] for x in read(pdir) if x.get("kind") == "real_person_sha" and x.get("sha")}
     if not marked:
@@ -81,97 +219,58 @@ def real_person_shas(pdir):
     changed = True
     while changed:
         changed = False
-        # 1. Scan .meta.json files in project media dirs
-        for sub in ("stills", "clips", "videos", "audio"):
-            d = p / sub
-            if not d.is_dir():
+        for meta_file in _lineage_files(p):
+            try:
+                meta = json.loads(meta_file.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
                 continue
-            for meta_file in d.glob("*.meta.json"):
-                try:
-                    meta = json.loads(meta_file.read_text(encoding="utf-8"))
-                except Exception:
-                    continue
-                source_shas = set()
-                if meta.get("source_sha"):
-                    source_shas.add(meta["source_sha"])
-                if meta.get("params", {}).get("source_sha"):
-                    source_shas.add(meta["params"]["source_sha"])
-                for r in meta.get("refs", []):
-                    if isinstance(r, dict) and r.get("sha"):
-                        source_shas.add(r["sha"])
-                if any(s in marked for s in source_shas):
-                    media_name = meta_file.name[:-10]
-                    media_file = meta_file.parent / media_name
-                    if media_file.is_file():
-                        h = _sha(media_file)
-                        if h and h not in marked:
-                            marked.add(h)
-                            changed = True
-        # 2. Check <stem>.v<k> where base <stem> has sha in marked
-        for sub in ("stills", "clips", "videos"):
-            d = p / sub
-            if not d.is_dir():
-                continue
-            for f in d.glob("*"):
-                if f.is_file() and not f.name.endswith(".meta.json") and ".v" in f.name:
-                    base_stem = f.name.split(".v")[0]
-                    base_file = d / f"{base_stem}{f.suffix}"
-                    if base_file.is_file():
-                        base_h = _sha(base_file)
-                        if base_h in marked:
-                            h = _sha(f)
-                            if h and h not in marked:
-                                marked.add(h)
-                                changed = True
+            media_file = meta_file.with_name(meta_file.name[:-10])
+            if media_file.is_file() and any(x in marked for x in _parents(meta)) and _trusted_lineage(media_file, meta):
+                h = _sha(media_file)
+                if h and h not in marked:
+                    marked.add(h)
+                    changed = True
     return marked
 
 
 def require_shas(pdir, shas):
     """Refuse when a file whose sha a human marked as a real person has no sha-bound consent entry."""
     marked = real_person_shas(pdir)
-    bound = {x.get("sha") for x in read(pdir) if x.get("kind") == "real_person" and x.get("sha")}
+    records = read(pdir)
+    bound = {x.get("sha") for x in records if x.get("kind") in ("real_person", "voice") and x.get("sha")}
+    cleared = {x.get("sha") for x in records if x.get("kind") == "not_a_real_person_sha" and x.get("sha")}
     
     # Expand bound consent to derived files whose source_sha has bound consent
     p = Path(pdir)
     changed = True
     while changed:
         changed = False
-        for sub in ("stills", "clips", "videos", "audio"):
-            d = p / sub
-            if not d.is_dir():
+        for meta_file in _lineage_files(p):
+            try:
+                meta = json.loads(meta_file.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
                 continue
-            for meta_file in d.glob("*.meta.json"):
-                try:
-                    meta = json.loads(meta_file.read_text(encoding="utf-8"))
-                except Exception:
-                    continue
-                source_shas = set()
-                if meta.get("source_sha"):
-                    source_shas.add(meta["source_sha"])
-                if meta.get("params", {}).get("source_sha"):
-                    source_shas.add(meta["params"]["source_sha"])
-                for r in meta.get("refs", []):
-                    if isinstance(r, dict) and r.get("sha"):
-                        source_shas.add(r["sha"])
-                if any(s in bound for s in source_shas):
-                    media_name = meta_file.name[:-10]
-                    media_file = meta_file.parent / media_name
-                    if media_file.is_file():
-                        h = _sha(media_file)
-                        if h and h not in bound:
-                            bound.add(h)
-                            changed = True
-            for f in d.glob("*"):
-                if f.is_file() and not f.name.endswith(".meta.json") and ".v" in f.name:
-                    base_stem = f.name.split(".v")[0]
-                    base_file = d / f"{base_stem}{f.suffix}"
-                    if base_file.is_file() and _sha(base_file) in bound:
-                        h = _sha(f)
-                        if h and h not in bound:
-                            bound.add(h)
-                            changed = True
+            media_file = meta_file.with_name(meta_file.name[:-10])
+            if media_file.is_file() and _inherits_bound(meta, marked, bound) and _trusted_lineage(media_file, meta):
+                h = _sha(media_file)
+                if h and h not in bound:
+                    bound.add(h)
+                    changed = True
 
     for sha in shas:
         if sha in marked and sha not in bound:
             raise ServiceError("a file marked as a real person has no consent bound to it. A human must record consent for these exact file bytes "
                                "(POST /api/projects/<name>/consent with the file's sha); generation is refused until then.")
+
+
+def require_verified_shas(pdir, shas):
+    """Require provenance or a human sha clearance before consent-sensitive use."""
+    records = read(pdir)
+    bound = {x.get("sha") for x in records if x.get("kind") in ("real_person", "voice") and x.get("sha")}
+    cleared = {x.get("sha") for x in records if x.get("kind") == "not_a_real_person_sha" and x.get("sha")}
+    unverified = _unverified_shas(pdir)
+    known = {_sha(path) for path in _project_media(pdir)}
+    for sha in shas:
+        if (sha not in known or sha in unverified) and sha not in bound and sha not in cleared:
+            raise ServiceError("an unverified media file needs human clearance (sha-bound consent or not-a-real-person clearance) for these exact file bytes")
+    require_shas(pdir, shas)

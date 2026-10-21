@@ -21,3 +21,16 @@ def real_projects(case):
     old = os.environ.pop("AISTUDIO_ALL_TEST", None)
     if old is not None:
         case.addCleanup(os.environ.__setitem__, "AISTUDIO_ALL_TEST", old)
+
+
+def register_test_media(pdir, *rels):
+    """Record explicit human clearance for non-person synthetic media fixtures."""
+    from pathlib import Path
+    from aistudio import consent
+    from aistudio.domain.common import _sha
+
+    pdir = Path(pdir)
+    for rel in rels:
+        path = pdir / rel
+        if path.is_file():
+            consent.clear_sha(pdir, _sha(path), "not_a_real_person")
