@@ -181,7 +181,31 @@ class CrewRuntimeTests(unittest.TestCase):
 
     def test_assist_proposals_make_no_batch(self):
         rec, _ = self.run_([act("propose", name="demo", kind="image", target="meena"), DONE], autonomy="assist")
-        self.assertEqual((rec["steps"][0]["status"], rec["batch"]), ("proposed", None))
+        self.assertEqual((rec["steps"][0]["status"], rec["batch"], rec["proposals"]), ("suggested", None, []))      # assist creates nothing, not even a pending proposal
+
+    def test_undo_never_overwrites_a_later_human_edit(self):
+        story = (self.p / "Story.md").read_bytes()
+        rec, _ = self.run_([act("write_doc", name="demo", doc="Story.md", text="# By the agent\n"), DONE])
+        (self.p / "Story.md").write_text("# Edited by the human afterwards\n", encoding="utf-8")
+        out = runtime.undo(self.ws, "demo", rec["id"])
+        self.assertEqual((out["ok"], out["restored"], out["skipped_edited_since"]), (False, [], ["Story.md"]))
+        self.assertEqual((self.p / "Story.md").read_text(encoding="utf-8"), "# Edited by the human afterwards\n")
+        self.assertIsNone(runtime.get_run(self.ws, "demo", rec["id"])["undone"])
+        self.assertNotEqual((self.p / "Story.md").read_bytes(), story)
+
+    def test_undo_leaves_documents_the_run_never_touched(self):
+        rec, _ = self.run_([act("write_doc", name="demo", doc="Story.md", text="# By the agent\n"), DONE])
+        brief = (self.p / "brief.json").read_bytes() if (self.p / "brief.json").exists() else None
+        (self.p / "brief.json").write_text('{"human": "edit"}', encoding="utf-8")
+        runtime.undo(self.ws, "demo", rec["id"])
+        self.assertEqual((self.p / "brief.json").read_text(encoding="utf-8"), '{"human": "edit"}')
+        self.assertNotEqual(brief, b'{"human": "edit"}')
+
+    def test_agent_ids_are_validated_before_any_file_is_read(self):
+        from aistudio.crew import agents
+        for bad in ("../etc/passwd", "a/b", "", "UPPER", 5, None):
+            with self.assertRaises(agents.AgentError):
+                agents.load(bad)
 
     def test_autopilot_and_empty_task_are_refused(self):
         with self.assertRaises(ServiceError):

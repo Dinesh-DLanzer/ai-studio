@@ -250,6 +250,10 @@ def _act(ws, project, rec, allowed, step, action, autonomy):
     if cls == "paid":
         if tool != "propose":
             return fail("refused", f"'{tool}' is not supported for agents yet; use propose.")
+        if autonomy == "assist":
+            rec["suggested_changes"].append({"tool": tool, "args": args, "why": step["why"], "applied": False, "diff": ""})
+            step.update(status="suggested", result="not applied (assist mode)")
+            return "Assist mode: this proposal was recorded as a suggestion for the human and NOT created."
         try:
             prop = ws.propose(project, args["kind"], args["target"])      # reveal_code stays False: a human gets the code, never the agent
         except ServiceError as e:
@@ -288,6 +292,7 @@ def _finish(ws, project, rec, pre, p):
     rec["finished"] = time.time()
     now = _snapshot(p)
     rec["changes"] = [{"doc": d, "diff": _diff(d, pre[d], now[d])} for d in sorted(now) if _sha(pre[d]) != _sha(now[d])]
+    rec["post_run"] = {c["doc"]: _sha(now[c["doc"]]) for c in rec["changes"]}     # undo touches only these, and only if still unedited
     if rec["autonomy"] == "copilot" and rec["proposals"]:
         try:
             b = ws.batches.create(project, actor="crew", only={(x["kind"], x["shot"]) for x in rec["proposals"]})
@@ -306,11 +311,15 @@ def undo(ws, project, rid):
     if rec.get("undone"):
         raise ServiceError("this run was already undone")
     p = ws.pdir(project)
-    restored, missing = [], []
-    for doc, sha in rec["pre_run"].items():
+    restored, missing, edited = [], [], []
+    for doc in rec.get("post_run", {}):
+        sha = rec["pre_run"].get(doc)
         path = p / doc
         cur = path.read_bytes() if path.is_file() else None
         if _sha(cur) == sha:
+            continue
+        if _sha(cur) != rec["post_run"][doc]:         # a human (or a later run) edited it after this run: do not overwrite their work
+            edited.append(doc)
             continue
         if sha is None:                       # the run created the document: archive it, then remove it
             history.record_previous(p, doc, cur, b"")
@@ -325,6 +334,7 @@ def undo(ws, project, rid):
         restored.append(doc)
     if missing:
         raise ServiceError(f"cannot restore {', '.join(missing)}: its pre-run version is no longer in the history" + (f" (restored {', '.join(restored)})" if restored else ""))
-    rec["undone"] = time.time()
+    if not edited:
+        rec["undone"] = time.time()
     _save(ws, project, rec)
-    return {"ok": True, "restored": restored, "run": rid}
+    return {"ok": not edited, "restored": restored, "skipped_edited_since": edited, "run": rid}

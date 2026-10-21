@@ -116,15 +116,20 @@ def apply_overrides(agent, overrides):
 
 
 def load(agent_id, settings_dir=None, dirs=None):
+    if not isinstance(agent_id, str) or not re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,63}", agent_id):
+        raise AgentError(f"invalid agent id: {agent_id!r}")
     for d in (dirs or DIRS):
         f = Path(d) / f"{agent_id}.md"
         if f.is_file():
             ov = {}
             if settings_dir and (Path(settings_dir) / "agents.json").is_file():
                 try:
-                    ov = json.loads((Path(settings_dir) / "agents.json").read_text(encoding="utf-8")).get(agent_id)
+                    allov = json.loads((Path(settings_dir) / "agents.json").read_text(encoding="utf-8"))
                 except ValueError:
                     raise AgentError("settings/agents.json is not valid JSON") from None
+                if not isinstance(allov, dict):
+                    raise AgentError("settings/agents.json must be an object")
+                ov = allov.get(agent_id)
             return apply_overrides(load_file(f), ov)
     raise AgentError(f"unknown agent '{agent_id}'")
 
