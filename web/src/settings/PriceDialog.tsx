@@ -29,10 +29,11 @@ export default function PriceDialog({ target, onClose, onSaved }: { target: Pric
   const [withAudio, setWithAudio] = useState(""); const [noAudio, setNoAudio] = useState("");
   const [perImage, setPerImage] = useState(""); const [imgFree, setImgFree] = useState(false); const [vidFree, setVidFree] = useState(false);
   const [free, setFree] = useState(false); const [inp, setInp] = useState(""); const [out, setOut] = useState("");
+  const [minSecs, setMinSecs] = useState(""); const [perRef, setPerRef] = useState("");
   const [err, setErr] = useState(""); const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    setPerSec(""); setDiff(false); setWithAudio(""); setNoAudio(""); setPerImage(""); setImgFree(false); setVidFree(false); setFree(false); setInp(""); setOut(""); setErr(""); setBusy(false);
+    setPerSec(""); setDiff(false); setWithAudio(""); setNoAudio(""); setPerImage(""); setImgFree(false); setVidFree(false); setFree(false); setInp(""); setOut(""); setMinSecs(""); setPerRef(""); setErr(""); setBusy(false);
     setSuggest(target?.suggest ?? null);
     if (target?.card) apply(target.card);            // editing: start from the current price
     if (!target || target.suggest !== undefined) return;
@@ -50,6 +51,7 @@ export default function PriceDialog({ target, onClose, onSaved }: { target: Pric
 
   const apply = (c: PriceCard) => {
     setErr("");
+    setMinSecs(c.minimum_seconds ? String(c.minimum_seconds) : ""); setPerRef(c.per_reference_image ? String(c.per_reference_image) : "");
     if (c.kind === "video") {
       const e = Object.entries(c.per_second || {})[0];
       const v = e?.[1] as unknown;
@@ -85,6 +87,12 @@ export default function PriceDialog({ target, onClose, onSaved }: { target: Pric
       const i = num(inp), o = num(out);
       if (bad(i) || bad(o)) return setErr("Enter both token prices as numbers, 0 or more.");
       card = { kind: "text", input_per_1m: i, output_per_1m: o };
+    }
+    if (kind !== "text" && !(kind === "video" && vidFree)) {
+      const m = minSecs.trim() === "" ? 0 : num(minSecs), r = perRef.trim() === "" ? 0 : num(perRef);
+      if (bad(m) || bad(r)) return setErr("Minimum seconds and the per-reference price must be numbers, 0 or more.");
+      if (m && kind === "video") card.minimum_seconds = m;
+      if (r) card.per_reference_image = r;
     }
     setErr(""); setBusy(true);
     try { await settingsApi.putPrice(target.provider, target.model, card); toast("ok", `Saved price for ${target.model}`); onSaved(); onClose(); }
@@ -146,6 +154,13 @@ export default function PriceDialog({ target, onClose, onSaved }: { target: Pric
             )}
           </fieldset>
         )}
+        {kind !== "text" && !(kind === "video" && vidFree) && (
+          <div className="grid grid-cols-2 gap-3">
+            {kind === "video" && <div><Label>Minimum billed seconds (optional)</Label><Input aria-label="Minimum billed seconds" type="number" min={0} step="any" value={minSecs} onChange={(e) => setMinSecs(e.target.value)} /></div>}
+            <div><Label>$ per reference image (optional)</Label><Input aria-label="Dollars per reference image" type="number" min={0} step="any" value={perRef} onChange={(e) => setPerRef(e.target.value)} /></div>
+          </div>
+        )}
+        {target.card && <p className="text-xs text-slate-400">Price as of {target.card.retrieved_at ?? "an unknown date"}{target.card.source ? <> (source: {target.card.source})</> : null}. Saving marks it as set by you today.</p>}
         {err && <p role="alert" className="text-sm text-red-300">{err}</p>}
         <div className="flex justify-end gap-2">
           <Button variant="outline" onClick={onClose}>Cancel</Button>

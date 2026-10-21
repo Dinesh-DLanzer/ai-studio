@@ -13,7 +13,7 @@ export interface Provider {
 }
 export interface ProvidersResponse { providers: Provider[]; secrets_backend: "keychain" | "file"; }
 
-export interface PriceCard { kind: "video" | "image" | "text"; per_second?: Record<string, unknown>; per_image?: number; input_per_1m?: number; output_per_1m?: number; per_call?: number; free?: boolean; from?: string; }
+export interface PriceCard { kind: "video" | "image" | "text" | "audio" | "utility"; minimum_seconds?: number; per_reference_image?: number; retrieved_at?: string; source?: string; per_1k_chars?: number; per_minute?: number; per_run?: number; per_second?: Record<string, unknown>; per_image?: number; input_per_1m?: number; output_per_1m?: number; per_call?: number; free?: boolean; from?: string; }
 export interface ModelInfo {
   provider: string; provider_label: string; ptype: string; id: string; name: string; capability: Capability;
   price: string | null; priced: boolean; free: boolean; card: PriceCard | null; suggest: PriceCard | null; custom: boolean;
