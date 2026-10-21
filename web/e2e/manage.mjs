@@ -22,8 +22,9 @@ try {
   await page.goto(`http://127.0.0.1:${port}/?token=${token}`);
   await page.getByPlaceholder(/project-name/).fill("mgr"); await page.getByRole("button", { name: "Create" }).click();
   await go(page, "Story");
-  await page.waitForFunction(() => document.querySelector("textarea")?.value.includes("STORYBOARD"));
-  await page.locator("textarea").first().fill(readFileSync(join(here, "story.md"), "utf-8"));
+  await page.getByRole("tab", { name: "Markdown editor" }).click();
+  await page.locator('textarea[aria-label="Story.md contents"]').waitFor();
+  await page.locator('textarea[aria-label="Story.md contents"]').fill(readFileSync(join(here, "story.md"), "utf-8"));
   await page.getByRole("button", { name: "Save", exact: true }).first().click(); await page.getByText("Saved").first().waitFor();
   await page.getByRole("dialog").getByText("Set the budget").first().waitFor(); await page.getByRole("button", { name: "Decide later" }).click();
 
@@ -44,7 +45,8 @@ try {
 
   // saving Story.md rebuilds the shots (there is no separate Convert button), now with the chosen language
   await go(page, "Story"); await page.getByRole("tab", { name: /Story\.md/ }).click();
-  await page.waitForFunction(() => document.querySelector("textarea")?.value.includes("STORYBOARD"));
+  await page.getByRole("tab", { name: "Markdown editor" }).click();
+  await page.locator('textarea[aria-label="Story.md contents"]').waitFor();
   await page.getByRole("button", { name: "Save", exact: true }).first().click();
   await page.getByRole("dialog").getByText("Set the budget").first().waitFor(); await page.getByRole("button", { name: "Decide later" }).click();
   await page.getByText(/Updated: 3 shots/).waitFor();

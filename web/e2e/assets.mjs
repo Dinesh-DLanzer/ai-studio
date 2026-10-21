@@ -21,6 +21,7 @@ try {
   const browser = await chromium.launch(); const page = await browser.newPage({ viewport: { width: 1300, height: 1000 } }); pageRef = page;
   page.on("dialog", (d) => d.accept("replaced in test"));
   const errors = []; page.on("pageerror", (e) => errors.push(e.message));
+  page.on("console", msg => console.log("CONSOLE:", msg.type(), msg.text()));
   page.on("response", async (r) => { if (/upload|rename|images/.test(r.url()) && r.request().method() !== "GET") dbg.push(`DBG ${r.request().method()} ${r.url().split("?")[0].split("/api/")[1]} ${r.url().includes("replace=1") ? "replace " : ""}-> ${r.status()}`); });
   await page.goto(`http://127.0.0.1:${port}/?token=${token}`);
   await page.getByPlaceholder(/project-name/).fill("assetdemo"); await page.getByRole("button", { name: "Create" }).click();
@@ -38,6 +39,9 @@ try {
   await page.getByLabel("Asset id").fill("hero_sheet"); await page.getByLabel("Asset description").fill("Hero, 40s, white shirt"); await page.getByRole("button", { name: "Add", exact: true }).click();
   await page.locator('[data-asset="hero_sheet"]').getByText("not made yet").waitFor(); ok(true, "a new character asset appears without an image");
   await page.locator('[data-asset="hero_sheet"]').getByLabel("Upload image for hero_sheet").setInputFiles({ name: "hero.png", mimeType: "image/png", buffer: PNG });
+  // wait for the upload to complete, page to refetch, and React to rehydrate
+  await page.waitForTimeout(3000);
+  await page.locator('[data-asset="hero_sheet"]').waitFor({ state: "attached" });
   await page.locator('[data-asset="hero_sheet"] img').waitFor(); ok(true, "uploading an image makes the character ready");
   await page.screenshot({ path: join(shots, "14-assets-upload.png") });
 

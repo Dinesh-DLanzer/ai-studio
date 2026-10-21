@@ -28,7 +28,7 @@ const NAV = [
   { key: "shots", label: "Shots", icon: Film, count: "shots" as const },
   { key: "crew", label: "Crew", icon: Users },
   { key: "recipes", label: "Recipes", icon: BookOpen },
-  { key: "review", label: "Review & Export", icon: Clapperboard },
+  { key: "review-export", label: "Review & Export", icon: Clapperboard },
   { key: "publish", label: "Publish", icon: Send },
   { key: "costs", label: "Costs", icon: Wallet },
   { key: "discarded", label: "Discarded", icon: Trash2 },
@@ -173,7 +173,7 @@ function TopBar({ project, openMenu, openPalette }: { project?: ShellProject; op
     storyboard: "Search the script, scenes and prompts...",
     assets: "Search assets (characters, backgrounds, uploads)...",
     shots: "Search projects, scenes, or models...",
-    review: "Edit, trim, add text and export your video...",
+    "review-export": "Edit, trim, add text and export your video...",
     costs: "Search projects, scenes, or models...",
     discarded: "Search discarded items (scenes, shots, assets, videos)...",
   };

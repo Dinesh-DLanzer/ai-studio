@@ -111,6 +111,7 @@ export default function App() {
             <Route path="recipes" element={<Recipes />} />
             <Route path="publish" element={<Publish />} />
             <Route path="review" element={<Review />} />
+            <Route path="review-export" element={<ReviewExport />} />
             <Route path="costs" element={<Costs />} />
             <Route path="discarded" element={<Discarded />} />
             <Route path="*" element={<ProjectNotFound />} />
