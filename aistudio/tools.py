@@ -147,7 +147,7 @@ def run_local(tool, src, dst, params, project_dir, runner=subprocess.run):
         except Exception:
             pass
     # In test mode, copy source to versioned destination without running ffmpeg
-    if _in_test_mode():
+    if runner is subprocess.run and _in_test_mode():     # an injected runner (tests) is always honoured
         output.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(source, output)
         _write_meta(output)

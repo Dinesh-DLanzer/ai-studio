@@ -298,6 +298,7 @@ class TestMcpCastTools(unittest.TestCase):
         (self.p / "stills").mkdir(exist_ok=True)
         (self.p / "stills" / "meena.png").write_bytes(b"PNG-meena")
         (self.p / "stills" / "s01.png").write_bytes(b"PNG-s01")
+        HERM.register_test_media(self.p, "stills/meena.png", "stills/s01.png")      # a human cleared these synthetic files
         img_doc = self.ws._read(self.p, "images.json")
         img_doc["images"].append({"id": "meena", "kind": "character", "out": "stills/meena.png", "prompt": "Meena portrait", "refs": []})
         self.ws.put_images("demo", img_doc)
