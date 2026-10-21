@@ -26,7 +26,7 @@ export default function Palette({ open, onClose, project }: { open: boolean; onC
   const cmds = useMemo<Cmd[]>(() => {
     const base: Cmd[] = [{ id: "home", label: "All projects", icon: <FolderOpen size={16} />, run: go("/") }, { id: "settings", label: "AI Model Config", hint: "chat, verify, video models", icon: <Cog size={16} />, run: go("/settings") },
       { id: "help", label: "Help & Docs", icon: <Compass size={16} />, run: go("/help") }];
-    const pages = project ? [["Overview", ""], ["Chat", "/chat"], ["Storyboard", "/storyboard"], ["Assets", "/assets"], ["Shots", "/shots"], ["Review & Export", "/review"], ["Costs", "/costs"], ["Discarded", "/discarded"]]
+    const pages = project ? [["Overview", ""], ["Chat", "/chat"], ["Storyboard", "/storyboard"], ["Assets", "/assets"], ["Shots", "/shots"], ["Review & Export", "/review-export"], ["Costs", "/costs"], ["Discarded", "/discarded"]]
       .map(([l, s]) => ({ id: `page-${l}`, label: `Go to ${l}`, hint: project, icon: <Compass size={16} />, run: go(`/p/${project}${s}`) })) : [];
     const projs = projects.filter((n) => n !== project).map((n) => ({ id: `proj-${n}`, label: `Open project ${n}`, icon: <FolderOpen size={16} />, run: go(`/p/${n}`) }));
     const all = [...pages, ...base, ...projs];

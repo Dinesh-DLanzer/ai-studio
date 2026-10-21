@@ -34,8 +34,11 @@ try {
 
   await go(page, "Story");
   const story = readFileSync(join(here, "story.md"), "utf-8");
-  await page.waitForFunction(() => document.querySelector("textarea")?.value.includes("STORYBOARD"));
-  await page.locator("textarea").first().fill(story);
+  // switch to markdown editor (default is visual/Document view)
+  await page.getByRole("tab", { name: "Markdown editor" }).click();
+  // wait for the Story.md textarea to be ready (it loads async)
+  await page.locator('textarea[aria-label="Story.md contents"]').waitFor();
+  await page.locator('textarea[aria-label="Story.md contents"]').fill(story);
   await page.getByRole("button", { name: "Save", exact: true }).first().click();
   await page.getByText("Saved").first().waitFor();
   // saving Story.md now rebuilds the shots and images by itself (there is no separate Convert button any more)

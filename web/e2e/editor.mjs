@@ -25,23 +25,37 @@ try {
   [["s01", "red"], ["s02", "green"], ["s03", "blue"]].forEach(([id, c]) => ff("-f", "lavfi", "-i", `color=c=${c}:s=320x568:r=24:d=2`, "-f", "lavfi", "-i", "sine=frequency=440:duration=2", "-c:v", "libvpx-vp9", "-b:v", "200k", "-c:a", "libopus", "-shortest", join(pdir, "clips", `${id}_final_a1.mp4`)));
   const wav = join(tmpdir(), "e2e-music.wav"); ff("-f", "lavfi", "-i", "sine=frequency=330:duration=4", wav);
   await api("PUT", "/api/projects/ed/shots", { aspect_ratio: "9:16", audio: false, shots: ["s01", "s02", "s03"].map((id) => ({ id, model: "m", seconds: 2, prompt: "p" })) });
+  // create a basic edit.json with the 3 clips on the video track
+  await api("PUT", "/api/projects/ed/edit", {
+    tracks: {
+      video: ["s01", "s02", "s03"].map((id) => ({ id, src: `clips/${id}_final_a1.mp4`, in: 0, out: 2, volume: 1, transition: { type: "cut", dur: 0.5 } })),
+      text: [], audio: [], elements: [], subtitles: { cues: [] }
+    },
+    aspect: "9:16"
+  });
 
   const browser = await chromium.launch();
-  const context = await browser.newContext({ viewport: { width: 1672, height: 941 }, acceptDownloads: true });
+  const context = await browser.newContext({ viewport: { width: 1672, height: 1040 }, acceptDownloads: true });
   const page = await context.newPage(); const errors = []; page.on("pageerror", (e) => errors.push(e.message));
   await page.goto(`${base}/?token=${token}`); await page.goto(`${base}/#/p/ed`);
+  // wait for project to load - check for the project name in the sidebar
+  await page.locator('nav[aria-label="Project"]').getByText("ed").waitFor({ timeout: 10000 });
   await page.locator("nav[aria-label=Project]").getByRole("link", { name: /^Review & Export/ }).click();
-  await page.waitForFunction(() => location.hash === "#/p/ed/review"); ok(true, "the sidebar has Review & Export and opens #/p/ed/review");
-  await page.getByRole("heading", { name: "Review & Export" }).waitFor();
+  await page.waitForFunction(() => location.hash === "#/p/ed/review-export"); ok(true, "the sidebar has Review & Export and opens #/p/ed/review-export");
+  await page.getByRole("button", { name: "Export Video" }).waitFor();
   ok(await page.getByText("Edit your short video and export or save the project").isVisible(), "the header shows the title and subtitle from the design");
   ok(await page.getByRole("button", { name: "Export Project" }).isVisible() && await page.getByRole("button", { name: "Export Video" }).isVisible(), "Export Project and Export Video buttons are in the header");
   const tools = ["Media", "Text", "Elements", "Audio", "Transitions", "Filters", "Effects", "Subtitles", "Aspect Ratio", "Background"];
   const rail = page.getByRole("navigation", { name: "Editor tools" });
   ok((await rail.getByRole("button").allInnerTexts()).map((s) => s.trim()).join("|") === tools.join("|"), "the left rail has the 10 tools in the design's order");
+  // debug: check page content
+  await page.waitForTimeout(2000);
+  const bodyText = await page.locator("body").innerText();
+  console.log("Body text:", bodyText.substring(0, 2000));
   await page.locator("[data-testid=vbar-s01]").waitFor();
   ok(await page.locator("[data-testid^=vbar-]").count() === 3, "the timeline starts with the 3 shot clips on the Video track");
   ok((await page.getByTestId("time").innerText()).replace(/\s+/g, " ").includes("00:00 / 00:06"), "time shows 00:00 / 00:06");
-  ok((await page.locator(".re-tl-label").allInnerTexts()).map((s) => s.trim()).join() === "Text,Video,Audio", "track labels are Text, Video, Audio");
+  ok((await page.locator(".re-tl-label").allInnerTexts()).map((s) => s.trim()).join(",") === "Text,Subtitles,Elements,Video,Audio", "track labels are Text, Subtitles, Elements, Video, Audio");
   await page.waitForFunction(() => document.querySelectorAll(".re-film img").length >= 3, null, { timeout: 15000 }).catch(() => {});
   ok(await page.locator(".re-film img").count() >= 3, "the video track shows filmstrip thumbnails");
 
@@ -92,7 +106,7 @@ try {
 
   // ---- split
   await page.getByRole("slider", { name: "Seek" }).evaluate((el) => { const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set; set.call(el, "1"); el.dispatchEvent(new Event("input", { bubbles: true })); });
-  await page.locator("[data-testid=vbar-s01]").click({ position: { x: 30, y: 20 } });
+  await page.locator("[data-testid=vbar-s01]").click({ position: { x: 10, y: 20 } });
   await page.getByRole("button", { name: "Split at playhead" }).click();
   await page.waitForFunction(() => document.querySelectorAll("[data-testid^=vbar-]").length === 4);
   ok(true, "Split at playhead cuts the selected clip in two (4 clips)");
@@ -131,7 +145,7 @@ try {
 
   // ---- export video
   await page.getByRole("button", { name: "Export Video" }).click();
-  await page.getByRole("button", { name: "Start export" }).click();
+  await page.getByRole("button", { name: "Render MP4 Video" }).click();
   await page.getByTestId("export-result").waitFor({ timeout: 90000 }); ok(true, "Export Video renders with ffmpeg and shows the result");
   const ex = (await api("GET", "/api/projects/ed/exports")).json.exports;
   ok(ex.length === 1 && ex[0].bytes > 2000 && existsSync(join(pdir, ex[0].file)), "the MP4 is saved in the project's exports folder");

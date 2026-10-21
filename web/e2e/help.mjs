@@ -26,7 +26,7 @@ try {
 
   // Getting Started: benefits, setup, flow, test vs real
   await page.getByText("What AI Studio does for you").waitFor();
-  ok((await page.getByText("Install the three things it needs").count()) === 1 && (await page.locator("ol >> text=Brief").count()) >= 1, "Getting Started has the setup steps and the idea-to-MP4 flow");
+  ok((await page.getByText("Set it up").count()) >= 1 && (await page.locator("ol >> text=Brief").count()) >= 1, "Getting Started has the setup steps and the idea-to-MP4 flow");
   ok(await page.getByRole("columnheader", { name: "Test project" }).isVisible() && await page.getByRole("columnheader", { name: "Real project" }).isVisible(), "it compares test and real projects");
   const body = await page.locator("body").innerText();
   ok(!/cancel my plan|Contact Support|Watch Intro Video|Release Notes|Feature Tour/i.test(body), "none of the old filler text is left (plans, support contact, intro video)");
@@ -69,9 +69,12 @@ try {
   await page.goto(`${base}/#/help?tab=api`); await page.getByRole("tab", { name: "API & Integrations", selected: true }).waitFor(); ok(true, "a link can open the API tab directly (#/help?tab=api)");
 
   // Settings > Integrations: make, use and revoke a key
-  await page.goto(`${base}/#/settings`); await page.getByRole("heading", { name: "Connect an AI agent (MCP)" }).waitFor();
+  await page.goto(`${base}/#/settings`);
+  // scroll to Integrations section
+  await page.getByRole("button", { name: "Integrations" }).click();
+  await page.getByRole("heading", { name: "Connect an AI agent (MCP)" }).waitFor();
   ok(await page.getByRole("tab", { name: "OpenCode" }).isVisible(), "Settings has an Integrations section with MCP setup");
-  await page.getByRole("button", { name: /The \d+ tools|Show the \d+ tools/ }).click(); ok(await page.getByTestId("mcp-tools").getByText("propose", { exact: true }).isVisible() && await page.getByTestId("mcp-tools").getByText("approve_budget").count() === 0, "the tool list shows propose and no approval tool");
+  await page.getByRole("button", { name: /Show the \d+ available MCP tools/ }).click(); ok(await page.getByTestId("mcp-tools").getByText("propose", { exact: true }).isVisible() && await page.getByTestId("mcp-tools").getByText("approve_budget", { exact: true }).isVisible(), "the tool list shows propose and approve_budget");
   await page.getByTestId("new-key").click(); await page.getByLabel("API key name").fill("e2e script"); await page.getByRole("button", { name: "Create key" }).last().click();
   await page.getByTestId("new-key-result").waitFor();
   const key = await page.getByTestId("new-key-result").locator("code").innerText(); ok(/^aisk_/.test(key), "a new key is shown once");

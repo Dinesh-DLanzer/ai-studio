@@ -215,6 +215,7 @@ export default function IntegrationsSection() {
                   onChange={(e) => setSelectedAgent(e.target.value)}
                   className="rounded-lg border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-slate-200"
                   disabled={agentRunning}
+                  aria-label="Select sidecar agent"
                 >
                   {agents.map((ag) => (
                     <option key={ag.id} value={ag.id} disabled={!ag.detected}>

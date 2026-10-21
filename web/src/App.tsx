@@ -117,6 +117,7 @@ export default function App() {
             <Route path="review" element={<Review />} />
             <Route path="audio" element={<Audio />} />
             <Route path="export" element={<Interchange />} />
+            <Route path="review-export" element={<ReviewExport />} />
             <Route path="costs" element={<Costs />} />
             <Route path="discarded" element={<Discarded />} />
             <Route path="*" element={<ProjectNotFound />} />
