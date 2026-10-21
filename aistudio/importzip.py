@@ -36,7 +36,7 @@ MAGIC = {  # suffix -> check on the first 16 bytes
     ".ogg": lambda b: b.startswith(b"OggS"),
 }
 JUNK = ("__MACOSX", ".DS_Store", "Thumbs.db", ".git", ".history")
-KNOWN_JSON = ("shots.json", "images.json", "edit.json", "budget.json", "brief.json", "chat.json", "todos.json", "verify.json", "discarded.json", "sandbox.json", "proposals.json")
+KNOWN_JSON = ("shots.json", "images.json", "edit.json", "budget.json", "brief.json", "chat.json", "todos.json", "verify.json", "discarded.json", "sandbox.json", "proposals.json", "comments.json")
 
 
 class ImportError_(Exception):
@@ -186,10 +186,13 @@ def _check_project(dest):
                 d = _load(dest, fn)
             except (ValueError, UnicodeDecodeError):
                 continue                       # already reported as invalid JSON
-            if fn in ("shots.json", "images.json", "edit.json", "budget.json", "brief.json", "sandbox.json") and not isinstance(d, dict):
+            if fn in ("shots.json", "images.json", "edit.json", "budget.json", "brief.json", "sandbox.json", "comments.json") and not isinstance(d, dict):
                 errs.append(f"{fn}: must be a JSON object")
             elif fn in ("chat.json", "todos.json", "discarded.json", "proposals.json", "verify.json") and not isinstance(d, (dict, list)):
                 errs.append(f"{fn}: has the wrong shape")
+    if has("comments.json") and isinstance(_safe(dest, "comments.json"), dict):
+        from aistudio.comments import validate_comments_doc
+        errs += [f"comments.json: {e}" for e in validate_comments_doc(_safe(dest, "comments.json"))]
     for fn, check in (("shots.json", project_mod.validate_shots), ("images.json", project_mod.validate_images)):
         if has(fn) and isinstance(_safe(dest, fn), dict):
             errs += [f"{fn}: {e}" for e in check(_safe(dest, fn))]

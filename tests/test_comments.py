@@ -169,6 +169,26 @@ class TestComments(unittest.TestCase):
         self.assertEqual(loaded["future_top_key"], "preserved")
         self.assertEqual(loaded["comments"][0]["future_comment_field"], 123)
 
+    def test_importzip_preserves_and_validates_comments(self):
+        from aistudio import importzip
+
+        # Add comment to project
+        comments.add_comment(self.pdir, "edit", "Export test", "Auditor", time=1.0, cid="c_exp1")
+
+        # Export project zip
+        zpath = self.ws.export_project(self.pname)
+        try:
+            # Import into new project
+            res = self.ws.import_project(zpath, "imported-proj", "proj.zip")
+            imported_pdir = self.ws.pdir("imported-proj")
+            self.assertTrue((imported_pdir / "comments.json").exists())
+            c_list = comments.list_comments(imported_pdir)
+            self.assertEqual(len(c_list), 1)
+            self.assertEqual(c_list[0]["id"], "c_exp1")
+            self.assertEqual(c_list[0]["text"], "Export test")
+        finally:
+            zpath.unlink(missing_ok=True)
+
 
 if __name__ == "__main__":
     unittest.main()
