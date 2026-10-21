@@ -19,7 +19,7 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from starlette.background import BackgroundTask
 from fastapi.staticfiles import StaticFiles
 
-from aistudio import activity as activitymod, apikeys, comments as commentsmod, editor as editormod, importzip as importmod, jobs as jobsmod, notifications, pairing, review_package as reviewmod
+from aistudio import activity as activitymod, apikeys, comments as commentsmod, editor as editormod, history as historymod, importzip as importmod, jobs as jobsmod, notifications, pairing, review_package as reviewmod
 from aistudio.service import REPO, ServiceError, Workspace
 from server import api_docs
 
@@ -635,6 +635,60 @@ def create_app(root=None, token=None, rates_path=None, transport=None, static_di
     async def put_doc(name: str, fn: str, request: Request):
         guard(ws.put_text, name, fn, (await request.json()).get("text", ""))
         return {"ok": True}
+
+    # Document versions contain prompts and project content, so every history endpoint is human-session only.
+    @app.get("/api/projects/{name}/history", dependencies=[api])
+    def document_history(name: str, doc: str, request: Request):
+        human_session(request)
+        try:
+            return {"entries": historymod.history(ws.pdir(name), doc)}
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from None
+
+    @app.get("/api/projects/{name}/history/{doc}/{ts}", dependencies=[api])
+    def document_history_read(name: str, doc: str, ts: str, request: Request):
+        human_session(request)
+        try:
+            content = historymod.read_version(ws.pdir(name), doc, ts)
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from None
+        except FileNotFoundError:
+            raise HTTPException(404, "history version not found") from None
+        if doc.endswith(".json"):
+            try:
+                return JSONResponse(json.loads(content))
+            except (ValueError, TypeError):
+                raise HTTPException(400, "history version is not valid JSON") from None
+        return {"text": content}
+
+    @app.get("/api/projects/{name}/history/{doc}/{ts}/diff", dependencies=[api])
+    def document_history_diff(name: str, doc: str, ts: str, request: Request):
+        human_session(request)
+        try:
+            return historymod.diff_summary(ws.pdir(name), doc, ts)
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from None
+        except FileNotFoundError:
+            raise HTTPException(404, "history version not found") from None
+
+    @app.post("/api/projects/{name}/history/{doc}/{ts}/restore", dependencies=[api])
+    def document_history_restore(name: str, doc: str, ts: str, request: Request):
+        human_session(request)
+        try:
+            restored = historymod.restore(ws.pdir(name), doc, ts)
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from None
+        except FileNotFoundError:
+            raise HTTPException(404, "history version not found") from None
+        if doc.endswith(".json"):
+            try:
+                version = json.loads(restored)
+            except (ValueError, TypeError):
+                raise HTTPException(400, "history version is not valid JSON") from None
+        else:
+            version = {"text": restored}
+        entries = historymod.history(ws.pdir(name), doc)
+        return {"version": version, "entries": entries}
 
     @app.post("/api/projects/{name}/story/convert", dependencies=[api])
     async def convert(name: str, request: Request):
