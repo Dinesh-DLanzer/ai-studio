@@ -4,7 +4,7 @@ import hmac
 import json
 import unittest
 from aistudio.providers.adapters.kling import KlingAdapter
-from aistudio.providers.base import Rejected, Retryable
+from aistudio.providers.base import Rejected, Retryable, b64_of
 from tests._adapter_helpers import FakeTransport, png
 
 CONN = {"id": "k", "type": "kling", "secret": {"access_key": "AK123", "secret_key": "SK456"}}
@@ -47,6 +47,27 @@ class TestKling(unittest.TestCase):
         self.assertFalse(t.last["body"]["image"].startswith("data:"))
         with self.assertRaises(Rejected):
             a.video_submit("m", REQ)
+
+    def test_verified_end_frame_for_kling_25_turbo(self):
+        a, t = make({"code": 0, "data": {"task_id": "T3"}})
+        first, last = png("first.png"), png("last.png")
+        a.video_submit("kling-v2-5-turbo", {**REQ, "first_frame": first, "last_frame": last})
+        self.assertEqual(t.last["body"]["image"], b64_of(first))
+        self.assertEqual(t.last["body"]["image_tail"], b64_of(last))
+        self.assertEqual(KlingAdapter.request_features, {"end_frame"})
+
+    def test_unsupported_controls_refused_without_transport(self):
+        attempts = [
+            ("kling-v1-6", {"last_frame": png("last.png"), "first_frame": png("first.png")}),
+            ("kling-v2-5-turbo", {"last_frame": png("last.png")}),
+            ("kling-v2-5-turbo", {"first_frame": png("first.png"), "refs": [png("ref.png")]}),
+            ("kling-v2-5-turbo", {"camera_native": {"pan": 1}}),
+        ]
+        for model, extra in attempts:
+            a, t = make()
+            with self.subTest(model=model, extra=extra), self.assertRaises(Rejected):
+                a.video_submit(model, {**REQ, **extra})
+            self.assertEqual(t.calls, [])
 
     def test_poll_and_download(self):
         job = {"job_id": "text2video:T1", "model": "m"}

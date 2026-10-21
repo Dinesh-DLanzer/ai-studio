@@ -1,6 +1,6 @@
 import unittest
 from aistudio.providers.adapters.runway import RunwayAdapter
-from aistudio.providers.base import AuthError, Retryable
+from aistudio.providers.base import AuthError, Rejected, Retryable, data_url
 from tests._adapter_helpers import FakeTransport, png
 
 CONN = {"id": "r", "type": "runway", "secret": {"api_key": "key_runway_secret_value"}}
@@ -35,6 +35,27 @@ class TestRunway(unittest.TestCase):
         self.assertEqual(t.last["url"], BASE + "/image_to_video")
         self.assertTrue(t.last["body"]["promptImage"].startswith("data:image/png;base64,"))
         self.assertEqual(t.last["body"]["ratio"], "1280:720")
+
+    def test_end_frame_is_sent_as_last_prompt_image(self):
+        a, t = make({"id": "task"})
+        first, last = png("first.png"), png("last.png")
+        a.video_submit("gen4_turbo", {**REQ, "first_frame": first, "last_frame": last})
+        self.assertEqual(t.last["body"]["promptImage"], [
+            {"uri": data_url(first), "position": "first"},
+            {"uri": data_url(last), "position": "last"},
+        ])
+        self.assertEqual(RunwayAdapter.request_features, {"end_frame"})
+
+    def test_unverified_video_inputs_are_refused_before_transport(self):
+        for extra in (
+            {"last_frame": png("last.png")},
+            {"refs": [png("ref.png")]},
+            {"camera_native": {"pan": 1}},
+        ):
+            a, t = make()
+            with self.subTest(extra=extra), self.assertRaises(Rejected):
+                a.video_submit("gen4_turbo", {**REQ, **extra})
+            self.assertEqual(t.calls, [])
 
     def test_poll(self):
         a, t = make({"status": "RUNNING"}, {"status": "SUCCEEDED", "output": ["http://x/v.mp4"]}, {"status": "FAILED", "failure": "nsfw"})

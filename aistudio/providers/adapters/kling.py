@@ -47,7 +47,21 @@ from aistudio.providers.base import Adapter, Rejected, Retryable, b64_of, scrub
 class KlingAdapter(Adapter):
     type = "kling"
     capabilities = frozenset({"video", "lipsync"})
+    request_features = frozenset({"end_frame"})
     default_base_url = "https://api.klingai.com"
+
+    @staticmethod
+    def preflight(model, req):
+        if req.get("last_frame"):
+            if not req.get("first_frame"):
+                return "Kling needs a start frame to use an end frame"
+            if model != "kling-v2-5-turbo":
+                return "end-frame control is verified only for kling-v2-5-turbo"
+        if req.get("refs"):
+            return "Kling reference images are not verified for this model"
+        if req.get("camera_native"):
+            return "Kling native camera parameters are not verified for this model"
+        return None
 
     def __init__(self, conn, transport=None, clock=time.time):
         super().__init__(conn, transport)
@@ -97,6 +111,9 @@ class KlingAdapter(Adapter):
             return {"ok": False, "message": scrub(e, self.secret)[:200]}
 
     def video_submit(self, model, req):
+        problem = self.preflight(model, req)
+        if problem:
+            raise Rejected(problem)
         token = self.make_token()
         kind = "image2video" if req.get("first_frame") else "text2video"
         seconds = req.get("seconds", 5)
@@ -110,6 +127,8 @@ class KlingAdapter(Adapter):
         }
         if kind == "image2video":
             body["image"] = b64_of(req["first_frame"])
+            if req.get("last_frame"):
+                body["image_tail"] = b64_of(req["last_frame"])
 
         resp = self.transport(
             "POST",

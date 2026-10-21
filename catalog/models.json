@@ -188,6 +188,25 @@
   },
   {
    "provider_type": "kling",
+   "pattern": "kling-v2-5-turbo",
+   "verified_at": "2026-10-21",
+   "note": "Verified 2026-10-21 at https://kling.ai/document-api/api/video/2-5-turbo/image-to-video/legacy: kling-v2-5-turbo image-to-video supports image_tail alongside image. This adapter only enables that model-specific feature; reference images, native camera controls, and video tasks remain disabled.",
+   "profile": {
+    "tasks": ["text_to_video", "image_to_video"],
+    "durations": [5, 10],
+    "resolutions": [],
+    "aspect_ratios": [],
+    "audio": "none",
+    "frames": {"start": true, "end": true, "keyframes": 0},
+    "references": {"max": 0, "roles": []},
+    "camera": {"mode": "prompt", "native": [], "param": null},
+    "seed": false,
+    "negative_prompt": false,
+    "tools": "json"
+   }
+  },
+  {
+   "provider_type": "kling",
    "pattern": "kling-*",
    "verified_at": null,
    "note": "Not verified against current provider docs; conservative defaults (camera via prompt, no end frame). Kling documents image_tail and camera_control for some models; not confirmed, so not enabled.",
@@ -214,6 +233,25 @@
      "native": [],
      "param": null
     },
+    "seed": false,
+    "negative_prompt": false,
+    "tools": "json"
+   }
+  },
+  {
+   "provider_type": "runway",
+   "pattern": "gen4_turbo",
+   "verified_at": "2026-10-21",
+   "note": "Verified 2026-10-21 at https://docs.dev.runwayml.com/api-details/versions/2024-11-06/: gen4_turbo image-to-video accepts promptImage as an array with unique first/last positions. Reference images, native camera controls, and video tasks are not enabled here.",
+   "profile": {
+    "tasks": ["image_to_video"],
+    "durations": [],
+    "resolutions": [],
+    "aspect_ratios": [],
+    "audio": "none",
+    "frames": {"start": true, "end": true, "keyframes": 0},
+    "references": {"max": 0, "roles": []},
+    "camera": {"mode": "prompt", "native": [], "param": null},
     "seed": false,
     "negative_prompt": false,
     "tools": "json"
