@@ -120,3 +120,39 @@ class ReplicateAdapter(Adapter):
         if not url:
             raise Retryable("not finished")
         return self.transport("GET", url, headers={}, raw=True)
+
+    def describe_model(self, model):
+        """Partial capability profile from the model's input schema (GET /models/{owner}/{name}); None when unreadable."""
+        try:
+            body = self._get("/models/" + model)
+            schemas = body["latest_version"]["openapi_schema"]["components"]["schemas"]
+            props = schemas["Input"]["properties"]
+        except Exception:
+            return None
+
+        def enum_of(name):
+            prop = props.get(name) or {}
+            for ref in [prop] + list(prop.get("allOf") or []):
+                if "$ref" in ref:
+                    ref = schemas.get(ref["$ref"].rsplit("/", 1)[-1], {})
+                if ref.get("enum"):
+                    return ref["enum"]
+            return []
+
+        has = lambda *names: any(n in props for n in names)
+        out = {"frames": {"start": has("image", "first_frame_image", "start_image", "input_image"),
+                          "end": has("end_image", "last_frame", "last_frame_image", "tail_image"), "keyframes": 0},
+               "seed": has("seed"), "negative_prompt": has("negative_prompt")}
+        durations = [int(d) for d in enum_of("duration") if str(d).isdigit()]
+        if durations:
+            out["durations"] = durations
+        ratios = [str(r) for r in enum_of("aspect_ratio")]
+        if ratios:
+            out["aspect_ratios"] = ratios
+        ref_name = next((n for n in ("reference_images", "input_images", "subject_reference") if n in props), None)
+        if ref_name:
+            out["references"] = {"max": int(props[ref_name].get("maxItems") or 4), "roles": []}
+        if has("camera_motion", "camera_control"):
+            param = "camera_motion" if "camera_motion" in props else "camera_control"
+            out["camera"] = {"mode": "native", "native": [str(v) for v in enum_of(param)], "param": param}
+        return out

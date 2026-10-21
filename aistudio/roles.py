@@ -14,7 +14,7 @@ returns {"status":"pending", "job": ...} so `sync` can finish it later.
 import shutil
 import time
 
-from aistudio import approvals
+from aistudio import approvals, catalog as catalog_mod
 from aistudio.providers import config as cfg
 from aistudio.providers.base import AuthError, ProviderError, Retryable, scrub
 
@@ -67,12 +67,13 @@ class RoleRunner:
         self.dir, self.secrets, self.pricing, self.transport = settings_dir, secrets, pricing, transport
         self.factory, self.fake_mode, self.health, self.sleep, self.poll_seconds, self.clock = adapter_factory, fake_mode, health or Health(clock), sleep, poll_seconds, clock
         self.trust_transport, self.chain_override = trust_transport, chain_override     # tests / env locks
+        self.catalog = None             # aistudio.catalog.Catalog, set by the Workspace; lets run() skip models lacking a required feature
         self.fake_for = fake_for        # optional (role, project_dir) -> bool: lets one project run some roles on the fake provider
 
     def _fake(self, role, project_dir=None):
         return self.fake_for(role, project_dir) if self.fake_for else self.fake_mode()
 
-    def _grant(self, role, project_dir, grant):
+    def _grant(self, role, project_dir, grant, first=None):
         """Require and redeem a Grant whenever the configured role can call a non-free card."""
         if grant is not None:
             if not isinstance(grant, approvals.Grant) or project_dir is None:
@@ -81,7 +82,7 @@ class RoleRunner:
                 return approvals.redeem(project_dir, grant, role)
             except approvals.ApprovalError as e:
                 raise GrantRequired(str(e)) from None
-        entries = self.resolve(role, project_dir)
+        entries = self.resolve(role, project_dir) + ([first] if first else [])
         paid = [e for e in entries if e.get("problem") is None and not self.pricing.is_free(e.get("card"))]
         if paid:
             raise GrantRequired(f"a human approval grant is required before calling {role}")
@@ -130,15 +131,25 @@ class RoleRunner:
                         "card": self.pricing.card(ref.get("provider"), (p or {}).get("type"), ref["model"]) if p else None})
         return out
 
+    def entry_for(self, role, provider_id, model, project_dir=None):
+        """A chain-shaped entry for a model that is not (or not first) in the chain, or None when its provider cannot be used for this role."""
+        p = self.providers().get(provider_id)
+        if p is None or self._usable(p) or cfg.ROLE_CAPABILITY[role] not in cfg.capabilities_of(p["type"]):
+            return None
+        return {"provider": p, "ptype": p["type"], "model": model, "problem": None, "index": -1, "card": self.pricing.card(p["id"], p["type"], model)}
+
     def policy(self, role, project_dir=None):
         return cfg.effective_roles(self.dir, project_dir)["roles"][role]["policy"]
 
     # -------------------------------------------------------------- the generic runner
-    def run(self, role, call, project_dir=None, allow=None, approved_price=None, price_of=None, retry_after_submit=False, approved_unknown_entry=None):
+    def run(self, role, call, project_dir=None, allow=None, approved_price=None, price_of=None, retry_after_submit=False, approved_unknown_entry=None, first=None, required=None):
         """call(adapter, model) -> result. Returns {"result", "provider", "model", "card", "attempts"}.
         approved_unknown_entry is an approved (provider id, model) pair.
+        first is an entry tried before the chain (a shot's own model); required is a request-feature dict: entries whose profile lacks one are skipped, never degraded.
         """
         entries = self.resolve(role, project_dir)
+        if first and not self._fake(role, project_dir):
+            entries = [first] + [e for e in entries if (e["provider"]["id"], e["model"]) != (first["provider"]["id"], first["model"])]
         if not entries:
             raise ChainError(f"No model is set for '{role}'. Add a provider and pick a model in Settings.", code="unconfigured")
         pol = self.policy(role, project_dir) if not self._fake(role, project_dir) else cfg.default_policy(role)
@@ -149,6 +160,11 @@ class RoleRunner:
             if e["problem"]:
                 attempts.append({"who": who, "error": e["problem"], "skipped": True})
                 continue
+            if required and self.catalog:
+                why = catalog_mod.missing(self.catalog.profile(e["provider"]["id"], e["ptype"], e["model"], e["card"]), e["ptype"], required)
+                if why:
+                    attempts.append({"who": who, "error": f"skipped: {why}", "skipped": True})
+                    continue
             if allow:
                 ok, why = allow(e)
                 if not ok:
@@ -229,11 +245,11 @@ class RoleRunner:
         cost, src = self._cost("vision", out, r["card"])
         return {**out, "cost": cost, "cost_source": src, "provider": r["provider"], "attempts": r["attempts"]}
 
-    def image(self, prompt, refs=(), aspect_ratio="9:16", opts=None, project_dir=None, *, grant=None):
-        grant = self._grant("image", project_dir, grant)
+    def image(self, prompt, refs=(), aspect_ratio="9:16", opts=None, project_dir=None, *, grant=None, first=None, required=None):
+        grant = self._grant("image", project_dir, grant, first)
         approved_price = grant.price if grant else None
         price_of = lambda e: self.pricing.image_price(e["card"])
-        r = self.run("image", lambda a, m: a.image(m, prompt, refs, aspect_ratio, opts), project_dir, None, approved_price, price_of)
+        r = self.run("image", lambda a, m: a.image(m, prompt, refs, aspect_ratio, opts), project_dir, None, approved_price, price_of, first=first, required=required)
         out = r["result"]
         cost, src = self._cost("image", out, r["card"])
         return {**out, "cost": cost, "cost_source": src, "provider": r["provider"], "attempts": r["attempts"]}
@@ -250,8 +266,8 @@ class RoleRunner:
     def video_price(self, entry, req):
         return self.pricing.video_price(entry["card"], req["seconds"], req.get("resolution", "720p"), req.get("audio", False))
 
-    def video_extend(self, video_path, prompt, seconds=5, aspect_ratio="16:9", resolution="720p", project_dir=None, *, grant=None, timeout=None):
-        grant = self._grant("video", project_dir, grant)
+    def video_extend(self, video_path, prompt, seconds=5, aspect_ratio="16:9", resolution="720p", project_dir=None, *, grant=None, timeout=None, first=None):
+        grant = self._grant("video", project_dir, grant, first)
         approved_price = grant.price if grant else None
         req = {"seconds": seconds, "resolution": resolution, "audio": False}
         price_of = lambda e: self.video_price(e, req)
@@ -285,7 +301,7 @@ class RoleRunner:
                 self.sleep(self.poll_seconds)
 
         try:
-            r = self.run("video", call, project_dir, None, approved_price, price_of)
+            r = self.run("video", call, project_dir, None, approved_price, price_of, first=first)
         except _Stop as ex:
             job = state.get("job") or {}
             return {"status": "failed", "error": ex.args[0], "job": job, "cost": 0.0, "cost_source": "unknown", "provider": job.get("provider", ""),
@@ -297,9 +313,9 @@ class RoleRunner:
         cost, src = self._cost("video", {"cost": out.get("reported")}, r["card"], extra=req)
         return {**base, "status": "done", "bytes": out["bytes"], "cost": cost, "cost_source": src}
 
-    def video(self, req, project_dir=None, *, grant=None, timeout=None):
+    def video(self, req, project_dir=None, *, grant=None, timeout=None, first=None, required=None):
         """-> {"status":"done","bytes",...} | {"status":"pending","job"} | {"status":"failed","error",...}. Raises ChainError/NeedsNewApproval."""
-        grant = self._grant("video", project_dir, grant)
+        grant = self._grant("video", project_dir, grant, first)
         approved_price = grant.price if grant else None
         price_of = lambda e: self.video_price(e, req)
         pol = self.policy("video", project_dir) if not self._fake("video", project_dir) else cfg.default_policy("video")
@@ -332,7 +348,7 @@ class RoleRunner:
                 self.sleep(self.poll_seconds)
 
         try:
-            r = self.run("video", call, project_dir, None, approved_price, price_of)
+            r = self.run("video", call, project_dir, None, approved_price, price_of, first=first, required=required)
         except _Stop as ex:
             job = state.get("job") or {}
             return {"status": "failed", "error": ex.args[0], "job": job, "cost": 0.0, "cost_source": "unknown", "provider": job.get("provider", ""),

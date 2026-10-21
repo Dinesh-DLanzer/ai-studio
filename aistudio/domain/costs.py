@@ -5,6 +5,7 @@ import hashlib
 import json
 
 from aistudio import budget as budget_mod, costlog, pricing as pricing_mod, project as project_mod, roles as roles_mod
+from aistudio.domain import spec as spec_mod
 from aistudio.domain.common import ServiceError
 from aistudio.providers import base as pbase
 
@@ -41,6 +42,18 @@ class CostDomain:
                 roles[role] = [{"provider": e["provider"].get("id"), "model": e["model"], "card": e.get("card")} for e in self.ws.runner().resolve(role, p)]
             except Exception:
                 roles[role] = []
+        try:      # models picked per shot / image: a price change there must stale the approval too
+            extra = {}
+            for kind, items in (("clip", self.ws._read(p, "shots.json", {"shots": []}).get("shots", [])), ("image", self.ws._read(p, "images.json", {"images": []}).get("images", []))):
+                for item in items:
+                    if item.get("model"):
+                        sp = spec_mod.resolve(self.ws, p, kind, item["id"], loose=True)
+                        if sp.explicit:
+                            extra[f"{kind}:{item['id']}"] = {"provider": sp.provider, "model": sp.model, "card": sp.entry.get("card")}
+            if extra:
+                roles["per_item"] = extra
+        except ServiceError:
+            roles["per_item"] = "unresolvable"
         canon = lambda value: json.dumps(value, sort_keys=True, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
         return {
             "plan_hash": hashlib.sha256(canon(self.plan_snapshot(p))).hexdigest(),
@@ -99,20 +112,23 @@ class CostDomain:
         return b
 
     def _estimate(self, p, shots, images, existing, failure):
-        """Budget estimate priced with the primary model of the video chain (and the image chain, when there is one)."""
-        e = self.ws._primary("video", p)
-        if not e["card"] or e["card"].get("kind") != "video":
-            raise ServiceError(f"No price set for {e['model']}. Set it in Settings > Model Configuration.")
-        k = pricing_mod.key(e["provider"]["id"], e["model"])
-        doc = {**shots, "shots": [{**s, "model": k} for s in shots["shots"]]}
-        image_rate = 0.036
-        try:
-            ie = self.ws._primary("image", p)
-            rate = self.ws.pricing().image_price(ie["card"])
-            image_rate = image_rate if rate is None else rate
-        except ServiceError:
-            pass
-        return budget_mod.estimate(doc, images, {"models": {k: e["card"]["per_second"]}}, existing, failure, image_rate=image_rate)
+        """Budget estimate: every clip priced from its own GenerationSpec (the shot's model, snapped seconds), stills from the image model."""
+        rates, priced = {}, []
+        for s in shots["shots"]:
+            sp = spec_mod.resolve(self.ws, p, "clip", s["id"], loose=True)
+            k = pricing_mod.key(sp.provider, sp.model)
+            rates[k] = sp.entry["card"]["per_second"]
+            priced.append({**s, "model": k, "seconds": sp.seconds, "resolution": sp.resolution, "audio": sp.audio})
+        todo = [i for i in images["images"] if i["id"] not in existing]
+        image_total = 0.0
+        for i in todo:
+            try:
+                sp = spec_mod.resolve(self.ws, p, "image", i["id"], loose=True)
+                image_total += sp.price
+            except ServiceError:      # no usable image model or price: the old flat default
+                image_total += 0.036
+        image_rate = image_total / len(todo) if todo else 0.036
+        return budget_mod.estimate({**shots, "shots": priced}, images, {"models": rates}, existing, failure, image_rate=image_rate)
 
     def approve_budget(self, name):
         """Human channel only (web UI / terminal). Not exposed through MCP."""
