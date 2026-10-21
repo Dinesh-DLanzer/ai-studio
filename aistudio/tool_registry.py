@@ -104,6 +104,8 @@ TOOLS = {
     "list_providers": ("Connected AI providers (id, label, type, status). There is no app-wide mode: each project is a test project or a real one.", S(), lambda ws, a: {"providers": [{k: v for k, v in p.items() if k in ("id", "label", "type", "enabled", "status")} for p in ws.providers_list()["providers"] if p["type"] != "fake"]}),
     "production_progress": ("Get production checklist groups, queue items, and next action.", S(name=STR), lambda ws, a: ws.production_progress(a["name"])),
     "generate_all_plan": ("Freeze the plan for everything left to generate as a batch (exact prices; nothing is spent or approved). Returns a batch id; a human must approve it with approve_batch.", S(name=STR), lambda ws, a: ws.batches.create(a["name"], actor="mcp")),
+    "build_identity_sheet": ("Build a character's identity sheet: a batch of image proposals for its missing views (front, three-quarter, profile, full-body, expression), conditioned on the master image. Nothing is spent or approved; a human must approve the returned batch with approve_batch.",
+                             S(name=STR, character=STR, views={"type": "array", "optional": True}), lambda ws, a: ws.identity_sheet(a["name"], a["character"], a.get("views"), actor="mcp")),
     "get_batch": ("Status of a batch and each of its items.", S(name=STR, id=STR), lambda ws, a: ws.batches.get(a["name"], a["id"])),
     "approve_batch": (
         "Request human approval for the exact batch total. Uses MCP elicitation when available; otherwise returns a one-time code challenge. confirm=true is not accepted.",
@@ -176,7 +178,7 @@ FREE_READ = ("get_project", "read_doc", "get_brief", "get_model_setup", "get_tod
              "list_providers", "production_progress", "get_batch", "get_edit", "unregistered_stills")
 FREE_WRITE = ("write_doc", "update_brief", "rename_asset", "rename_shot", "convert_story", "update_shots", "update_images", "update_edit",
               "import_stills", "add_todo", "toggle_todo", "remove_todo", "export_edit", "export_project")
-PAID = ("propose", "analyze_character", "edit_still", "extend_clip", "generate_all_plan")
+PAID = ("propose", "analyze_character", "edit_still", "extend_clip", "generate_all_plan", "build_identity_sheet")
 # approve/execute/override/cancel/delete/budget tools, tools that reveal codes, and tools that reach outside the run's project
 # (other projects, trash, local file paths, the job ledger of every project) are never crew tools.
 APPROVAL = ("approve_budget", "approve_proposal", "approve_batch", "approve_shot", "run_proposal", "run_batch", "reject_proposal", "set_max_attempts",

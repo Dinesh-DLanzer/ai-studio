@@ -90,10 +90,11 @@ class BatchDomain:
         return approvals.request_hash(kind, target, model, price, body)
 
     # ---- lifecycle
-    def create(self, name, actor="local", only=None):
-        """Freeze the current Generate-all plan (or just the (kind, target) pairs in `only`, used by crew runs). Free: creates a file only."""
+    def create(self, name, actor="local", only=None, plan=None):
+        """Freeze the current Generate-all plan (or just the (kind, target) pairs in `only`, used by crew runs, or an explicit `plan` of the
+        same shape such as an identity sheet). Free: creates a file only; every item keeps its own price, hash, proposal and cost-log row."""
         p = self.ws.pdir(name)
-        plan = self.ws.generate_all_plan(name)
+        plan = plan or self.ws.generate_all_plan(name)
         if only is not None:
             plan["items"] = [it for it in plan["items"] if (it["kind"], it["target"]) in only]
             if not plan["items"]:

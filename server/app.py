@@ -459,6 +459,11 @@ def create_app(root=None, token=None, rates_path=None, transport=None, static_di
         guard(ws.add_file, name, rel, data, bool(replace))
         return {"ok": True}
 
+    @app.post("/api/projects/{name}/characters/{aid}/identity-sheet", dependencies=[api])
+    async def identity_sheet(name: str, aid: str, request: Request):
+        b = await request.json() if (await request.body()) else {}
+        return guard(ws.identity_sheet, name, aid, b.get("views"), "api-key" if getattr(request.state, "scope", "session") == "agent" else "local")
+
     @app.get("/api/projects/{name}/consent", dependencies=[api])
     def consent_list(name: str):
         return {"consent": guard(ws.consent_list, name)}

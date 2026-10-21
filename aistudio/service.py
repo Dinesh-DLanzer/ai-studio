@@ -253,6 +253,9 @@ class Workspace(SettingsMixin):
     def _image_spec(self, p, img_id):
         return self._characters._image_spec(p, img_id)
 
+    def identity_sheet(self, name, char_id, views=None, actor="local"):
+        return self._characters.identity_sheet(name, char_id, views=views, actor=actor)
+
     def analyze_character_image(self, name, rel):
         return self._characters.analyze_character_image(name, rel)
 

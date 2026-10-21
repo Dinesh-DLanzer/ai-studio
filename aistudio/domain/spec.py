@@ -172,7 +172,7 @@ def resolve(ws, p, kind, target, options=None, loose=False):
     req = {"task": "image_to_video" if ff else "text_to_video", "end_frame": bool(end), "keyframes": len(keyframes), "refs": 0}
     entry, explicit = select_entry(ws, p, role, shot.get("model"), req, f"shot {target}")
     profile = _profile(ws, entry)
-    shot_refs, dropped = pick_refs(shot, profile, image_doc)
+    shot_refs, dropped = pick_refs(shot, profile, image_doc, root=p)
     if dropped:
         warnings.append("reference limit; dropped: " + ", ".join(r["id"] for r in dropped))
         req["refs"] = len(shot_refs)
