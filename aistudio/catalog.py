@@ -1,5 +1,5 @@
 """Model capability profiles (plan 13).  Lookup order, first layer wins per field:
-user override (settings/models.json "capabilities") > provider metadata cache (settings/catalog_cache.json) > built-in catalog/models.json > conservative default.
+user override (settings/models.json "capabilities") > comfy workflow manifest > provider metadata cache (settings/catalog_cache.json) > built-in catalog/models.json > conservative default.
 Each layer is merged over the next, so a partial profile (for example only the fields a provider API reported) is enough.
 """
 from copy import deepcopy
@@ -49,6 +49,31 @@ class Catalog:
         self.dir, self.pricing = Path(settings_dir), pricing
         self.entries = _read(builtin, {}).get("entries", [])
 
+    def comfy_manifest(self, workflow_id):
+        """Load the capability profile from a ComfyUI workflow manifest.
+        Returns the profile dict with source='comfy_manifest' or None if not found/invalid.
+        """
+        from aistudio.comfy_workflows import get_workflow
+        try:
+            m = get_workflow(self.dir, workflow_id)
+            profile = {**m["profile"], "source": "comfy_manifest"}
+            # Derive tasks from the manifest's task field if not explicitly in profile
+            if "tasks" not in profile:
+                task = m["task"]
+                if task == "image":
+                    profile["tasks"] = ["text_to_image"]
+                elif task in ("text_to_video", "image_to_video", "video"):
+                    profile["tasks"] = ["text_to_video", "image_to_video"]
+                elif task == "text_to_image":
+                    profile["tasks"] = ["text_to_image"]
+                else:
+                    profile["tasks"] = [task]
+            return profile
+        except ServiceError:
+            return None
+        except ValueError:
+            return None
+
     def builtin(self, ptype, model):
         for e in self.entries:
             if e["provider_type"] == ptype and fnmatch.fnmatchcase(model, e["pattern"]):
@@ -66,7 +91,12 @@ class Catalog:
             card = self.pricing.card(provider_id, ptype, model)
         out = default_profile(ptype, card)
         user = self.override(provider_id, model)
-        for layer in (self.builtin(ptype, model), self.cached(provider_id, model), user and {**user, "source": "user"}):
+        # Check if this is a ComfyUI workflow model (wf:<id>)
+        comfy_layer = None
+        if model.startswith("wf:"):
+            wf_id = model[3:]
+            comfy_layer = self.comfy_manifest(wf_id)
+        for layer in (comfy_layer, self.builtin(ptype, model), self.cached(provider_id, model), user and {**user, "source": "user"}):
             if layer:
                 out = _merge(out, layer)
         return out
