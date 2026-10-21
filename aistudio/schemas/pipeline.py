@@ -1,9 +1,10 @@
 """Pydantic schemas for proposals, budget and batch generation pipeline."""
 from typing import Any, Dict, List, Optional
-from pydantic import BaseModel, Field
+from pydantic import Field
+from .base import SchemaModel
 
 
-class ProposalSummary(BaseModel):
+class ProposalSummary(SchemaModel):
     provider: Optional[str] = None
     prompt: Optional[str] = None
     seconds: Optional[float] = None
@@ -13,7 +14,7 @@ class ProposalSummary(BaseModel):
     file: Optional[str] = None
 
 
-class Proposal(BaseModel):
+class Proposal(SchemaModel):
     id: str
     kind: str
     shot: str
@@ -27,13 +28,13 @@ class Proposal(BaseModel):
     summary: Dict[str, Any] = Field(default_factory=dict)
 
 
-class BudgetShot(BaseModel):
+class BudgetShot(SchemaModel):
     id: str
     seconds: float = 4.0
     cost: float = 0.0
 
 
-class BudgetDoc(BaseModel):
+class BudgetDoc(SchemaModel):
     estimate: Optional[float] = None
     stop_loss: Optional[float] = None
     approved: bool = False
@@ -45,20 +46,20 @@ class BudgetDoc(BaseModel):
     per_shot: List[BudgetShot] = Field(default_factory=list)
 
 
-class ProgressGroup(BaseModel):
+class ProgressGroup(SchemaModel):
     key: str
     label: str
     done: int
     total: int
 
 
-class NextAction(BaseModel):
+class NextAction(SchemaModel):
     kind: str
     label: str
     target: Optional[str] = None
 
 
-class QueueItem(BaseModel):
+class QueueItem(SchemaModel):
     kind: str
     target: str
     label: str
@@ -66,7 +67,7 @@ class QueueItem(BaseModel):
     model: Optional[str] = None
 
 
-class ProductionProgress(BaseModel):
+class ProductionProgress(SchemaModel):
     groups: List[ProgressGroup] = Field(default_factory=list)
     next: Optional[NextAction] = None
     queue: List[QueueItem] = Field(default_factory=list)

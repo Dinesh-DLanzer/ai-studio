@@ -12,8 +12,8 @@ class TestProject(unittest.TestCase):
         self.assertTrue((p / "clips").is_dir() and (p / "stills").is_dir())
         for f in ("brief.md", "Story.md", "TODO.md"):
             self.assertIn("demo", (p / f).read_text(encoding="utf-8"))
-        self.assertEqual(json.loads((p / "shots.json").read_text()), {"aspect_ratio": "9:16", "audio": False, "shots": []})
-        self.assertEqual(json.loads((p / "images.json").read_text()), {"style": "", "images": []})
+        self.assertEqual(json.loads((p / "shots.json").read_text()), {"schema_version": 1, "aspect_ratio": "9:16", "audio": False, "shots": []})
+        self.assertEqual(json.loads((p / "images.json").read_text()), {"schema_version": 1, "style": "", "images": []})
 
     def test_create_errors(self):
         P.create_project(self.root, "demo")

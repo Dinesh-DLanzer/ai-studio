@@ -1,15 +1,16 @@
 """Pydantic schemas for todos and task checklist items."""
 from typing import List, Optional
-from pydantic import BaseModel, Field
+from pydantic import Field
+from .base import SchemaModel
 
 
-class TodoItem(BaseModel):
+class TodoItem(SchemaModel):
     id: str
     title: str
     done: bool = False
 
 
-class AutoTodoItem(BaseModel):
+class AutoTodoItem(SchemaModel):
     id: str
     title: str
     done: bool
@@ -17,6 +18,6 @@ class AutoTodoItem(BaseModel):
     tab: str = ""
 
 
-class TodosDoc(BaseModel):
+class TodosDoc(SchemaModel):
     auto: List[AutoTodoItem] = Field(default_factory=list)
     manual: List[TodoItem] = Field(default_factory=list)

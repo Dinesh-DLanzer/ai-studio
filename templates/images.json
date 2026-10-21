@@ -1,4 +1,5 @@
 {
+  "schema_version": 1,
   "style": "Photorealistic, ultra realistic skin and fabric detail, natural light, cinematic but believable. No text, no watermark, no logo.",
   "images": [
     {"id": "char_a_sheet", "kind": "character", "out": "stills/char_a_sheet.png", "aspect_ratio": "3:2", "refs": [],

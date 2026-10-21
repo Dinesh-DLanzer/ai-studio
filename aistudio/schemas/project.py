@@ -1,9 +1,10 @@
 """Pydantic schemas for project metadata, brief and overview."""
 from typing import Any, Dict, List, Optional
-from pydantic import BaseModel, Field
+from pydantic import Field
+from .base import SchemaModel
 
 
-class BriefField(BaseModel):
+class BriefField(SchemaModel):
     key: str
     label: str
     question: str
@@ -11,7 +12,7 @@ class BriefField(BaseModel):
     value: str = ""
 
 
-class BriefData(BaseModel):
+class BriefData(SchemaModel):
     fields: List[BriefField] = Field(default_factory=list)
     complete: bool = False
     missing: List[str] = Field(default_factory=list)
@@ -19,7 +20,7 @@ class BriefData(BaseModel):
     required_total: int = 0
 
 
-class ProjectSummary(BaseModel):
+class ProjectSummary(SchemaModel):
     name: str
     shots: int
     spent: float
@@ -30,7 +31,7 @@ class ProjectSummary(BaseModel):
     favorite: bool = False
 
 
-class ProjectOverview(BaseModel):
+class ProjectOverview(SchemaModel):
     name: str
     mode: str
     test_pipeline: bool

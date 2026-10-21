@@ -78,7 +78,7 @@ def create_project(root, name, format=None):
     (project_path / "TODO.md").write_text(f"# TODO for {name}\n", encoding="utf-8")
     
     # Write shots.json with format info
-    shots_data = {"aspect_ratio": aspect_ratio, "audio": audio, "shots": []}
+    shots_data = {"schema_version": 1, "aspect_ratio": aspect_ratio, "audio": audio, "shots": []}
     if format_id:
         shots_data["format"] = format_id
     (project_path / "shots.json").write_text(
@@ -87,7 +87,7 @@ def create_project(root, name, format=None):
     )
     
     (project_path / "images.json").write_text(
-        json.dumps({"style": "", "images": []}, indent=2, ensure_ascii=False),
+        json.dumps({"schema_version": 1, "style": "", "images": []}, indent=2, ensure_ascii=False),
         encoding="utf-8"
     )
     
@@ -245,7 +245,7 @@ def validate_shots(data):
     return errors
 
 
-def validate_images(data):
+def validate_images(data, max_refs=4):
     errors = []
     images = data.get("images")
     if not isinstance(images, list):
@@ -282,8 +282,8 @@ def validate_images(data):
         if not isinstance(refs, list):
             errors.append(f"image {i}: refs must be a list")
         else:
-            if len(refs) > 4:
-                errors.append(f"image {i}: refs must have at most 4 items")
+            if len(refs) > max_refs:
+                errors.append(f"image {i}: refs must have at most {max_refs} items")
             for ref in refs:
                 if not isinstance(ref, str):
                     errors.append(f"image {i}: ref must be a string")
