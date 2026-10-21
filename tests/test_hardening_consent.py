@@ -135,6 +135,40 @@ class TestHardeningConsent(unittest.TestCase):
         consent.write_lineage(self.p, derived, {"tool": "pipeline"}, source_sha=_sha(source), kind="reframe_local")
         consent.require_verified_shas(self.p, [_sha(derived)])
 
+    def _render(self, name, parents):
+        out = self.p / "exports" / name
+        out.parent.mkdir(exist_ok=True)
+        out.write_bytes(b"render " + name.encode())
+        consent.write_lineage(self.p, out, {"editor_render": True}, source_sha=_sha(parents[0]), kind="editor_render",
+                              source_shas=[_sha(x) for x in parents])
+        return out
+
+    def test_render_with_an_unverified_later_clip_stays_unverified(self):
+        good = self.p / "clips" / "good.mp4"
+        good.write_bytes(b"good clip")
+        consent.clear_sha(self.p, _sha(good), "not_a_real_person")
+        uploaded = self.p / "clips" / "upl.mp4"
+        uploaded.write_bytes(b"agent uploaded clip")
+        render = self._render("mix.mp4", [good, uploaded])
+        with self.assertRaisesRegex(ServiceError, "unverified"):
+            consent.require_verified_shas(self.p, [_sha(render)])
+        consent.clear_sha(self.p, _sha(uploaded), "not_a_real_person")     # a human clears it -> the render is fine
+        consent.require_verified_shas(self.p, [_sha(render)])
+
+    def test_render_inherits_real_person_mark_from_a_later_clip(self):
+        good = self.p / "clips" / "good2.mp4"
+        good.write_bytes(b"good clip 2")
+        consent.clear_sha(self.p, _sha(good), "not_a_real_person")
+        person = self.p / "clips" / "person.mp4"
+        person.write_bytes(b"real person clip")
+        consent.mark_real_person(self.p, "person", _sha(person), "Pat")
+        render = self._render("mix2.mp4", [good, person])
+        self.assertIn(_sha(render), consent.real_person_shas(self.p))
+        with self.assertRaisesRegex(ServiceError, "consent"):
+            consent.require_shas(self.p, [_sha(render)])
+        consent.record(self.p, "Pat", "I consent", sha=_sha(person))
+        consent.require_shas(self.p, [_sha(render)])
+
     def test_copied_or_forged_lineage_cannot_verify_media(self):
         source = self.p / "stills" / "cleared.png"
         source.write_bytes(b"cleared source")

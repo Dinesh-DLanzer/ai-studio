@@ -873,7 +873,8 @@ def render(pdir, edit, progress=None, options=None):
                 for rel in files if (pdir / rel).is_file()]
         from aistudio import consent
         consent.write_lineage(pdir, final, {"editor_render": True, "refs": refs},
-                              source_sha=(refs[0].get("sha", "") if refs else ""), kind="editor_render")
+                              source_sha=(refs[0].get("sha", "") if refs else ""), kind="editor_render",
+                              source_shas=[r["sha"] for r in refs])
         if progress:
             progress(100.0)
         return f"exports/{final.name}"

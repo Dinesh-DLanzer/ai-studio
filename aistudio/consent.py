@@ -31,12 +31,23 @@ def _lineage_key():
     return fields["secret"].encode("utf-8")
 
 
-def _lineage_signature(sha, source_sha, kind):
-    value = json.dumps({"sha": sha, "source_sha": source_sha or "", "kind": kind or ""}, sort_keys=True, separators=(",", ":"))
+def _parents(meta):
+    """Every input a derived file was made from: source_shas (several inputs, e.g. an editor render) or the single source_sha."""
+    many = meta.get("source_shas")
+    if isinstance(many, list) and many:
+        return sorted({x for x in many if isinstance(x, str) and x})
+    return [meta["source_sha"]] if meta.get("source_sha") else []
+
+
+def _lineage_signature(sha, source_sha, kind, source_shas=None):
+    body = {"sha": sha, "source_sha": source_sha or "", "kind": kind or ""}
+    if source_shas:
+        body["source_shas"] = sorted(source_shas)     # only present for multi-input files, so older signatures stay valid
+    value = json.dumps(body, sort_keys=True, separators=(",", ":"))
     return hmac.new(_lineage_key(), value.encode("utf-8"), hashlib.sha256).hexdigest()
 
 
-def write_lineage(pdir, path, meta, source_sha=None, kind=None):
+def write_lineage(pdir, path, meta, source_sha=None, kind=None, source_shas=None):
     """Write server-authenticated lineage for a media file produced by a trusted tool."""
     path = Path(path)
     digest = _sha(path)
@@ -45,8 +56,13 @@ def write_lineage(pdir, path, meta, source_sha=None, kind=None):
     meta = dict(meta)
     source_sha = source_sha if source_sha is not None else meta.get("source_sha", "")
     kind = kind if kind is not None else meta.get("kind", "")
+    source_shas = sorted({x for x in (source_shas or []) if x}) or None
     meta.update({"source_sha": source_sha or "", "kind": kind or "", "sha": digest,
-                 "lineage_hmac": _lineage_signature(digest, source_sha, kind)})
+                 "lineage_hmac": _lineage_signature(digest, source_sha, kind, source_shas)})
+    if source_shas:
+        meta["source_shas"] = source_shas
+    else:
+        meta.pop("source_shas", None)
     project_mod.save_json(Path(pdir), path.relative_to(Path(pdir)).as_posix() + ".meta.json", meta)
     return meta
 
@@ -55,7 +71,8 @@ def _trusted_lineage(path, meta):
     digest = _sha(path)
     if not digest or meta.get("sha") != digest or not meta.get("lineage_hmac"):
         return False
-    expected = _lineage_signature(digest, meta.get("source_sha", ""), meta.get("kind", ""))
+    many = meta.get("source_shas")
+    expected = _lineage_signature(digest, meta.get("source_sha", ""), meta.get("kind", ""), many if isinstance(many, list) else None)
     return hmac.compare_digest(str(meta["lineage_hmac"]), expected)
 
 
@@ -181,10 +198,17 @@ def _unverified_shas(pdir):
                                and meta.get("target") and meta.get("created") and meta.get("actor") is not None
                                and isinstance(meta.get("cost"), (int, float)))
             signed = _trusted_lineage(path, meta)
-            if signed and (pipeline_output or source_sha in verified):
+            parents = _parents(meta)
+            if signed and (pipeline_output or (parents and all(x in verified for x in parents))):    # every input must be verified
                 verified.add(digest)
                 changed = True
     return {digest for digest, (path, _meta) in metadata.items() if digest not in verified}
+
+
+def _inherits_bound(meta, marked, bound):
+    """A derived file inherits consent only when every marked input it was made from has consent bound to it."""
+    hit = [x for x in _parents(meta) if x in marked or x in bound]
+    return bool(hit) and all(x in bound for x in hit if x in marked) and any(x in bound for x in hit)
 
 
 def real_person_shas(pdir):
@@ -201,7 +225,7 @@ def real_person_shas(pdir):
             except (OSError, ValueError):
                 continue
             media_file = meta_file.with_name(meta_file.name[:-10])
-            if media_file.is_file() and meta.get("source_sha") in marked and _trusted_lineage(media_file, meta):
+            if media_file.is_file() and any(x in marked for x in _parents(meta)) and _trusted_lineage(media_file, meta):
                 h = _sha(media_file)
                 if h and h not in marked:
                     marked.add(h)
@@ -227,7 +251,7 @@ def require_shas(pdir, shas):
             except (OSError, ValueError):
                 continue
             media_file = meta_file.with_name(meta_file.name[:-10])
-            if media_file.is_file() and meta.get("source_sha") in bound and _trusted_lineage(media_file, meta):
+            if media_file.is_file() and _inherits_bound(meta, marked, bound) and _trusted_lineage(media_file, meta):
                 h = _sha(media_file)
                 if h and h not in bound:
                     bound.add(h)
