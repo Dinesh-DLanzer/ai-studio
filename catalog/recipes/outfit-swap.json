@@ -1,0 +1,15 @@
+{
+  "id": "outfit-swap",
+  "label": "Outfit swap",
+  "category": "Fashion",
+  "description": "Change the outfit in a photo. Needs an outfit-swap task and a recorded consent for the person in the photo.",
+  "consent": "required",
+  "requires": ["outfit_swap"],
+  "inputs": [
+    {"key": "photo", "type": "image", "required": true, "label": "Photo (a person who gave consent)"},
+    {"key": "outfit", "type": "choice", "required": true, "options": ["business suit", "evening dress", "casual", "sportswear"], "label": "Outfit"}
+  ],
+  "steps": [
+    {"id": "swap", "task": "outfit_swap", "source": "{photo}", "prompt": "Change the outfit to {outfit}. Keep the face and pose unchanged."}
+  ]
+}

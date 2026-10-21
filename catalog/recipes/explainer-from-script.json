@@ -1,0 +1,25 @@
+{
+  "id": "explainer-from-script",
+  "label": "Explainer from script",
+  "category": "Video",
+  "description": "Up to three sentences become three illustrated clips with captions. A voice-over is added only when a text-to-speech model exists.",
+  "consent": "none",
+  "format": "explainer-16x9",
+  "inputs": [
+    {"key": "scene1", "type": "text", "required": true, "max": 200, "label": "Sentence 1"},
+    {"key": "scene2", "type": "text", "max": 200, "label": "Sentence 2 (optional)"},
+    {"key": "scene3", "type": "text", "max": 200, "label": "Sentence 3 (optional)"},
+    {"key": "style", "type": "choice", "required": true, "options": ["flat illustration", "clean 3D", "paper cut-out"], "label": "Look"}
+  ],
+  "steps": [
+    {"id": "still1", "task": "text_to_image", "prompt": "{style} explainer illustration, no text in the image: {scene1}"},
+    {"id": "clip1", "task": "image_to_video", "source": "{still1}", "seconds": 4, "direction": {"preset": "slow-push-in"}, "prompt": "Gentle motion: {scene1}"},
+    {"id": "still2", "task": "text_to_image", "when": "scene2", "prompt": "{style} explainer illustration, no text in the image: {scene2}"},
+    {"id": "clip2", "task": "image_to_video", "when": "scene2", "source": "{still2}", "seconds": 4, "direction": {"preset": "slow-push-in"}, "prompt": "Gentle motion: {scene2}"},
+    {"id": "still3", "task": "text_to_image", "when": "scene3", "prompt": "{style} explainer illustration, no text in the image: {scene3}"},
+    {"id": "clip3", "task": "image_to_video", "when": "scene3", "source": "{still3}", "seconds": 4, "direction": {"preset": "slow-push-in"}, "prompt": "Gentle motion: {scene3}"},
+    {"id": "voice", "task": "tts", "optional": true, "prompt": "{scene1} {scene2} {scene3}"},
+    {"id": "edit", "task": "assemble", "clips": ["{clip1}", "{clip2}", "{clip3}"], "audio": ["{voice}"],
+     "text": [{"text": "{scene1}", "at": 0.3, "for": 3.5}, {"text": "{scene2}", "at": 4.3, "for": 3.5}, {"text": "{scene3}", "at": 8.3, "for": 3.5}]}
+  ]
+}

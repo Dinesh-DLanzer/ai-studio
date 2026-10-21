@@ -1,0 +1,16 @@
+{
+  "id": "talking-head-ad",
+  "label": "Talking-head ad",
+  "category": "Ads",
+  "description": "A portrait and a script become a talking presenter. Needs text-to-speech and lip-sync models and a recorded consent for the person in the portrait.",
+  "consent": "required",
+  "requires": ["tts", "lipsync"],
+  "inputs": [
+    {"key": "portrait", "type": "image", "required": true, "label": "Portrait (a person who gave consent)"},
+    {"key": "script", "type": "text", "required": true, "max": 400, "label": "Script"}
+  ],
+  "steps": [
+    {"id": "voice", "task": "tts", "prompt": "{script}"},
+    {"id": "talk", "task": "lipsync", "source": "{portrait}", "audio": ["{voice}"]}
+  ]
+}

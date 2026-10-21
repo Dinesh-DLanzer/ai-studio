@@ -1,0 +1,15 @@
+{
+  "id": "product-placement",
+  "label": "Product placement",
+  "category": "Ads",
+  "description": "Put your product photo into a new scene. One image edit.",
+  "consent": "none",
+  "inputs": [
+    {"key": "product", "type": "image", "required": true, "label": "Product photo"},
+    {"key": "setting", "type": "choice", "required": true, "options": ["studio", "kitchen", "outdoor", "desk", "marble counter"], "label": "Scene"}
+  ],
+  "steps": [
+    {"id": "hero", "task": "image_edit", "source": "{product}", "params": {"edit_mode": "bgswap", "mask_mode": "MASK_MODE_BACKGROUND"},
+     "prompt": "Place the product in a {setting} scene, premium lighting, realistic shadows and reflections. Keep the product unchanged."}
+  ]
+}

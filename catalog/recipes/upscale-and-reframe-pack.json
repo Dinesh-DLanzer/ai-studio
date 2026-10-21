@@ -1,0 +1,16 @@
+{
+  "id": "upscale-and-reframe-pack",
+  "label": "Upscale and reframe pack",
+  "category": "Utility",
+  "description": "One image in 9:16, 1:1 and 16:9 (free, local, blurred padding). A paid upscale is added only when an upscale model exists.",
+  "consent": "none",
+  "inputs": [
+    {"key": "photo", "type": "image", "required": true, "label": "Image"}
+  ],
+  "steps": [
+    {"id": "upscaled", "task": "upscale", "optional": true, "source": "{photo}"},
+    {"id": "tall", "task": "reframe", "source": "{photo}", "aspect": "9:16", "mode": "blur-pad"},
+    {"id": "square", "task": "reframe", "source": "{photo}", "aspect": "1:1", "mode": "blur-pad"},
+    {"id": "wide", "task": "reframe", "source": "{photo}", "aspect": "16:9", "mode": "blur-pad"}
+  ]
+}

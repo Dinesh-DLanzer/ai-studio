@@ -1,0 +1,16 @@
+{
+  "id": "photo-to-cinematic-clip",
+  "label": "Photo to cinematic clip",
+  "category": "Video",
+  "description": "Animate one photo with a camera move you pick.",
+  "consent": "if-real-person",
+  "inputs": [
+    {"key": "photo", "type": "image", "required": true, "label": "Photo"},
+    {"key": "camera", "type": "choice", "required": true, "options": ["slow-push-in", "360-orbit", "crane-reveal", "slow-pull-out", "orbit-right", "zoom-out-reveal", "tilt-reveal"], "label": "Camera move"},
+    {"key": "motion", "type": "text", "max": 120, "label": "What moves (optional)"}
+  ],
+  "steps": [
+    {"id": "clip", "task": "image_to_video", "source": "{photo}", "seconds": 5, "direction": {"preset": "{camera}"},
+     "prompt": "Cinematic shot of the photo. {motion}"}
+  ]
+}

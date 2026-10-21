@@ -1,0 +1,21 @@
+{
+  "id": "product-ad-9x16",
+  "label": "Product ad (9:16)",
+  "category": "Ads",
+  "description": "Product photo, scene edit, orbit clip, music when a music model exists, then a timeline with your headline.",
+  "consent": "none",
+  "format": "product-ad",
+  "inputs": [
+    {"key": "product", "type": "image", "required": true, "label": "Product photo"},
+    {"key": "headline", "type": "text", "max": 40, "label": "Headline"},
+    {"key": "setting", "type": "choice", "required": true, "options": ["studio", "kitchen", "outdoor"], "label": "Scene"}
+  ],
+  "steps": [
+    {"id": "hero", "task": "image_edit", "source": "{product}", "params": {"edit_mode": "bgswap", "mask_mode": "MASK_MODE_BACKGROUND"},
+     "prompt": "Place the product in a {setting} scene, premium lighting. Keep the product unchanged."},
+    {"id": "orbit", "task": "image_to_video", "source": "{hero}", "seconds": 5, "direction": {"preset": "360-orbit"},
+     "prompt": "Slow, steady orbit around the product. The product stays sharp and unchanged."},
+    {"id": "music", "task": "music", "optional": true, "seconds": 8, "prompt": "upbeat modern"},
+    {"id": "edit", "task": "assemble", "clips": ["{orbit}"], "audio": ["{music}"], "text": [{"text": "{headline}", "at": 0.5, "for": 3}]}
+  ]
+}
