@@ -138,7 +138,7 @@ class TestService(unittest.TestCase):
         self.assertTrue((st / "_discarded" / "hero.png").exists())              # old image kept
         self.assertEqual(self.ws.overview("demo")["discarded"][0]["reason"], "replaced by an upload")
         self.ws.add_file("demo", "stills/hero.png", PNG_BYTES, replace=True)   # extension follows the real content
-        self.assertEqual(sorted(f.name for f in st.glob("hero.*")), ["hero.png"])
+        self.assertEqual(sorted(f.name for f in st.glob("hero.*")), ["hero.png", "hero.png.meta.json"])
         self.ws.add_file("demo", "stills/fake.jpg", PNG_BYTES)                 # a PNG uploaded under .jpg is stored as .png
         self.assertTrue((st / "fake.png").exists())
 

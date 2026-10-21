@@ -4,6 +4,9 @@ Writing is HUMAN-SESSION ONLY: the only caller is the web route marked agent=Fal
 (tests/test_cast.py pins that). Reading is free. Generation with an asset marked `real_person: true` is refused without a matching entry.
 """
 import json
+import hashlib
+import hmac
+import os
 import re
 from datetime import date as _date
 from pathlib import Path
@@ -13,6 +16,55 @@ from aistudio.domain.common import ServiceError, _sha
 
 FILE = "consent.json"
 KINDS = ("real_person", "voice")
+LINEAGE_SECRET = "media-lineage-hmac"
+
+
+def _lineage_key():
+    """Use the existing external secret store; project files never carry the signing key."""
+    from aistudio.secrets import SecretStore
+    import secrets
+    store = SecretStore()
+    fields = store.get(LINEAGE_SECRET)
+    if not fields.get("secret"):
+        store.set(LINEAGE_SECRET, {"secret": secrets.token_urlsafe(32)})
+        fields = store.get(LINEAGE_SECRET)
+    return fields["secret"].encode("utf-8")
+
+
+def _lineage_signature(sha, source_sha, kind):
+    value = json.dumps({"sha": sha, "source_sha": source_sha or "", "kind": kind or ""}, sort_keys=True, separators=(",", ":"))
+    return hmac.new(_lineage_key(), value.encode("utf-8"), hashlib.sha256).hexdigest()
+
+
+def write_lineage(pdir, path, meta, source_sha=None, kind=None):
+    """Write server-authenticated lineage for a media file produced by a trusted tool."""
+    path = Path(path)
+    digest = _sha(path)
+    if not digest:
+        raise ServiceError("cannot record lineage for unreadable media")
+    meta = dict(meta)
+    source_sha = source_sha if source_sha is not None else meta.get("source_sha", "")
+    kind = kind if kind is not None else meta.get("kind", "")
+    meta.update({"source_sha": source_sha or "", "kind": kind or "", "sha": digest,
+                 "lineage_hmac": _lineage_signature(digest, source_sha, kind)})
+    project_mod.save_json(Path(pdir), path.relative_to(Path(pdir)).as_posix() + ".meta.json", meta)
+    return meta
+
+
+def _trusted_lineage(path, meta):
+    digest = _sha(path)
+    if not digest or meta.get("sha") != digest or not meta.get("lineage_hmac"):
+        return False
+    expected = _lineage_signature(digest, meta.get("source_sha", ""), meta.get("kind", ""))
+    return hmac.compare_digest(str(meta["lineage_hmac"]), expected)
+
+
+def _lineage_files(pdir):
+    for directory, dirs, names in os.walk(Path(pdir), followlinks=False):
+        dirs[:] = [d for d in dirs if not (Path(directory) / d).is_symlink()]
+        for name in names:
+            if name.endswith(".meta.json"):
+                yield Path(directory) / name
 
 
 def read(pdir):
@@ -88,42 +140,25 @@ def clear_sha(pdir, sha, clearance):
     return {"sha": sha, "clearance": clearance}
 
 
-def _registered_media(pdir):
+def _project_media(pdir):
     p = Path(pdir)
-    registered = set()
-    for filename, keys in (("images.json", ("out",)), ("shots.json", ("final_clip", "video", "clip", "first_frame", "end_frame", "final_video"))):
-        try:
-            doc = json.loads((p / filename).read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            continue
-        rows = doc.get("images", []) if filename == "images.json" else doc.get("shots", [])
-        for row in rows:
-            if isinstance(row, dict):
-                for key in keys:
-                    rel = row.get(key)
-                    if isinstance(rel, str) and rel:
-                        try:
-                            path = (p / rel).resolve()
-                            path.relative_to(p.resolve())
-                            registered.add(path)
-                        except (OSError, ValueError):
-                            pass
-    return registered
+    files = []
+    for directory, dirs, names in os.walk(p, followlinks=False):
+        dirs[:] = [d for d in dirs if not (Path(directory) / d).is_symlink()]
+        for name in names:
+            path = Path(directory) / name
+            if not name.endswith(".meta.json") and (path.is_file() or path.is_symlink()):
+                files.append(path)
+    return files
 
 
 def _unverified_shas(pdir):
-    """Find media without a project registration or a chain back to registered media."""
-    p = Path(pdir)
-    registered = _registered_media(p)
+    """Find media without authenticated provenance or an explicit human clearance."""
     verified = set()
+    verified.update(x.get("sha") for x in read(pdir)
+                    if x.get("sha") and (x.get("kind") in ("real_person", "voice", "real_person_sha", "not_a_real_person_sha")))
     pipeline_kinds = {"image", "clip", "image_edit", "clip_extend", "upscale_ai", "reframe_ai", "restyle", "replace", "motion_transfer", "character_swap", "review", "tts", "music", "sfx", "lipsync", "transcribe"}
-    media_ext = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".tif", ".tiff", ".heic", ".heif",
-                 ".mp4", ".mov", ".mkv", ".webm", ".mp3", ".wav", ".m4a", ".aac", ".flac"}
-    files = []
-    for sub in ("stills", "clips", "videos", "audio", "exports"):
-        d = p / sub
-        if d.is_dir():
-            files.extend(f for f in d.rglob("*") if f.is_file() and f.suffix.lower() in media_ext)
+    files = _project_media(pdir)
     metadata = {}
     for path in files:
         meta_file = path.with_name(path.name + ".meta.json")
@@ -131,25 +166,25 @@ def _unverified_shas(pdir):
             meta = json.loads(meta_file.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             meta = {}
-        metadata[_sha(path)] = meta
-        if path.resolve() in registered:
-            verified.add(_sha(path))
+        digest = _sha(path)
+        if digest:
+            metadata[digest] = (path, meta)
     changed = True
     while changed:
         changed = False
-        for digest, meta in metadata.items():
+        for digest, (path, meta) in metadata.items():
             if digest in verified or meta.get("unverified"):
                 continue
-            sources = {meta.get("source_sha"), (meta.get("params") or {}).get("source_sha")}
-            sources.update(r.get("sha") for r in meta.get("refs", []) if isinstance(r, dict))
+            source_sha = meta.get("source_sha")
             pipeline_output = (meta.get("kind") in pipeline_kinds and isinstance(meta.get("spec_hash"), str)
                                and re.fullmatch(r"[0-9a-f]{64}", meta["spec_hash"])
                                and meta.get("target") and meta.get("created") and meta.get("actor") is not None
                                and isinstance(meta.get("cost"), (int, float)))
-            if meta.get("editor_render") is True or pipeline_output or sources.intersection(verified):
+            signed = _trusted_lineage(path, meta)
+            if signed and (pipeline_output or source_sha in verified):
                 verified.add(digest)
                 changed = True
-    return {_sha(path) for path in files if _sha(path) not in verified}
+    return {digest for digest, (path, _meta) in metadata.items() if digest not in verified}
 
 
 def real_person_shas(pdir):
@@ -160,48 +195,17 @@ def real_person_shas(pdir):
     changed = True
     while changed:
         changed = False
-        # 1. Scan .meta.json files in project media dirs
-        for sub in ("stills", "clips", "videos", "audio"):
-            d = p / sub
-            if not d.is_dir():
+        for meta_file in _lineage_files(p):
+            try:
+                meta = json.loads(meta_file.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
                 continue
-            for meta_file in d.glob("*.meta.json"):
-                try:
-                    meta = json.loads(meta_file.read_text(encoding="utf-8"))
-                except Exception:
-                    continue
-                source_shas = set()
-                if meta.get("source_sha"):
-                    source_shas.add(meta["source_sha"])
-                if meta.get("params", {}).get("source_sha"):
-                    source_shas.add(meta["params"]["source_sha"])
-                for r in meta.get("refs", []):
-                    if isinstance(r, dict) and r.get("sha"):
-                        source_shas.add(r["sha"])
-                if any(s in marked for s in source_shas):
-                    media_name = meta_file.name[:-10]
-                    media_file = meta_file.parent / media_name
-                    if media_file.is_file():
-                        h = _sha(media_file)
-                        if h and h not in marked:
-                            marked.add(h)
-                            changed = True
-        # 2. Check <stem>.v<k> where base <stem> has sha in marked
-        for sub in ("stills", "clips", "videos"):
-            d = p / sub
-            if not d.is_dir():
-                continue
-            for f in d.glob("*"):
-                if f.is_file() and not f.name.endswith(".meta.json") and ".v" in f.name:
-                    base_stem = f.name.split(".v")[0]
-                    base_file = d / f"{base_stem}{f.suffix}"
-                    if base_file.is_file():
-                        base_h = _sha(base_file)
-                        if base_h in marked:
-                            h = _sha(f)
-                            if h and h not in marked:
-                                marked.add(h)
-                                changed = True
+            media_file = meta_file.with_name(meta_file.name[:-10])
+            if media_file.is_file() and meta.get("source_sha") in marked and _trusted_lineage(media_file, meta):
+                h = _sha(media_file)
+                if h and h not in marked:
+                    marked.add(h)
+                    changed = True
     return marked
 
 
@@ -217,40 +221,17 @@ def require_shas(pdir, shas):
     changed = True
     while changed:
         changed = False
-        for sub in ("stills", "clips", "videos", "audio"):
-            d = p / sub
-            if not d.is_dir():
+        for meta_file in _lineage_files(p):
+            try:
+                meta = json.loads(meta_file.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
                 continue
-            for meta_file in d.glob("*.meta.json"):
-                try:
-                    meta = json.loads(meta_file.read_text(encoding="utf-8"))
-                except Exception:
-                    continue
-                source_shas = set()
-                if meta.get("source_sha"):
-                    source_shas.add(meta["source_sha"])
-                if meta.get("params", {}).get("source_sha"):
-                    source_shas.add(meta["params"]["source_sha"])
-                for r in meta.get("refs", []):
-                    if isinstance(r, dict) and r.get("sha"):
-                        source_shas.add(r["sha"])
-                if any(s in bound for s in source_shas):
-                    media_name = meta_file.name[:-10]
-                    media_file = meta_file.parent / media_name
-                    if media_file.is_file():
-                        h = _sha(media_file)
-                        if h and h not in bound:
-                            bound.add(h)
-                            changed = True
-            for f in d.glob("*"):
-                if f.is_file() and not f.name.endswith(".meta.json") and ".v" in f.name:
-                    base_stem = f.name.split(".v")[0]
-                    base_file = d / f"{base_stem}{f.suffix}"
-                    if base_file.is_file() and _sha(base_file) in bound:
-                        h = _sha(f)
-                        if h and h not in bound:
-                            bound.add(h)
-                            changed = True
+            media_file = meta_file.with_name(meta_file.name[:-10])
+            if media_file.is_file() and meta.get("source_sha") in bound and _trusted_lineage(media_file, meta):
+                h = _sha(media_file)
+                if h and h not in bound:
+                    bound.add(h)
+                    changed = True
 
     for sha in shas:
         if sha in marked and sha not in bound:
@@ -264,7 +245,8 @@ def require_verified_shas(pdir, shas):
     bound = {x.get("sha") for x in records if x.get("kind") in ("real_person", "voice") and x.get("sha")}
     cleared = {x.get("sha") for x in records if x.get("kind") == "not_a_real_person_sha" and x.get("sha")}
     unverified = _unverified_shas(pdir)
+    known = {_sha(path) for path in _project_media(pdir)}
     for sha in shas:
-        if sha in unverified and sha not in bound and sha not in cleared:
+        if (sha not in known or sha in unverified) and sha not in bound and sha not in cleared:
             raise ServiceError("an unverified media file needs human clearance (sha-bound consent or not-a-real-person clearance) for these exact file bytes")
     require_shas(pdir, shas)

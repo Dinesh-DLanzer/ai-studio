@@ -126,13 +126,98 @@ class TestHardeningConsent(unittest.TestCase):
         consent.require_verified_shas(self.p, [sha])
 
     def test_pipeline_lineage_verifies_derived_media(self):
+        from aistudio import consent
         source = self.p / "stills" / "registered.png"
         source.write_bytes(b"registered source")
-        project_mod.save_json(self.p, "images.json", {"images": [{"id": "registered", "out": "stills/registered.png"}]})
+        consent.clear_sha(self.p, _sha(source), "not_a_real_person")
         derived = self.p / "stills" / "derived.png"
         derived.write_bytes(b"pipeline result")
-        project_mod.save_json(self.p, "stills/derived.png.meta.json", {"source_sha": _sha(source), "tool": "pipeline"})
-        consent.require_shas(self.p, [_sha(derived)])
+        consent.write_lineage(self.p, derived, {"tool": "pipeline"}, source_sha=_sha(source), kind="reframe_local")
+        consent.require_verified_shas(self.p, [_sha(derived)])
+
+    def test_copied_or_forged_lineage_cannot_verify_media(self):
+        source = self.p / "stills" / "cleared.png"
+        source.write_bytes(b"cleared source")
+        consent.clear_sha(self.p, _sha(source), "not_a_real_person")
+        forged = self.p / "stills" / "forged.png"
+        forged.write_bytes(b"forged result")
+        project_mod.save_json(self.p, "stills/forged.png.meta.json", {
+            "kind": "reframe_local", "source_sha": _sha(source), "sha": _sha(forged), "lineage_hmac": "0" * 64,
+        })
+        with self.assertRaisesRegex(ServiceError, "unverified"):
+            consent.require_verified_shas(self.p, [_sha(forged)])
+
+    def test_forged_lineage_cannot_inherit_real_person_consent(self):
+        source = self.p / "stills" / "consented.png"
+        source.write_bytes(b"consented source")
+        source_sha = _sha(source)
+        consent.mark_real_person(self.p, "consented", source_sha, "Subject")
+        consent.record(self.p, "Subject", "I consent", sha=source_sha)
+        copied = self.p / "stills" / "copy.bin"
+        copied.parent.mkdir(exist_ok=True)
+        copied.write_bytes(b"unrelated copied bytes")
+        project_mod.save_json(self.p, "stills/copy.bin.meta.json", {"source_sha": source_sha})
+        self.assertNotIn(_sha(copied), consent.real_person_shas(self.p))
+
+    def test_registration_does_not_verify_untrusted_upload(self):
+        image = self.p / "stills" / "uploaded.png"
+        image.write_bytes(b"agent-upload")
+        project_mod.save_json(self.p, "images.json", {"images": [{"id": "uploaded", "out": "stills/uploaded.png"}]})
+        with self.assertRaisesRegex(ServiceError, "unverified"):
+            consent.require_verified_shas(self.p, [_sha(image)])
+
+    def test_import_stills_does_not_clear_upload_provenance(self):
+        from PIL import Image
+        from io import BytesIO
+        stream = BytesIO()
+        Image.new("RGB", (2, 2), "red").save(stream, format="PNG")
+        self.ws.add_file("demo", "stills/unregistered.png", stream.getvalue(), is_agent=True)
+        self.ws.import_stills("demo", [{"file": "unregistered.png", "id": "portrait", "kind": "character"}])
+        path = self.p / "stills" / "portrait.png"
+        with self.assertRaisesRegex(ServiceError, "unverified"):
+            consent.require_verified_shas(self.p, [_sha(path)])
+
+    def test_unverified_media_outside_standard_folders_is_blocked(self):
+        image = self.p / "refs" / "person.dat"
+        image.parent.mkdir()
+        image.write_bytes(b"reference media")
+        with self.assertRaisesRegex(ServiceError, "unverified"):
+            consent.require_verified_shas(self.p, [_sha(image)])
+
+    def test_symlinked_media_is_blocked(self):
+        source = self.p / "stills" / "source.png"
+        source.write_bytes(b"source")
+        link = self.p / "refs" / "linked.png"
+        link.parent.mkdir()
+        link.symlink_to(source)
+        with self.assertRaisesRegex(ServiceError, "unverified"):
+            consent.require_verified_shas(self.p, [_sha(link)])
+
+    def test_character_swap_blocks_unverified_person_media(self):
+        source = self.p / "clips" / "unverified.mp4"
+        source.write_bytes(b"unverified clip")
+        with self.assertRaisesRegex(ServiceError, "unverified"):
+            self.ws.propose("demo", "character_swap", "s01", options={
+                "source": "clips/unverified.mp4", "subject": "Actor", "prompt": "swap outfit",
+            })
+
+    def test_lipsync_blocks_unverified_video_and_voice_files(self):
+        video = self.p / "clips" / "unverified.mp4"
+        audio = self.p / "audio" / "unverified.wav"
+        audio.parent.mkdir(exist_ok=True)
+        video.write_bytes(b"unverified video")
+        audio.write_bytes(b"unverified voice")
+        with self.assertRaisesRegex(ServiceError, "unverified"):
+            self.ws.propose("demo", "lipsync", "s01", options={
+                "video": "clips/unverified.mp4", "audio": "audio/unverified.wav",
+            })
+
+    def test_library_promotion_blocks_unverified_media(self):
+        from aistudio import library
+        image = self.p / "stills" / "unverified.png"
+        image.write_bytes(b"unverified library image")
+        with self.assertRaisesRegex(ServiceError, "unverified"):
+            library.promote(self.root, "demo", "stills/unverified.png")
 
     def test_unverified_media_accepts_sha_bound_consent(self):
         outsider = self.p / "audio" / "voice.wav"
@@ -163,6 +248,14 @@ class TestHardeningConsent(unittest.TestCase):
         self.assertTrue(meta["unverified"])
         with self.assertRaisesRegex(ServiceError, "unverified"):
             consent.require_verified_shas(self.p, [_sha(uploaded)])
+
+        # The same default applies to device or other non-human-session callers that
+        # reach the service without the historical is_agent flag.
+        self.ws.add_file("demo", "stills/device-upload.png", stream.getvalue())
+        device_upload = self.p / "stills" / "device-upload.png"
+        self.assertTrue(json.loads(Path(str(device_upload) + ".meta.json").read_text())["unverified"])
+        with self.assertRaisesRegex(ServiceError, "unverified"):
+            consent.require_verified_shas(self.p, [_sha(device_upload)])
 
     def test_sha_clearance_route_is_human_only_even_with_confirm_flag(self):
         from fastapi.testclient import TestClient

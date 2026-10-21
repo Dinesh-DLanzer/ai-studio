@@ -240,8 +240,15 @@ def _serve_once(server):
 
 
 def _project_file(project_dir, rel):
-    root = Path(project_dir).resolve()
-    path = (root / rel).resolve()
+    base = Path(project_dir)
+    root = base.resolve()
+    candidate = base / rel
+    for part in (candidate, *candidate.parents):
+        if part == base.parent:
+            break
+        if part.is_symlink():
+            raise ValueError("export file must not be a symbolic link")
+    path = candidate.resolve()
     if root not in path.parents or not path.is_file():
         raise ValueError("export file must exist inside the project")
     return path
@@ -282,7 +289,7 @@ def check_consent(project_dir):
             raise ValueError(f"real person consent required before YouTube upload: {se}") from se
 
 
-def _thumbnail_info(root, rel):
+def _thumbnail_info(root, rel, check_format=True):
     try:
         thumb = _project_file(root, rel)
     except Exception as exc:
@@ -291,12 +298,24 @@ def _thumbnail_info(root, rel):
     if mime not in ("image/png", "image/jpeg"):
         raise ValueError("thumbnail must be a readable PNG or JPEG")
     digest = hashlib.sha256()
+    head = b""
     try:
         with thumb.open("rb") as stream:
             for block in iter(lambda: stream.read(1024 * 1024), b""):
+                if not head:
+                    head = block[:16]
                 digest.update(block)
     except OSError:
         raise ValueError("thumbnail cannot be read or hashed") from None
+    if check_format and ((mime == "image/png" and not head.startswith(b"\x89PNG\r\n\x1a\n")) or (mime == "image/jpeg" and not head.startswith(b"\xff\xd8\xff"))):
+        raise ValueError("thumbnail must be a readable PNG or JPEG")
+    if check_format:
+        try:
+            from PIL import Image
+            with Image.open(thumb) as image:
+                image.verify()
+        except Exception:
+            raise ValueError("thumbnail must be a readable PNG or JPEG") from None
     return thumb, digest.hexdigest(), mime
 
 
@@ -501,9 +520,10 @@ def upload_job(secret_store, project_dir, job, progress, call=None):
         if meta["thumbnail"]:
             if not payload.get("thumbnail_sha256"):
                 raise ValueError("thumbnail sha256 is required; review and queue again")
-            thumb, actual_thumb_sha, thumb_mime = _thumbnail_info(project_dir, meta["thumbnail"])
+            thumb, actual_thumb_sha, thumb_mime = _thumbnail_info(project_dir, meta["thumbnail"], check_format=False)
             if actual_thumb_sha != payload["thumbnail_sha256"]:
                 raise ValueError("thumbnail changed after confirmation; review and queue again")
+            _thumbnail_info(project_dir, meta["thumbnail"])
         result = upload_file(secret_store, call, f, meta, payload.get("privacy", "private"), progress,
                              file_size=path.stat().st_size, filename=path.name)
     finally:

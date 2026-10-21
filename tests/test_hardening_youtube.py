@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 
 import tests._hermetic as HERM
 from aistudio import consent, jobs, youtube
-from aistudio.domain.common import _sha
+from aistudio.domain.common import ServiceError, _sha
 from server.app import create_app
 
 
@@ -54,16 +54,20 @@ class TestHardeningYouTube(unittest.TestCase):
         self.video_file = self.export_dir / "demo.mp4"
         self.video_bytes = b"MP4-VIDEO-PAYLOAD-FOR-TEST"
         self.video_file.write_bytes(self.video_bytes)
-        (self.video_file.with_name(self.video_file.name + ".meta.json")).write_text(json.dumps({"editor_render": True}), encoding="utf-8")
+        consent.write_lineage(self.project, self.video_file, {"editor_render": True}, kind="editor_render")
         self.video_sha = hashlib.sha256(self.video_bytes).hexdigest()
 
         # Create thumbnail
+        from io import BytesIO
+        from PIL import Image
         self.thumb_dir = self.project / "exports" / "thumbnails"
         self.thumb_dir.mkdir(parents=True)
         self.thumb_file = self.thumb_dir / "thumb.png"
-        self.thumb_bytes = b"\x89PNG\r\n\x1a\nTHUMBNAIL-BYTES"
+        image = BytesIO()
+        Image.new("RGB", (2, 2), "red").save(image, format="PNG")
+        self.thumb_bytes = image.getvalue()
         self.thumb_file.write_bytes(self.thumb_bytes)
-        (self.thumb_file.with_name(self.thumb_file.name + ".meta.json")).write_text(json.dumps({"source_sha": "test-source-sha"}), encoding="utf-8")
+        consent.write_lineage(self.project, self.thumb_file, {"tool": "thumbnail_extract"}, source_sha="test-source-sha", kind="thumbnail_extract")
         self.thumb_sha = hashlib.sha256(self.thumb_bytes).hexdigest()
         HERM.register_test_media(self.project, "exports/youtube/platform/demo.mp4", "exports/thumbnails/thumb.png")
 
@@ -193,6 +197,20 @@ class TestHardeningYouTube(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "thumbnail changed"):
             youtube.upload_job(self.store, self.project, job, lambda _pct: None, call=fake_call)
+
+    def test_preview_refuses_unverified_video_before_upload(self):
+        (self.project / "consent.json").write_text("[]", encoding="utf-8")
+        self.video_file.with_name(self.video_file.name + ".meta.json").unlink()
+        with self.assertRaisesRegex(ServiceError, "unverified"):
+            youtube.preview(self.project, "youtube", channel_title="test channel")
+
+    def test_preview_refuses_missing_or_invalid_thumbnail(self):
+        self.thumb_file.unlink()
+        with self.assertRaisesRegex(ValueError, "thumbnail"):
+            youtube.preview(self.project, "youtube", channel_title="test channel")
+        self.thumb_file.write_bytes(b"not a png")
+        with self.assertRaisesRegex(ValueError, "PNG or JPEG"):
+            youtube.preview(self.project, "youtube", channel_title="test channel")
 
     def test_stream_hash_and_upload_exact_handle(self):
         # Restore valid thumbnail

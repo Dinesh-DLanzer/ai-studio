@@ -139,7 +139,8 @@ def run_local(tool, src, dst, params, project_dir, runner=subprocess.run):
                 "params": params,
                 "created": datetime.now(timezone.utc).isoformat(timespec="seconds"),
             }
-            Path(str(out_path) + ".meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
+            from aistudio import consent
+            consent.write_lineage(root, out_path, meta, source_sha=meta["source_sha"], kind=tool)
         except Exception:
             pass
 

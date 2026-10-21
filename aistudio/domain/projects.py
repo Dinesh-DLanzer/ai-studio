@@ -177,8 +177,7 @@ class ProjectDomain:
             self.discard(name, old.relative_to(p).as_posix(), "replaced by an upload")
         written = p / "stills" / f"{rp.stem}.{ext}"
         written.write_bytes(data)
-        if is_agent:
-            project_mod.save_json(p, written.relative_to(p).as_posix() + ".meta.json", {"unverified": True, "source": "agent_upload", "sha": hashlib.sha256(data).hexdigest()})
+        project_mod.save_json(p, written.relative_to(p).as_posix() + ".meta.json", {"unverified": True, "source": "upload", "sha": hashlib.sha256(data).hexdigest()})
         self.ws._changed(name, "assets", "shots")
 
     def brief_get(self, name):

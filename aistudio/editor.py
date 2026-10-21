@@ -871,7 +871,9 @@ def render(pdir, edit, progress=None, options=None):
         shutil.move(str(part), str(final))
         refs = [{"path": rel, "sha": hashlib.sha256((pdir / rel).read_bytes()).hexdigest()}
                 for rel in files if (pdir / rel).is_file()]
-        Path(str(final) + ".meta.json").write_text(json.dumps({"editor_render": True, "refs": refs}, indent=2), encoding="utf-8")
+        from aistudio import consent
+        consent.write_lineage(pdir, final, {"editor_render": True, "refs": refs},
+                              source_sha=(refs[0].get("sha", "") if refs else ""), kind="editor_render")
         if progress:
             progress(100.0)
         return f"exports/{final.name}"

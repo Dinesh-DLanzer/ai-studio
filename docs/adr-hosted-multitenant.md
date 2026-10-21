@@ -4,6 +4,10 @@
 **Scope:** plan 27 stage 2 foundation. Local mode remains single user and keeps its existing project layout. Hosted-mode filesystem partitioning is implemented as a foundation; hosted identity, organization management, and Postgres are not implemented.
 **Decision date:** 2026-10-20
 
+**Implemented in the filesystem foundation:** hosted project folders, project locks, proposal and spend-reservation files, import staging, and trash resolve below `tenants/<tenant_id>/`; tenant ids are validated and symlinked tenant roots are refused. Local mode continues to use `projects/` and its existing trash layout. These checks partition storage only; they do not authenticate the request context.
+
+**Still required before hosted use:** authenticated tenant and actor context, organization and membership management, and a Postgres backend with tenant-aware access controls. The hosted filesystem foundation does not complete any of those items.
+
 ## Context
 
 The local application stores projects as folders and keeps durable jobs and the generation library in SQLite. A future hosted tier needs shared workspaces, identity, tenant isolation, spend controls and durable background work. A hosted product would change the security boundary and requires separate operational and security work. This slice adds pure policy models, a request context, a store interface seam and tenant scoped secret references; it adds no accounts, listener, billing, cloud deployment or network access.

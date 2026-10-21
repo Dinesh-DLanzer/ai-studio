@@ -120,7 +120,7 @@ class LibraryConsentAndAccessTests(unittest.TestCase):
         item = library.promote(self.root, "a", "stills/maya.png")
         with self.assertRaises(Exception):
             library.use_in_project(self.root, item["id"], "b", "image")      # the TARGET project needs its own consent
-        consent.record(self.pb, "Maya", "I agree", kind="real_person")
+        consent.record(self.pb, "Maya", "I agree", kind="real_person", sha=_sha(self.pa / "stills" / "maya.png"))
         self.assertTrue(library.use_in_project(self.root, item["id"], "b", "image"))
 
     def test_a_hand_written_consent_dict_no_longer_approves_anything(self):

@@ -1,5 +1,5 @@
 import tests._hermetic  # noqa: F401
-import json, os, stat, tempfile, unittest, zipfile
+import hashlib, json, os, stat, tempfile, unittest, zipfile
 from pathlib import Path
 from aistudio import importzip
 from aistudio.service import Workspace
@@ -60,6 +60,16 @@ class TestImport(unittest.TestCase):
         self.assertEqual(len(r["notes"]), 3)                                  # actual project, approvals dropped, budget reset
         self.assertTrue(any("actual project" in n for n in r["notes"]))
         self.assertEqual(self.ws.overview("demo")["shots"]["shots"][0]["id"], "s01")
+
+    def test_import_drops_forged_media_lineage(self):
+        from aistudio import consent
+        forged = {**good(), "stills/hero.png.meta.json": json.dumps({"editor_render": True, "sha": "forged", "lineage_hmac": "0" * 64})}
+        self.ws.import_project(build(forged), "forged", "forged.zip")
+        pdir = self.ws.pdir("forged")
+        image = pdir / "stills" / "hero.png"
+        self.assertFalse(Path(str(image) + ".meta.json").exists())
+        with self.assertRaisesRegex(Exception, "unverified"):
+            consent.require_verified_shas(pdir, [hashlib.sha256(image.read_bytes()).hexdigest()])
 
     def test_roundtrip_with_real_export(self):
         self.ws.create_project("orig")

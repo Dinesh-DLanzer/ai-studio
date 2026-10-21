@@ -167,8 +167,14 @@ class PipelineDomain:
 
     @staticmethod
     def _source_file(p, rel, label="source"):
+        candidate = Path(p) / str(rel)
+        for part in (candidate, *candidate.parents):
+            if part == Path(p).parent:
+                break
+            if part.is_symlink():
+                raise ServiceError(f"{label} cannot be a symbolic link")
         try:
-            f = (p / str(rel)).resolve()
+            f = candidate.resolve()
             f.relative_to(p.resolve())
         except (OSError, ValueError):
             raise ServiceError(f"{label} must stay inside the project") from None
@@ -777,7 +783,9 @@ class PipelineDomain:
                 "params": {"kind": kind, "resolution": row.get("resolution", ""), **{k: v for k, v in payload.items() if k not in skip}},
                 "spec_hash": grant.request_hash, "cost": cost, "created": datetime.now(timezone.utc).isoformat(timespec="seconds"), "actor": grant.actor}
         try:
-            project_mod.save_json(p, out.relative_to(p).as_posix() + ".meta.json", meta)
+            from aistudio import consent
+            source_sha = (meta.get("refs") or [{}])[0].get("sha", "")
+            consent.write_lineage(p, out, meta, source_sha=source_sha, kind=kind)
         except OSError:
             pass
 
