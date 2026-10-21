@@ -8,6 +8,7 @@ import RolesSection from "./settings/Roles";
 import CrewAgentsSection from "./settings/CrewAgents";
 import IntegrationsSection from "./settings/Integrations";
 import BrandKitsSection from "./settings/BrandKits";
+import LocalEnginesSection from "./settings/LocalEngines";
 import { settingsApi } from "./settings/client";
 import type { RolesResponse } from "./settings/types";
 
@@ -17,6 +18,7 @@ const SECTIONS = [
   { id: "set-limits", label: "Usage & Limits", sub: "Track usage and set limits", icon: <Coins size={17} /> },
   { id: "set-brand", label: "Brand kits", sub: "Logo, palette, fonts, captions", icon: <Palette size={17} /> },
   { id: "set-agents", label: "Agents", sub: "Crew prompts and limits", icon: <Users size={17} /> },
+  { id: "set-engines", label: "Local engines", sub: "ComfyUI workflows & models", icon: <Cpu size={17} /> },
   { id: "set-integrations", label: "Integrations", sub: "Connect agents (MCP) and API keys", icon: <Plug size={17} /> },
   { id: "set-prefs", label: "Preferences", sub: "App preferences", icon: <SlidersHorizontal size={17} /> },
 ];
@@ -96,6 +98,8 @@ export default function Settings() {
           <section id="set-brand" className="scroll-mt-24"><BrandKitsSection /></section>
 
           <section id="set-agents" className="scroll-mt-24"><CrewAgentsSection /></section>
+
+          <section id="set-engines" className="scroll-mt-24"><LocalEnginesSection /></section>
 
           <section id="set-integrations" className="scroll-mt-24"><IntegrationsSection /></section>
 

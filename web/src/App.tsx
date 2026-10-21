@@ -26,6 +26,8 @@ const StoryTab = lazy(() => import("./pages/Story").then(({ StoryTab }) => ({ de
 const CostsTab = lazy(() => import("./pages/Costs").then(({ CostsTab }) => ({ default: CostsTab })));
 const DiscardedTab = lazy(() => import("./pages/Discarded").then(({ DiscardedTab }) => ({ default: DiscardedTab })));
 const CrewTab = lazy(() => import("./pages/Crew").then(({ CrewTab }) => ({ default: CrewTab })));
+const AudioTab = lazy(() => import("./pages/Audio").then(({ AudioTab }) => ({ default: AudioTab })));
+const InterchangeTab = lazy(() => import("./pages/Interchange").then(({ InterchangeTab }) => ({ default: InterchangeTab })));
 const OverviewTab = lazy(() => import("./pages/Overview").then(({ OverviewTab }) => ({ default: OverviewTab })));
 const ReviewExport = lazy(() => import("./pages/ReviewExport"));
 const RecipesPage = lazy(() => import("./pages/Recipes"));
@@ -61,6 +63,8 @@ const Crew = () => <CrewTab {...useProject()} />;
 const Recipes = () => <RecipesPage {...useProject()} />;
 const Publish = () => <PublishPage {...useProject()} />;
 const Review = () => <ReviewPage {...useProject()} />;
+const Audio = () => <AudioTab {...useProject()} />;
+const Interchange = () => <InterchangeTab {...useProject()} />;
 const Costs = () => <CostsTab {...useProject()} />;
 const Discarded = () => <DiscardedTab {...useProject()} />;
 function ChatPage() { const { name, load, openBudget, start, o, running } = useProject(); return <Chat project={name} reloadAll={load} onApplied={openBudget} openBudget={openBudget} start={start} running={running} refreshKey={o} />; }
@@ -111,6 +115,8 @@ export default function App() {
             <Route path="recipes" element={<Recipes />} />
             <Route path="publish" element={<Publish />} />
             <Route path="review" element={<Review />} />
+            <Route path="audio" element={<Audio />} />
+            <Route path="export" element={<Interchange />} />
             <Route path="costs" element={<Costs />} />
             <Route path="discarded" element={<Discarded />} />
             <Route path="*" element={<ProjectNotFound />} />

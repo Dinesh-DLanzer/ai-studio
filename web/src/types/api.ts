@@ -35,6 +35,9 @@ export interface Shot {
   final_ok?: boolean;
   final_clip?: string;
   note?: string;
+  voice_line?: string;
+  voice_mode?: string;
+  english?: string;
 }
 
 export interface ShotsDoc {
@@ -173,7 +176,7 @@ export interface ProjectOverview {
   rates?: { models?: Record<string, Record<string, any>> };
   discarded: { file: string; cost: number; reason: string; when: string; original: string }[];
   proposals: Proposal[];
-  files: { stills: string[]; clips: string[] };
+  files: { stills: string[]; clips: string[]; audio?: string[] };
   reviews: Record<string, any>;
 }
 
