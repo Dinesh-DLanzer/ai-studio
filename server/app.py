@@ -154,6 +154,9 @@ def create_app(root=None, token=None, rates_path=None, transport=None, static_di
         if secrets.compare_digest(given, token):
             request.state.scope = "session"
             return
+        from_url = not (request.headers.get("authorization") or request.headers.get("x-aistudio-token"))
+        if from_url and given.startswith(apikeys.PREFIX):      # a key in a URL leaks through logs, history and referrers: headers only
+            raise HTTPException(401, "send API keys in the Authorization or X-AIStudio-Token header, not in the URL")
         rec = apikeys.verify(ws.root, given) if given.startswith(apikeys.PREFIX) else None
         if not rec:
             raise HTTPException(401, "missing or wrong session token or API key")
@@ -863,7 +866,9 @@ def create_app(root=None, token=None, rates_path=None, transport=None, static_di
             msg, ok = "ChatGPT is connected. You can close this tab and return to AI Studio.", True
         except ServiceError as e:
             msg, ok = f"ChatGPT sign-in failed: {e}", False
-        return HTMLResponse(f"<!doctype html><title>AI Studio</title><body style='font:16px system-ui;padding:3rem'><h2>{'Connected' if ok else 'Not connected'}</h2><p>{msg}</p>", 200 if ok else 400)
+        import html as _html      # the query value is attacker-controlled: never put it into markup unescaped
+        return HTMLResponse(f"<!doctype html><title>AI Studio</title><body style='font:16px system-ui;padding:3rem'><h2>{'Connected' if ok else 'Not connected'}</h2><p>{_html.escape(str(msg))}</p>",
+                            200 if ok else 400, headers={"Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'"})
 
     def _chatgpt_stop_listener():
         _stop_chatgpt_listener(app.state)

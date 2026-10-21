@@ -96,3 +96,50 @@ class TestServer(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SecurityAuditFixesTests(unittest.TestCase):
+    def setUp(self):
+        import tempfile
+        from fastapi.testclient import TestClient
+        from tests import _hermetic  # noqa: F401
+        from server.app import create_app
+        self.root = tempfile.mkdtemp()
+        self.c = TestClient(create_app(self.root, token="human", static_dir="/nonexistent"))
+        self.h = {"x-aistudio-token": "human"}
+
+    def test_oauth_callback_never_reflects_markup(self):
+        r = self.c.get("/api/providers/chatgpt/oauth/callback", params={"error": "<script>alert(1)</script>"})
+        self.assertNotIn("<script>", r.text)
+        self.assertIn("&lt;script&gt;", r.text)
+        self.assertIn("default-src 'none'", r.headers.get("content-security-policy", ""))
+
+    def test_api_keys_are_refused_in_the_url_but_work_in_a_header(self):
+        key = self.c.post("/api/keys", json={"name": "t"}, headers=self.h).json()["key"]
+        self.assertEqual(self.c.get("/api/projects", params={"token": key}).status_code, 401)
+        self.assertEqual(self.c.get("/api/projects", headers={"x-aistudio-token": key}).status_code, 200)
+        self.assertEqual(self.c.get("/api/projects", params={"token": "human"}).status_code, 200)      # the page's own session token may still use the URL (file previews)
+
+    def test_symlinked_project_folders_are_refused(self):
+        import os
+        from pathlib import Path
+        outside = Path(tempfile.mkdtemp())
+        (outside / "secret.txt").write_text("x")
+        (Path(self.root) / "projects").mkdir(exist_ok=True)
+        os.symlink(outside, Path(self.root) / "projects" / "evil")
+        self.assertGreaterEqual(self.c.get("/api/projects/evil", headers=self.h).status_code, 400)
+
+
+class PrintWindowTemplateIsEscapedTests(unittest.TestCase):
+    """The storyboard print window is built from project text (titles, prompts, voice lines). Every such value must go through esc()."""
+
+    def test_every_project_derived_interpolation_is_escaped(self):
+        import re
+        from pathlib import Path
+        src = (Path(__file__).resolve().parent.parent / "web" / "src" / "pages" / "StoryDocumentView.tsx").read_text(encoding="utf-8")
+        start = src.index("const html = `<!DOCTYPE html>")
+        body = src[start: src.index("</html>`;", start)]
+        risky = re.findall(r"\$\{(?!esc\()([^}]*\b(?:doc\.|c\.|b\.|s\.|projectName)[^}]*)\}", body)
+        # allowed raw interpolations are counts/lengths/conditionals/maps/fileUrl, never user text
+        bad = [r for r in risky if not re.search(r"\.length|\.map\(|\.join\(\"\"\)|\?|doc\.shots\.length|frameUrl|fileUrl", r)]
+        self.assertEqual(bad, [], f"unescaped project text in the print template: {bad}")

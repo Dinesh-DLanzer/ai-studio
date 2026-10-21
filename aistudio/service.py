@@ -141,11 +141,13 @@ class Workspace(SettingsMixin):
     def pdir(self, name):
         _ident(name, "project name")
         p = self.root / "projects" / name
+        if p.is_symlink() or (p.is_dir() and p.resolve().parent != (self.root / "projects").resolve()):
+            raise ServiceError(f"refusing project {name}: a project folder must be a real folder inside projects/")
         if not p.is_dir():
             projs_dir = self.root / "projects"
             if projs_dir.is_dir():
                 matches = [d for d in projs_dir.iterdir() if d.is_dir() and not d.name.startswith(("_", ".")) and (d.name.lower() == name.lower() or d.name.lower().startswith(name.lower()))]
-                if len(matches) == 1:
+                if len(matches) == 1 and not matches[0].is_symlink():
                     return matches[0]
             raise ServiceError(f"no such project: {name}")
         return p

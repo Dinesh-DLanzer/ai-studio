@@ -19,6 +19,9 @@ import {
   Copy,
 } from "lucide-react";
 import { fileUrl } from "../api";
+
+/** HTML-escape project text before it goes into the print window markup: titles, prompts and voice lines must never inject markup or script. */
+const esc = (v: unknown): string => String(v ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 import { Button } from "../ui";
 
 export interface ShotItem {
@@ -232,7 +235,7 @@ export function exportStoryToPdf(projectName: string, doc: ParsedStoryDocument, 
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>${doc.concept["title"] || doc.rawTitle} — Screenplay Storyboard</title>
+  <title>${esc(doc.concept["title"] || doc.rawTitle)} — Screenplay Storyboard</title>
   <style>
     @page {
       size: A4;
@@ -414,28 +417,28 @@ export function exportStoryToPdf(projectName: string, doc: ParsedStoryDocument, 
 <body>
   <header class="doc-header">
     <span class="header-badge">AI Commercial Storyboard &amp; Screenplay</span>
-    <h1 class="doc-title">${doc.concept["title"] || doc.rawTitle}</h1>
+    <h1 class="doc-title">${esc(doc.concept["title"] || doc.rawTitle)}</h1>
     <div style="font-size: 9pt; color: #64748b;">
-      Project: <strong>${projectName}</strong> · Generated via AI Video Studio · ${doc.shots.length} Scenes (${doc.concept["target duration"] || "~45s"})
+      Project: <strong>${esc(projectName)}</strong> · Generated via AI Video Studio · ${doc.shots.length} Scenes (${esc(doc.concept["target duration"] || "~45s")})
     </div>
   </header>
 
   <div class="meta-grid">
     <div class="meta-item">
       <strong>Format</strong>
-      <span>${doc.concept["format"] || "9:16 Vertical"}</span>
+      <span>${esc(doc.concept["format"] || "9:16 Vertical")}</span>
     </div>
     <div class="meta-item">
       <strong>Duration</strong>
-      <span>${doc.concept["target duration"] || "~88s"}</span>
+      <span>${esc(doc.concept["target duration"] || "~88s")}</span>
     </div>
     <div class="meta-item">
       <strong>Language</strong>
-      <span>${doc.concept["language"] || "Tamil / English"}</span>
+      <span>${esc(doc.concept["language"] || "Tamil / English")}</span>
     </div>
     <div class="meta-item">
       <strong>Brand</strong>
-      <span>${doc.concept["brand"] || projectName}</span>
+      <span>${esc(doc.concept["brand"] || projectName)}</span>
     </div>
   </div>
 
@@ -443,7 +446,7 @@ export function exportStoryToPdf(projectName: string, doc: ParsedStoryDocument, 
     doc.sharedStyle
       ? `
     <div class="section-title">Shared Visual Aesthetic &amp; Camera Direction</div>
-    <div class="shared-style-box">${doc.sharedStyle}</div>
+    <div class="shared-style-box">${esc(doc.sharedStyle)}</div>
   `
       : ""
   }
@@ -457,8 +460,8 @@ export function exportStoryToPdf(projectName: string, doc: ParsedStoryDocument, 
         .map(
           (c) => `
         <div class="cast-card">
-          <h4>${c.name}</h4>
-          <div>${c.description}</div>
+          <h4>${esc(c.name)}</h4>
+          <div>${esc(c.description)}</div>
         </div>
       `
         )
@@ -477,8 +480,8 @@ export function exportStoryToPdf(projectName: string, doc: ParsedStoryDocument, 
         .map(
           (b) => `
         <div class="cast-card">
-          <h4>${b.name}</h4>
-          <div>${b.description}</div>
+          <h4>${esc(b.name)}</h4>
+          <div>${esc(b.description)}</div>
         </div>
       `
         )
@@ -497,12 +500,12 @@ export function exportStoryToPdf(projectName: string, doc: ParsedStoryDocument, 
     <div class="shot-card">
       <div class="shot-header">
         <div>
-          <span>Shot ${s.number}</span>
-          ${s.time ? `<span style="margin-left: 8px; color: #64748b; font-weight: normal;">${s.time}</span>` : ""}
+          <span>Shot ${esc(s.number)}</span>
+          ${s.time ? `<span style="margin-left: 8px; color: #64748b; font-weight: normal;">${esc(s.time)}</span>` : ""}
         </div>
         <div>
-          ${s.purpose ? `<span class="shot-badge">${s.purpose}</span>` : ""}
-          <span style="font-size: 8pt; color: #64748b; margin-left: 8px;">Asset: ${s.imageId}</span>
+          ${s.purpose ? `<span class="shot-badge">${esc(s.purpose)}</span>` : ""}
+          <span style="font-size: 8pt; color: #64748b; margin-left: 8px;">Asset: ${esc(s.imageId)}</span>
         </div>
       </div>
       <div class="shot-body">
@@ -512,7 +515,7 @@ export function exportStoryToPdf(projectName: string, doc: ParsedStoryDocument, 
               ? `
             <div class="field-row">
               <div class="field-label">Visual</div>
-              <div>${s.visual}</div>
+              <div>${esc(s.visual)}</div>
             </div>
           `
               : ""
@@ -522,7 +525,7 @@ export function exportStoryToPdf(projectName: string, doc: ParsedStoryDocument, 
               ? `
             <div class="field-row">
               <div class="field-label">Camera</div>
-              <div>${s.camera}</div>
+              <div>${esc(s.camera)}</div>
             </div>
           `
               : ""
@@ -532,7 +535,7 @@ export function exportStoryToPdf(projectName: string, doc: ParsedStoryDocument, 
               ? `
             <div class="field-row">
               <div class="field-label">Action</div>
-              <div>${s.action}</div>
+              <div>${esc(s.action)}</div>
             </div>
           `
               : ""
@@ -542,7 +545,7 @@ export function exportStoryToPdf(projectName: string, doc: ParsedStoryDocument, 
               ? `
             <div class="field-row">
               <div class="field-label">Uses</div>
-              <div style="font-size: 8pt; color: #64748b;">${s.uses.join(", ")}</div>
+              <div style="font-size: 8pt; color: #64748b;">${esc(s.uses.join(", "))}</div>
             </div>
           `
               : ""
@@ -553,10 +556,10 @@ export function exportStoryToPdf(projectName: string, doc: ParsedStoryDocument, 
             s.voice
               ? `
             <div class="field-row">
-              <div class="field-label">Voiceover (${s.voiceType})</div>
+              <div class="field-label">Voiceover (${esc(s.voiceType)})</div>
               <div class="dialogue-bubble">
-                <div class="dialogue-voice">${s.voice}</div>
-                ${s.english ? `<div class="dialogue-trans">${s.english}</div>` : ""}
+                <div class="dialogue-voice">${esc(s.voice)}</div>
+                ${s.english ? `<div class="dialogue-trans">${esc(s.english)}</div>` : ""}
               </div>
             </div>
           `
@@ -568,7 +571,7 @@ export function exportStoryToPdf(projectName: string, doc: ParsedStoryDocument, 
             <div class="field-row">
               <div class="field-label">On-Screen Text</div>
               <div style="padding: 4px 8px; background: #fef08a; border-radius: 3px; font-weight: 600; font-size: 8.5pt;">
-                ${s.onScreenText}
+                ${esc(s.onScreenText)}
               </div>
             </div>
           `
@@ -580,7 +583,7 @@ export function exportStoryToPdf(projectName: string, doc: ParsedStoryDocument, 
         s.prompt
           ? `
         <div class="prompt-box">
-          <strong>AI Prompt:</strong> ${s.prompt}
+          <strong>AI Prompt:</strong> ${esc(s.prompt)}
         </div>
       `
           : ""
@@ -591,7 +594,7 @@ export function exportStoryToPdf(projectName: string, doc: ParsedStoryDocument, 
     .join("")}
 
   <footer class="doc-footer">
-    <div>${doc.concept["title"] || doc.rawTitle} · Screenplay Document</div>
+    <div>${esc(doc.concept["title"] || doc.rawTitle)} · Screenplay Document</div>
     <div>Page generated by AI Studio · dlanzer.com</div>
   </footer>
 
