@@ -1,5 +1,5 @@
 // Shared navigation helpers for the browser tests. The app has a sidebar; on small screens it is a drawer behind the "Open menu" button.
-const SECTIONS = { Overview: "", Chat: "/chat", Story: "/storyboard", Storyboard: "/storyboard", Assets: "/assets", Shots: "/shots", Crew: "/crew", Costs: "/costs", Discarded: "/discarded" };
+const SECTIONS = { Overview: "", Chat: "/chat", Story: "/storyboard", Storyboard: "/storyboard", Assets: "/assets", Shots: "/shots", Crew: "/crew", Audio: "/audio", Review: "/review", Export: "/export", Costs: "/costs", Discarded: "/discarded" };
 export async function go(page, name) {
   const section = SECTIONS[name];
   if (section === undefined) throw new Error(`go(): unknown page ${name}`);

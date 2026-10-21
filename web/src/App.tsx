@@ -26,6 +26,7 @@ const StoryTab = lazy(() => import("./pages/Story").then(({ StoryTab }) => ({ de
 const CostsTab = lazy(() => import("./pages/Costs").then(({ CostsTab }) => ({ default: CostsTab })));
 const DiscardedTab = lazy(() => import("./pages/Discarded").then(({ DiscardedTab }) => ({ default: DiscardedTab })));
 const CrewTab = lazy(() => import("./pages/Crew").then(({ CrewTab }) => ({ default: CrewTab })));
+const AudioTab = lazy(() => import("./pages/Audio").then(({ AudioTab }) => ({ default: AudioTab })));
 const OverviewTab = lazy(() => import("./pages/Overview").then(({ OverviewTab }) => ({ default: OverviewTab })));
 const ReviewExport = lazy(() => import("./pages/ReviewExport"));
 const NotFound = lazy(() => import("./pages/NotFound"));
@@ -55,6 +56,7 @@ const Storyboard = () => <StoryTab {...useProject()} />;
 const Assets = () => <AssetsTab {...useProject()} />;
 const Shots = () => <ShotsTab {...useProject()} />;
 const Crew = () => <CrewTab {...useProject()} />;
+const Audio = () => <AudioTab {...useProject()} />;
 const Costs = () => <CostsTab {...useProject()} />;
 const Discarded = () => <DiscardedTab {...useProject()} />;
 function ChatPage() { const { name, load, openBudget, start, o, running } = useProject(); return <Chat project={name} reloadAll={load} onApplied={openBudget} openBudget={openBudget} start={start} running={running} refreshKey={o} />; }
@@ -102,6 +104,7 @@ export default function App() {
             <Route path="assets" element={<Assets />} />
             <Route path="shots" element={<Shots />} />
             <Route path="crew" element={<Crew />} />
+            <Route path="audio" element={<Audio />} />
             <Route path="review" element={<ReviewExport />} />
             <Route path="costs" element={<Costs />} />
             <Route path="discarded" element={<Discarded />} />

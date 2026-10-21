@@ -7,6 +7,7 @@ export interface Shot {
   id: string; model: string; seconds: number; prompt: string; resolution?: string; audio?: boolean;
   first_frame?: string; note?: string; final_ok?: boolean; final_clip?: string;
   direction?: Direction; end_frame?: string; keyframes?: { at: number; image: string }[]; camera?: string;
+  voice_line?: string; voice_mode?: string; english?: string;
 }
 export interface ImageSpec {
   id: string; kind: "character" | "background" | "frame" | "other"; out: string; prompt: string; refs: string[]; aspect_ratio?: string;

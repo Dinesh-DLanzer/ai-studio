@@ -35,6 +35,9 @@ export interface Shot {
   final_ok?: boolean;
   final_clip?: string;
   note?: string;
+  voice_line?: string;
+  voice_mode?: string;
+  english?: string;
 }
 
 export interface ShotsDoc {
