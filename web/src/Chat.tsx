@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
 import { ArrowRight, Check, CheckCheck, Circle, FolderOpen, Image as ImageIcon, Sliders, X } from "lucide-react";
 import { fileUrl } from "./api";
 import RolesSection from "./settings/Roles";
@@ -13,6 +13,7 @@ import { useChatStream } from "./hooks/useChatStream";
 import BatchPlanModal from "./components/BatchPlanModal";
 import { useBatchPipeline } from "./hooks/useBatchPipeline";
 import { api } from "./api";
+import { crewApi } from "./hooks/useCrew";
 
 const clock = (ts: string) => { const d = new Date(ts); return ts && !isNaN(+d) ? d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : ""; };
 
@@ -29,6 +30,7 @@ export default function Chat({ project, reloadAll, onApplied, openBudget, start,
     st,
     text,
     setText,
+    routed,
     busy,
     pending,
     files,
@@ -54,6 +56,11 @@ export default function Chat({ project, reloadAll, onApplied, openBudget, start,
     reloadAll,
     load,
   });
+  // typing "@" at the start offers the crew agent ids (human session only, so a failed load just hides the hint)
+  const [crewIds, setCrewIds] = useState<{ id: string; name: string }[]>([]);
+  useEffect(() => { crewApi.agents().then((r) => setCrewIds(r.agents)).catch(() => {}); }, []);
+  const mention = /^@([a-z0-9-]*)$/.exec(text.trimStart());
+  const hints = mention ? crewIds.filter((a) => a.id.startsWith(mention[1])) : [];
   const act = async (n: NextStep) => {
     if (working) return;
     if (n.kind === "apply-story") void apply();
@@ -186,6 +193,16 @@ export default function Chat({ project, reloadAll, onApplied, openBudget, start,
             </section>
           )}
 
+          {routed && (
+            <div className="mb-2 rounded-xl border border-sky/40 bg-sky/10 p-3 text-sm" role="status" data-testid="routed-reply">
+              {routed.reply} <Link className="font-bold underline underline-offset-2" to={`/p/${project}/crew?run=${routed.run}`}>View the @{routed.agent} run</Link>
+            </div>
+          )}
+          {hints.length > 0 && (
+            <ul className="mb-2 flex flex-wrap gap-2" aria-label="Crew agents you can mention" data-testid="agent-hints">
+              {hints.map((a) => <li key={a.id}><button type="button" className="btn btn-outline btn-sm" onClick={() => setText(`@${a.id} `)}>@{a.id} <span className="text-slate-400">{a.name}</span></button></li>)}
+            </ul>
+          )}
           <div className="chat-composer">
             <Field rows={2} placeholder={"Type your message or idea here... (Press Enter to send, Shift+Enter for new line)"} aria-label="Message" value={text}
               onChange={(e) => setText(e.target.value)} disabled={busy}

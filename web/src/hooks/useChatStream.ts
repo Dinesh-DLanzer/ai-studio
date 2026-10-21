@@ -23,6 +23,8 @@ export function useChatStream({ project, reloadAll, onApplied, refreshKey }: Use
   const [st, setSt] = useState<ChatState | null>(null);
   const [suggestedAction, setSuggestedAction] = useState<ChatAction | null>(null);
   const [text, setText] = useState("");
+  // "@writer ..." is routed to a crew run; the server does not store it in the chat, so the reply is kept here
+  const [routed, setRouted] = useState<{ agent: string; run: string; reply: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const [pending, setPending] = useState("");
   const [files, setFiles] = useState<ChatAttachment[]>([]);
@@ -68,13 +70,14 @@ export function useChatStream({ project, reloadAll, onApplied, refreshKey }: Use
     setFiles([]);
     setSt((s) => s && { ...s, messages: [...s.messages, { role: "user", text: t, ts: new Date().toISOString(), ...(sent.length ? { attachments: sent } : {}) }] });
     try {
-      const r = await api<{ applied?: boolean; action?: ChatAction; executed?: { type: string; kind?: string; target?: string } }>("POST", `/api/projects/${project}/chat`, {
+      const r = await api<{ routed_to?: string; run?: string; reply?: string; applied?: boolean; action?: ChatAction; executed?: { type: string; kind?: string; target?: string } }>("POST", `/api/projects/${project}/chat`, {
         text: t,
         prefs: { auto_storyboard: true },
         ...(sent.length ? { attachments: sent.map((f) => f.id) } : {}),
       });
       await load();
       reloadAll();
+      setRouted(r.routed_to && r.run ? { agent: r.routed_to, run: r.run, reply: r.reply || "" } : null);
       setSuggestedAction(r.action || null);
       if (r.applied) {
         toast("ok", "Story.md and TODO.md are ready.");
@@ -177,6 +180,7 @@ export function useChatStream({ project, reloadAll, onApplied, refreshKey }: Use
     setSt,
     text,
     setText,
+    routed,
     busy,
     pending,
     files,
