@@ -119,6 +119,9 @@ R = [
     ("GET", "/api/projects/{name}/edit/export-subtitles", False, "Review and Export", "The subtitle cues as SubRip or WebVTT for Canva, YouTube, TikTok and Google Vids. ?format=srt|vtt (default srt). Free.", "-", "caption file"),
     ("GET", "/api/projects/{name}/edit/export-bundle", False, "Review and Export", "The Canva / Google Vids zip: the media the timeline uses, captions.srt and captions.vtt, timeline.fcpxml, timeline.edl, timeline_summary.json and the newest rendered preview. Free.", "-", "application/zip"),
     ("GET", "/api/projects/{name}/edit/export/{fmt}", False, "Review and Export", "Download an interchange export: otio, otioz, xmeml, fcpxml, edl, srt, vtt or bundle.", "-", "file download"),
+    ("GET", "/api/projects/{name}/export/{fmt}", False, "Review and Export", "Download an interchange export: otio, otioz, xmeml, fcpxml, edl, srt, vtt, bundle or aftereffects.jsx. Human session or paired device token only.", "-", "file download"),
+    ("GET", "/api/projects/{name}/export/aftereffects.jsx", False, "Review and Export", "Generate an After Effects ExtendScript (.jsx) comp script that imports media and lays out the timeline. Project-contained. Human session or paired device token only.", "-", "ExtendScript (.jsx) file"),
+    ("GET", "/api/projects/{name}/media", False, "Review and Export", "Approved stills, clips and audio for editing panels with sizes, sha and download paths. Human session or paired device token only.", "query parameters (?approved=1)", '{"media": [...]}'),
     ("POST", "/api/projects/{name}/edit/import-otio", False, "Review and Export", "Preview an OTIO round trip. Apply by reviewing the diff and saving with PUT /edit.", '{"otio": "..."}', "diff preview"),
     ("POST", "/api/projects/{name}/external-edit", False, "Review and Export", "Open a project media copy in a desktop application. Human session only.", '{"file": "clips/a.mp4", "app"?: "..."}', "session"),
     ("GET", "/api/projects/{name}/external-edit", False, "Review and Export", "List active external edit sessions. Human session only.", "-", "sessions"),
@@ -184,6 +187,10 @@ R = [
     ("GET", "/api/keys", False, "Integrations", "List API keys: name, first characters, created, last used. Never the key.", "-", '{"keys": [...]}'),
     ("POST", "/api/keys", False, "Integrations", "Create an API key. The key is returned once and cannot be shown again. Header-only token.", '{"name": "my-script"}', '{"key": "aisk_...", "record"}'),
     ("DELETE", "/api/keys/{kid}", False, "Integrations", "Revoke an API key at once.", "-", '{"ok": true}'),
+    ("POST", "/api/pair/start", False, "Integrations", "Start 6-digit device pairing for NLE panels. Code shown in human notifications and terminal, never in the API. Human session only.", "-", '{"id", "expires", "message"}'),
+    ("POST", "/api/pair/confirm", False, "Integrations", "Confirm 6-digit pairing code and receive a scoped device token (returned once). Public endpoint.", '{"code": "123456", "host": "premiere|resolve|aftereffects|blender", "device_name": "..."}', '{"device_token": "aisd_...", "device": {...}}'),
+    ("GET", "/api/pair/devices", False, "Integrations", "List paired NLE devices. Human session only.", "-", '{"devices": [{id, host, device_name, created, expires, last_used}]}'),
+    ("DELETE", "/api/pair/devices/{id}", False, "Integrations", "Revoke a paired NLE device. Human session only.", "-", '{"ok": true, "revoked": "id"}'),
     ("GET", "/api/integrations", False, "Integrations", "The MCP connection details of this install (python path, repo, workspace) and the MCP tool list.", "-", '{"mcp", "tools", "base_url"}'),
     ("GET", "/api/agents", False, "Integrations", "List detected terminal AI agents (Claude Code, Antigravity CLI, OpenCode).", "-", '{"agents": [{id, name, binary, detected, description}]}'),
     ("POST", "/api/agents/run", False, "Integrations", "Execute a task with a detected terminal AI agent and stream SSE output.", '{"agent_id": "claude", "prompt": "...", "project": "..."}', "text/event-stream"),
@@ -194,7 +201,23 @@ R = [
     ("GET", "/files/{name}/{path}", True, "Files and utility", "Read a file of a project: stills, clips, checks, audio, exports (png, jpg, mp4, json, md, csv, txt, mp3, wav, m4a, aac, ogg). Supports ?token=.", "-", "the file"),
 ]
 
-DOCS = {f"{m} {p}": {"method": m, "path": p, "agent": a, "group": g, "summary": s, "body": b, "returns": r} for m, p, a, g, s, b, r in R}
+DEVICE_ALLOWED_ROUTES = {
+    ("GET", "/api/health"),
+    ("GET", "/api/projects"),
+    ("GET", "/api/projects/{name}"),
+    ("GET", "/api/projects/{name}/media"),
+    ("GET", "/api/projects/{name}/export/{fmt}"),
+    ("GET", "/api/projects/{name}/export/aftereffects.jsx"),
+    ("GET", "/api/projects/{name}/edit/export/{fmt}"),
+    ("GET", "/files/{name}/{path}"),
+    ("GET", "/api/jobs"),
+    ("GET", "/api/jobs/{jid}"),
+    ("POST", "/api/projects/{name}/proposals"),
+    ("POST", "/api/projects/{name}/clips/{shot_id}/tool"),
+    ("POST", "/api/projects/{name}/clips/{shot_id}/extend"),
+}
+
+DOCS = {f"{m} {p}": {"method": m, "path": p, "agent": a, "device": (m, p) in DEVICE_ALLOWED_ROUTES, "group": g, "summary": s, "body": b, "returns": r} for m, p, a, g, s, b, r in R}
 
 
 def endpoints():
@@ -221,3 +244,11 @@ def undocumented(app):
 def agent_allowed(method, route_path):
     d = DOCS.get(f"{method} {(route_path or '').replace(':path', '')}")
     return bool(d and d["agent"])
+
+
+def device_allowed(method, route_path):
+    clean_path = (route_path or "").replace(":path", "")
+    if (method, clean_path) in DEVICE_ALLOWED_ROUTES:
+        return True
+    d = DOCS.get(f"{method} {clean_path}")
+    return bool(d and d.get("device"))
