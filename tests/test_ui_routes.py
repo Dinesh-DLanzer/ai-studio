@@ -58,3 +58,16 @@ class UiRouteTests(unittest.TestCase):
         self.assertEqual(r.status_code, 200, r.text)
         self.assertEqual(r.json()["profile"]["source"], "user")
         self.assertEqual(self.c.delete("/api/capabilities/fake/fake-video", headers=self.h).json(), {"ok": True})
+
+    def test_library_file_and_remix_are_human_only(self):
+        self.c.post("/api/projects", headers=self.h, json={"name": "demo", "test_pipeline": True})
+        pdir = Path(self.root) / "projects" / "demo"
+        (pdir / "stills").mkdir(exist_ok=True)
+        (pdir / "stills" / "hero.png").write_bytes(logo_bytes())
+        self.assertEqual(self.c.post("/api/library/rebuild", headers=self.h).status_code, 200)
+        item = next(i for i in self.c.get("/api/library", headers=self.h).json()["items"] if i["file"] == "stills/hero.png")
+        self.assertEqual(self.c.get(f"/api/library/{item['id']}/file", headers=self.h).status_code, 200)
+        self.assertEqual(self.c.get(f"/api/library/{item['id']}/file", headers=self.ah).status_code, 403)
+        self.assertEqual(self.c.get("/api/library/nope/file", headers=self.h).status_code, 404)
+        self.assertEqual(self.c.post("/api/projects/demo/remix", headers=self.ah, json={"meta": "stills/hero.png.meta.json"}).status_code, 403)
+        self.assertEqual(self.c.post("/api/projects/demo/remix", headers=self.h, json={"meta": "stills/hero.png.meta.json"}).status_code, 400)

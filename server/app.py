@@ -202,6 +202,18 @@ def create_app(root=None, token=None, rates_path=None, transport=None, static_di
         if not row: raise HTTPException(404, "no such library item")
         return row
 
+    @app.get("/api/library/{id}/file", dependencies=[api])
+    def library_file(id: str):
+        row = librarymod.get(ws.root, id)
+        if not row: raise HTTPException(404, "no such library item")
+        try:
+            base = (ws.root / "library") if row["project"] == "_library" else librarymod._safe_project(ws.root, row["project"])
+            path, _ = librarymod._safe_rel(base, row["file"])
+        except ValueError as e: raise HTTPException(400, str(e)) from None
+        if not path.is_file() or path.suffix.lower() not in ALLOWED_SUFFIX or path.name.endswith(".meta.json"):
+            raise HTTPException(404, "file not found")
+        return FileResponse(path)
+
     @app.post("/api/library/{id}/favorite", dependencies=[api])
     async def library_favorite(id: str, request: Request):
         row = librarymod.set_favorite(ws.root, id, bool((await request.json()).get("on")))
@@ -567,6 +579,11 @@ def create_app(root=None, token=None, rates_path=None, transport=None, static_di
     async def identity_sheet(name: str, aid: str, request: Request):
         b = await request.json() if (await request.body()) else {}
         return guard(ws.identity_sheet, name, aid, b.get("views"), "api-key" if getattr(request.state, "scope", "session") == "agent" else "local")
+
+    @app.post("/api/projects/{name}/remix", dependencies=[api])
+    async def remix_output(name: str, request: Request):
+        b = await request.json()      # a PROPOSAL only (nothing approved or spent); the approval code is shown to the page only
+        return guard(ws.remix, name, b.get("meta"), getattr(request.state, "scope", "session") == "session")
 
     @app.post("/api/projects/{name}/variants", dependencies=[api])
     async def propose_variants(name: str, request: Request):
