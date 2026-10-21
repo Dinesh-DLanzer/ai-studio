@@ -38,6 +38,14 @@ _LEAD_RE = re.compile(r"^[\s\-–—:]+")
 _LABELS = {
     "visual": "visual",
     "camera": "camera",
+    "camera move": "movement",
+    "framing": "framing",
+    "angle": "angle",
+    "lens": "lens",
+    "lighting": "lighting",
+    "preset": "preset",
+    "end frame": "end_frame",
+    "keyframe": "keyframe",
     "action": "action",
     "voice": "voice",
     "voiceover": "voice",
@@ -119,6 +127,24 @@ def _parse_shot(block):
 
     image = (text("image").split() or [""])[0]
     uses = [slug(x) for x in re.split(r"[,;\s]+", re.sub(r"\([^)]*\)", "", text("uses"))) if x.strip()]
+    direction = {name: text(name) for name in ("movement", "framing", "angle", "lens", "lighting", "preset") if text(name)}
+    if "lens" in direction:
+        m = re.search(r"\d+(?:\.\d+)?", direction["lens"])
+        if m:
+            direction["lens_mm"] = float(m.group()) if "." in m.group() else int(m.group())
+        aperture = re.search(r"f\s*/\s*[\d.]+", direction["lens"], re.I)
+        if aperture:
+            direction["aperture"] = aperture.group().replace(" ", "")
+        direction.pop("lens", None)
+    end_frame = text("end_frame")
+    keyframe_values = _clean(body.get("keyframe", []))
+    if "keyframe" in inline:
+        keyframe_values.insert(0, inline["keyframe"])
+    keyframes = []
+    for value in keyframe_values:
+        m = re.match(r"(?:at\s*)?([\d.]+)\s*[,|:]\s*(?:image\s*)?(.+)", value, re.I)
+        if m:
+            keyframes.append({"at": float(m.group(1)), "image": m.group(2).strip()})
     return {
         "id": "s%02d" % number,
         "number": number,
@@ -126,6 +152,9 @@ def _parse_shot(block):
         "purpose": text("purpose"),
         "visual": text("visual"),
         "camera": text("camera"),
+        "direction": direction,
+        "end_frame": end_frame,
+        "keyframes": keyframes,
         "action": text("action"),
         "voice_mode": mode,
         "voice_line": voice_line,
@@ -229,6 +258,14 @@ def to_shots_doc(story, model="google/veo-3.1-lite", seconds=4, resolution="720p
         }
         if shot.get("image"):
             entry["first_frame"] = "stills/%s.png" % shot["image"]
+        if shot.get("direction"):
+            entry["direction"] = shot["direction"]
+        if shot.get("camera"):
+            entry["camera"] = shot["camera"]
+        if shot.get("end_frame"):
+            entry["end_frame"] = shot["end_frame"]
+        if shot.get("keyframes"):
+            entry["keyframes"] = shot["keyframes"]
         entry["prompt"] = shot.get("prompt", "") + _audio_suffix(shot, language)
         entry["note"] = ("%s %s" % (shot.get("purpose", ""), shot.get("time", ""))).strip()
         shots.append(entry)

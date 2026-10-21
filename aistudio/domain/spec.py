@@ -27,6 +27,7 @@ class GenerationSpec:
     audio: bool = False
     start_frame: str = ""
     end_frame: str = ""
+    keyframes: list = field(default_factory=list)
     refs: list = field(default_factory=list)       # [{"id", "path"}] paths relative to the project
     camera: dict = field(default_factory=dict)
     price: float = 0.0
@@ -45,10 +46,13 @@ class GenerationSpec:
         return {"task": self.task, "end_frame": bool(self.end_frame), "refs": len(self.refs)}
 
     def to_dict(self):
-        return {"kind": self.kind, "target": self.target, "provider": self.provider, "model": self.model, "task": self.task, "profile": self.profile,
-                "seconds": self.seconds, "resolution": self.resolution, "aspect_ratio": self.aspect_ratio, "audio": self.audio,
-                "start_frame": self.start_frame, "end_frame": self.end_frame, "refs": self.refs, "camera": self.camera,
-                "price": self.price, "warnings": self.warnings}
+        result = {"kind": self.kind, "target": self.target, "provider": self.provider, "model": self.model, "task": self.task, "profile": self.profile,
+                  "seconds": self.seconds, "resolution": self.resolution, "aspect_ratio": self.aspect_ratio, "audio": self.audio,
+                  "start_frame": self.start_frame, "end_frame": self.end_frame, "refs": self.refs, "camera": self.camera,
+                  "price": self.price, "warnings": self.warnings}
+        if self.keyframes:
+            result["keyframes"] = self.keyframes
+        return result
 
 
 def _profile(ws, entry):
@@ -153,12 +157,42 @@ def resolve(ws, p, kind, target, options=None, loose=False):
     pipe = ws.pipeline_domain
     shot, doc, res, audio, ff = (pipe._clip_spec_loose if loose else pipe._clip_spec)(p, target)
     end = shot.get("end_frame") or ""
-    if end and not (p / end).exists() and not loose:
+    keyframes = list(shot.get("keyframes") or [])
+    image_doc = ws._read(p, "images.json", {"images": []})
+    image_paths = {i.get("id"): i.get("out") for i in image_doc.get("images", []) if i.get("id") and i.get("out")}
+    def frame_path(value):
+        return image_paths.get(value, value)
+    if end and not (p / frame_path(end)).is_file() and not loose:
         raise ServiceError(f"end frame missing: {end}")
-    shot_refs = list(shot.get("refs") or [])
-    req = {"task": "image_to_video" if ff else "text_to_video", "end_frame": bool(end), "refs": len(shot_refs)}
+    for frame in keyframes:
+        image = frame.get("image") if isinstance(frame, dict) else None
+        if image and not (p / frame_path(image)).is_file() and not loose:
+            raise ServiceError(f"keyframe missing: {image}")
+    raw_refs = list(shot.get("refs") or [])
+    # Derive roles from image kind and retain the best references when a model has a small limit.
+    image_by_id = {i.get("id"): i for i in image_doc.get("images", []) if i.get("id")}
+    priority = {"character": 0, "location": 1, "style": 2, "product": 3}
+    shot_refs = []
+    for ref in raw_refs:
+        rid = ref.get("id") if isinstance(ref, dict) else str(ref)
+        asset = image_by_id.get(rid, {})
+        kind = asset.get("kind", "other")
+        reference_role = ref.get("role") if isinstance(ref, dict) else None
+        reference_role = reference_role or ("character" if kind == "character" else "location" if kind == "background" else "style")
+        if reference_role not in priority:
+            reference_role = "style"
+        path = asset.get("out") or (ref.get("path") if isinstance(ref, dict) else rid)
+        shot_refs.append({"id": rid, "role": reference_role, "path": path})
+    shot_refs.sort(key=lambda r: priority[r["role"]])
+    req = {"task": "image_to_video" if ff else "text_to_video", "end_frame": bool(end), "refs": 0}
     entry, explicit = select_entry(ws, p, role, shot.get("model"), req, f"shot {target}")
     profile = _profile(ws, entry)
+    ref_limit = profile["references"]["max"]
+    if len(shot_refs) > ref_limit:
+        dropped = shot_refs[ref_limit:]
+        warnings.append("reference limit; dropped: " + ", ".join(r["id"] for r in dropped))
+        shot_refs = shot_refs[:ref_limit]
+        req["refs"] = len(shot_refs)
     seconds = _snap(profile, int(shot["seconds"]), warnings)
     if profile["resolutions"] and res not in profile["resolutions"]:
         warnings.append(f"{res} is not in this model's known resolutions ({', '.join(profile['resolutions'])})")
@@ -169,11 +203,14 @@ def resolve(ws, p, kind, target, options=None, loose=False):
         warnings.append("this model does not generate audio")
     if shot_refs:
         warnings.append("reference images are checked against the model limit but no video adapter sends them yet")
-    cam = {"prompt_text": shot.get("camera") or "", "native": {}}
+    from aistudio.storyboard.direction import split
+    direction = shot.get("direction") or {}
+    native, prompt_text = split(direction, profile) if direction and not shot.get("camera") else ({}, "")
+    cam = {"prompt_text": shot.get("camera") or prompt_text, "native": native}
     if cam["prompt_text"] and profile["camera"]["mode"] == "none":
         warnings.append("this model has no camera control; the camera note stays in the prompt only")
     price = runner.video_price(entry, {"seconds": seconds, "resolution": res, "audio": audio}, len(shot_refs))      # reference charges are part of the quote
     if price is None:
         raise ServiceError(f"No price for {entry['model']} at {res} ({seconds}s). Set it in Settings > Model Configuration.")
     return GenerationSpec(kind, target, role, entry, req["task"], profile, seconds, res, aspect, audio, ff or "", end,
-                          [{"id": r, "path": r} for r in shot_refs], cam, price, warnings + _age(pricing, entry), explicit)
+                          keyframes=keyframes, refs=shot_refs, camera=cam, price=price, warnings=warnings + _age(pricing, entry), explicit=explicit)

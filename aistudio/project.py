@@ -78,7 +78,7 @@ def create_project(root, name, format=None, brand_kit=None, kit_root=None):
     (project_path / "TODO.md").write_text(f"# TODO for {name}\n", encoding="utf-8")
     
     # Write shots.json with format info
-    shots_data = {"schema_version": 1, "aspect_ratio": aspect_ratio, "audio": audio, "shots": []}
+    shots_data = {"schema_version": 2, "aspect_ratio": aspect_ratio, "audio": audio, "shots": []}
     if format_id:
         shots_data["format"] = format_id
     (project_path / "shots.json").write_text(

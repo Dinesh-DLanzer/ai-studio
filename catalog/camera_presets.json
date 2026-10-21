@@ -1,0 +1,29 @@
+{
+  "presets": [
+    {"id":"slow-push-in","name":"Slow push-in","direction":{"movement":"dolly-in","speed":"slow"},"description":"The camera slowly pushes closer to the subject."},
+    {"id":"dolly-zoom","name":"Dolly zoom","direction":{"movement":"dolly-zoom"},"description":"The camera dollies as the lens zooms to create a shifting background."},
+    {"id":"crash-zoom","name":"Crash zoom","direction":{"movement":"zoom-in","speed":"fast"},"description":"The camera snaps into a tight zoom on the subject."},
+    {"id":"360-orbit","name":"360 orbit","direction":{"movement":"orbit-left"},"description":"The camera makes a full orbit around the subject."},
+    {"id":"fpv-fly-through","name":"FPV fly-through","direction":{"movement":"fpv","speed":"fast"},"description":"The camera flies dynamically through the scene from an FPV viewpoint."},
+    {"id":"crane-reveal","name":"Crane reveal","direction":{"movement":"crane-up","speed":"slow"},"description":"The camera rises on a crane to reveal the scene."},
+    {"id":"handheld-follow","name":"Handheld follow","direction":{"movement":"handheld","framing":"medium"},"description":"A handheld camera follows the subject with natural movement."},
+    {"id":"whip-pan","name":"Whip pan","direction":{"movement":"pan-left","speed":"fast"},"description":"The camera whips quickly left with energetic motion blur."},
+    {"id":"bullet-time","name":"Bullet-time orbit","direction":{"movement":"orbit-left","speed":"slow","motion":2},"description":"The camera circles the nearly frozen subject in a dramatic arc."},
+    {"id":"overhead-top-down","name":"Overhead top-down","direction":{"movement":"static","framing":"wide","angle":"overhead"},"description":"A steady overhead view looks straight down on the scene."},
+    {"id":"rack-focus","name":"Rack focus","direction":{"movement":"static","focus":"rack focus to background"},"description":"Focus shifts from the foreground subject to the background."},
+    {"id":"parallax-truck","name":"Parallax truck","direction":{"movement":"truck-right","speed":"slow"},"description":"The camera trucks right to create layered parallax across the scene."},
+    {"id":"slow-pull-out","name":"Slow pull-out","direction":{"movement":"dolly-out","speed":"slow"},"description":"The camera slowly pulls away to reveal more of the surroundings."},
+    {"id":"tilt-reveal","name":"Tilt reveal","direction":{"movement":"tilt-up","speed":"slow"},"description":"The camera tilts upward from a detail to reveal the subject."},
+    {"id":"low-angle-hero","name":"Low-angle hero","direction":{"movement":"static","framing":"medium-close","angle":"low"},"description":"A low camera angle frames the subject as confident and powerful."},
+    {"id":"dutch-drift","name":"Dutch drift","direction":{"movement":"tracking","angle":"dutch"},"description":"A tracking camera holds a tilted Dutch angle for unease."},
+    {"id":"pedestal-rise","name":"Pedestal rise","direction":{"movement":"pedestal-up","speed":"slow"},"description":"The camera rises vertically on a pedestal beside the subject."},
+    {"id":"pedestal-drop","name":"Pedestal drop","direction":{"movement":"pedestal-down","speed":"slow"},"description":"The camera descends vertically to settle at subject level."},
+    {"id":"orbit-right","name":"Orbit right","direction":{"movement":"orbit-right","speed":"slow"},"description":"The camera arcs smoothly around the subject to the right."},
+    {"id":"zoom-out-reveal","name":"Zoom-out reveal","direction":{"movement":"zoom-out"},"description":"The lens zooms out to reveal the wider setting."},
+    {"id":"over-shoulder","name":"Over-the-shoulder","direction":{"movement":"static","framing":"over-shoulder","angle":"eye-level"},"description":"An eye-level over-the-shoulder view connects the speaker and listener."},
+    {"id":"pov-walk","name":"POV walk","direction":{"movement":"tracking","framing":"pov","speed":"slow"},"description":"The camera moves forward from the subject's point of view."},
+    {"id":"ground-level-track","name":"Ground-level track","direction":{"movement":"tracking","angle":"ground"},"description":"A low ground-level camera tracks alongside the moving subject."},
+    {"id":"static-close-up","name":"Static close-up","direction":{"movement":"static","framing":"close-up","lens_mm":85},"description":"A steady 85mm close-up isolates the subject's expression."},
+    {"id":"wide-crane-down","name":"Wide crane down","direction":{"movement":"crane-down","framing":"wide","speed":"slow"},"description":"A wide view descends gently from above toward the scene."}
+  ]
+}

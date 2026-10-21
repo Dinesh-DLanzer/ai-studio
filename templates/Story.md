@@ -27,6 +27,22 @@
 
 **Camera**
 
+**Camera move:** <static, pan-left, dolly-in, orbit-left, tracking, or another supported move>
+
+**Framing:** <extreme-wide, wide, medium-wide, medium, medium-close, close-up, extreme-close-up, over-shoulder, pov, insert>
+
+**Angle:** <eye-level, low, high, dutch, overhead, ground>
+
+**Lens:** <35mm, f/2.0>
+
+**Lighting:** <plain-English lighting direction>
+
+**Preset:** <optional camera preset id>
+
+**End frame:** <optional existing image id or path>
+
+**Keyframe:** <optional time in seconds, then image id or path>
+
 **Action**
 
 **Voice** (who speaks: ON-CAMERA dialogue with lip-sync, or OFF-CAMERA narrator voice-over)
