@@ -14,6 +14,7 @@ BUILTIN_DIR = Path(__file__).resolve().parent.parent.parent / "catalog" / "agent
 ID_RE = re.compile(r"^[a-z][a-z0-9-]{1,40}$")
 KEYS = {"id", "name", "version", "role", "tools", "engine", "limits"}
 HARD = {"max_steps": 50, "max_tokens": 200000, "max_llm_usd": 5.0}
+DIRS = [BUILTIN_DIR]     # tests add a fixtures folder
 DEFAULT_LIMITS = {"max_steps": 12, "max_tokens": 20000, "max_llm_usd": 0.25}
 
 
@@ -114,8 +115,8 @@ def apply_overrides(agent, overrides):
     return out
 
 
-def load(agent_id, settings_dir=None, dirs=(BUILTIN_DIR,)):
-    for d in dirs:
+def load(agent_id, settings_dir=None, dirs=None):
+    for d in (dirs or DIRS):
         f = Path(d) / f"{agent_id}.md"
         if f.is_file():
             ov = {}
@@ -128,5 +129,5 @@ def load(agent_id, settings_dir=None, dirs=(BUILTIN_DIR,)):
     raise AgentError(f"unknown agent '{agent_id}'")
 
 
-def list_agents(settings_dir=None, dirs=(BUILTIN_DIR,)):
-    return [load(f.stem, settings_dir, dirs) for d in dirs if Path(d).is_dir() for f in sorted(Path(d).glob("*.md"))]
+def list_agents(settings_dir=None, dirs=None):
+    return [load(f.stem, settings_dir, dirs) for d in (dirs or DIRS) if Path(d).is_dir() for f in sorted(Path(d).glob("*.md"))]
