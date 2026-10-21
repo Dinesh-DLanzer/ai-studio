@@ -70,3 +70,19 @@ class TenancyTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TenantFixRegressions(unittest.TestCase):
+    def test_secret_refs_cannot_collide_across_tenants(self):
+        a = SecretStore._scoped_ref("y:z", "x")
+        b = SecretStore._scoped_ref("z", "x:y")
+        self.assertNotEqual(a, b)
+        self.assertNotEqual(SecretStore._scoped_ref("org-7:provider", "local"), SecretStore._scoped_ref("provider", "org-7"))
+
+    def test_reconcile_marks_other_tenant_paid_job_needs_sync(self):
+        with tempfile.TemporaryDirectory() as d:
+            with context.use_context(context.RequestContext(tenant_id="org-a", actor="u1")):
+                job = jobs.enqueue(d, "p", "clip", state="running")
+            jobs.JobRunner(d, {}).reconcile()
+            with context.use_context(context.RequestContext(tenant_id="org-a")):
+                self.assertEqual(jobs.get(d, job["id"])["state"], "needs_sync")

@@ -86,7 +86,7 @@ class SecretStore:
         cls._check(ref)
         if not isinstance(namespace, str) or not REF_RE.match(namespace):
             raise SecretError("invalid secret namespace")
-        return ref if namespace == "local" else f"{namespace}:{ref}"
+        return ref if namespace == "local" else f"{namespace}/{ref}"   # "/" is rejected by REF_RE, so no tenant/ref pair can collide with another
 
     # -- public API
     def backend(self):

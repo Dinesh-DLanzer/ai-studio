@@ -13,7 +13,7 @@ import secrets
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
-from aistudio.context import get_context, use_context
+from aistudio.context import RequestContext, get_context, use_context
 
 from aistudio import costlog, store
 from aistudio.domain.common import ServiceError
@@ -59,6 +59,18 @@ def list_jobs(root, project=None, state=None, batch_id=None, limit=200):
             sql += f" AND {col} = ?"
             args.append(val)
     return [_row(r) for r in store.query(root, sql + " ORDER BY created DESC, id LIMIT ?", (*args, int(limit)))]
+
+
+def _all_jobs(root, state=None):
+    """Internal maintenance listing across tenants (restart reconcile and the poller); never exposed through a route."""
+    sql, args = "SELECT * FROM jobs", ()
+    if state:
+        sql, args = sql + " WHERE state = ?", (state,)
+    return [_row(r) for r in store.query(root, sql + " ORDER BY created DESC, id LIMIT 100000", args)]
+
+
+def _job_context(job):
+    return RequestContext(tenant_id=job["tenant_id"], actor=job["actor"])
 
 
 def claim(root, jid):
@@ -184,14 +196,15 @@ class JobRunner:
                 self._poller.start()
 
     def poll_once(self):
-        pending = list_jobs(self.root, state="provider_pending")
+        pending = _all_jobs(self.root, state="provider_pending")
         for job in pending:
-            try:
-                outcome = self.poll(job)
-            except Exception:
-                continue    # transient; try again next round
-            if outcome and get(self.root, job["id"])["state"] == "provider_pending":
-                finish(self.root, job["id"], outcome, error="" if outcome == "completed" else "the provider reported the job failed")
+            with use_context(_job_context(job)):
+                try:
+                    outcome = self.poll(job)
+                except Exception:
+                    continue    # transient; try again next round
+                if outcome and get(self.root, job["id"])["state"] == "provider_pending":
+                    finish(self.root, job["id"], outcome, error="" if outcome == "completed" else "the provider reported the job failed")
         return len(pending)
 
     def _poll_loop(self):
@@ -201,18 +214,22 @@ class JobRunner:
     # ---- startup
     def reconcile(self):
         """Run once when the server starts (a single server owns the ledger).  Never re-runs paid work."""
-        for job in list_jobs(self.root, limit=100000):
-            free = job["kind"] in FREE_KINDS
-            if job["state"] in ("queued", "running") and free:
-                update(self.root, job["id"], state="queued")
-                self.pool.submit(self._run, job["id"])
-            elif job["state"] == "running":
-                update(self.root, job["id"], state="needs_sync",
-                       error="the server stopped while this was running; it may already have been billed. Check Costs, sync, then propose again if needed")
-            elif job["state"] == "queued":
-                update(self.root, job["id"], state="needs_sync",
-                       error="the server stopped before this started; approvals do not carry over a restart. Propose again if you still want it")
-        prune(self.root)
+        for job in _all_jobs(self.root):
+            ctx = _job_context(job)
+            with use_context(ctx):
+                free = job["kind"] in FREE_KINDS
+                if job["state"] in ("queued", "running") and free:
+                    update(self.root, job["id"], state="queued")
+                    self.pool.submit(self._run_in_context, job["id"], ctx)
+                elif job["state"] == "running":
+                    update(self.root, job["id"], state="needs_sync",
+                           error="the server stopped while this was running; it may already have been billed. Check Costs, sync, then propose again if needed")
+                elif job["state"] == "queued":
+                    update(self.root, job["id"], state="needs_sync",
+                           error="the server stopped before this started; approvals do not carry over a restart. Propose again if you still want it")
+        for tid in {j["tenant_id"] for j in _all_jobs(self.root)}:
+            with use_context(RequestContext(tenant_id=tid)):
+                prune(self.root)
         self._start_poller()
 
     def shutdown(self):
