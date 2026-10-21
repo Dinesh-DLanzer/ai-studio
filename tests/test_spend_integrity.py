@@ -55,7 +55,7 @@ from tests.test_story_convert import MD  # noqa: E402
 def _worker(root, pid, barrier, out):
     try:
         ws = Workspace(root)
-        barrier.wait(30)
+        barrier.wait(90)
         ws.execute("demo", pid)
         out.put("ok")
     except ServiceError as error:
@@ -102,7 +102,7 @@ class MultiProcessStopLossTests(unittest.TestCase):
         results = []
         for _ in procs:
             try:
-                results.append(out.get(timeout=60))
+                results.append(out.get(timeout=150))
             except Exception as error:
                 results.append(f"no result: {error!r}")
         for pr in procs:

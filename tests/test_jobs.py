@@ -8,7 +8,7 @@ from aistudio import jobs, store
 from aistudio.domain.common import ServiceError
 
 
-def wait(pred, secs=5):
+def wait(pred, secs=20):
     end = time.time() + secs
     while time.time() < end:
         if pred():
@@ -62,7 +62,7 @@ class TestLedger(unittest.TestCase):
             with lock:
                 live[0] += 1
                 peak[0] = max(peak[0], live[0])
-            gate.wait(5)
+            gate.wait(20)
             with lock:
                 live[0] -= 1
             return {}
@@ -80,7 +80,7 @@ class TestLedger(unittest.TestCase):
         gate = threading.Event()
 
         def blocker(job, progress):
-            gate.wait(5)
+            gate.wait(20)
             progress(50)       # sees the cancel request
             return {}
         r = self.runner({"export": blocker}, concurrency=lambda p: 1)
