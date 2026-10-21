@@ -103,6 +103,8 @@ def missing(profile, ptype, req):
             return "its adapter cannot send keyframes yet"
     if req.get("refs", 0) > profile["references"]["max"]:
         return f"accepts at most {profile['references']['max']} reference image(s), {req['refs']} given"
+    if req.get("refs") and ptype in cfg.PROVIDER_TYPES and "refs" not in cfg.adapter_class(ptype).request_features:
+        return "its adapter cannot send reference images yet"
     return None
 
 

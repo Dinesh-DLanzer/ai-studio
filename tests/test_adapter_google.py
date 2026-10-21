@@ -1,7 +1,7 @@
 import base64
 import unittest
 from aistudio.providers.adapters.google import GoogleAdapter
-from aistudio.providers.base import Retryable
+from aistudio.providers.base import Rejected, Retryable
 from tests._adapter_helpers import FakeTransport, png
 
 CONN = {"id": "g", "type": "google", "secret": {"api_key": "AIzaSyTESTKEY1234567890abcdefg"}}
@@ -80,7 +80,7 @@ class TestGoogle(unittest.TestCase):
         body = t.calls[0]["body"]
         self.assertEqual(body["parameters"], {"aspectRatio": "9:16", "durationSeconds": 4, "resolution": "720p"})
         self.assertEqual(body["instances"][0]["prompt"], "p")
-        self.assertIn("bytesBase64Encoded", body["instances"][0]["image"])
+        self.assertEqual(body["instances"][0]["image"]["inlineData"]["mimeType"], "image/png")
         self.assertEqual(job, {"job_id": OP, "model": "veo-3.1-lite-generate-preview"})
         self.assertEqual(a.video_poll(job)["status"], "pending")
         self.assertEqual(t.last["url"], BASE + "/" + OP)
@@ -129,3 +129,50 @@ class TestGoogle(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestVeoFrames(unittest.TestCase):
+    M = "veo-3.1-generate-preview"
+
+    def req(self, **kw):
+        return {"prompt": "p", "seconds": 8, "resolution": "720p", "aspect_ratio": "16:9", "audio": True, **kw}
+
+    def sent(self, model=None, **kw):
+        a, t = make({"name": OP})
+        a.video_submit(model or self.M, self.req(**kw))
+        return t.calls[0]["body"]
+
+    def refused(self, model=None, **kw):
+        a, t = make({"name": OP})
+        with self.assertRaises(Rejected):
+            a.video_submit(model or self.M, self.req(**kw))
+        self.assertEqual(t.calls, [])      # nothing sent
+
+    def test_end_frame_sent_as_last_frame_inline(self):
+        inst = self.sent(first_frame=png("a.png"), last_frame=png("b.png"))["instances"][0]
+        self.assertEqual(set(inst["lastFrame"]["inlineData"]), {"mimeType", "data"})
+        self.assertIn("image", inst)
+
+    def test_end_frame_needs_start_image(self):
+        self.refused(last_frame=png())
+
+    def test_references_sent_as_asset_images(self):
+        inst = self.sent(refs=[png("a.png"), png("b.png")])["instances"][0]
+        self.assertEqual([r["referenceType"] for r in inst["referenceImages"]], ["asset", "asset"])
+        self.assertEqual(inst["referenceImages"][0]["image"]["inlineData"]["mimeType"], "image/png")
+        self.assertNotIn("image", inst)
+
+    def test_reference_constraints(self):
+        self.refused(refs=[png()], seconds=6)
+        self.refused(refs=[png()] * 4)
+        self.refused(model="veo-3.1-lite-generate-preview", refs=[png()])
+        self.refused(refs=[png()], first_frame=png())      # mixing is not documented, so not sent
+
+    def test_long_resolution_needs_eight_seconds(self):
+        self.refused(seconds=6, resolution="1080p")
+
+    def test_native_camera_refused(self):
+        self.refused(camera_native={"pan": 1})
+
+    def test_features(self):
+        self.assertEqual(GoogleAdapter.request_features, {"end_frame", "refs"})
