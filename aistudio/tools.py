@@ -130,10 +130,10 @@ def run_local(tool, src, dst, params, project_dir, runner=subprocess.run):
     if output == source:
         raise ValueError("output cannot overwrite the source")
 
-    # In test mode, return a fake versioned path without running ffmpeg
+    # In test mode, copy source to versioned destination without running ffmpeg
     if _in_test_mode():
         output.parent.mkdir(parents=True, exist_ok=True)
-        output.write_bytes(b"fake processed clip")
+        shutil.copyfile(source, output)
         return output
 
     common = ["ffmpeg", "-y", "-nostdin", "-hide_banner", "-loglevel", "error"]

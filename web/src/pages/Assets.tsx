@@ -263,7 +263,7 @@ export function AssetsTab({ o, name, load, start, openProposal, running }: TabPr
               <div>
                 <h4 className="font-bold text-amber-200">Character Reference Image Detected</h4>
                 <p className="mt-1 text-xs text-amber-300/90 leading-relaxed">
-                  {checkingChar.analysis.summary || "This image appears to be a single-angle reference photo or face image."}
+                  {typeof checkingChar.analysis.summary === "string" ? checkingChar.analysis.summary : "This image appears to be a single-angle reference photo or face image."}
                 </p>
                 <p className="mt-2 text-xs text-slate-300 leading-relaxed">
                   For video scenes to remain consistent, an AI character master sheet needs <b>multi-angle body views</b> (front, side, back) and a <b>grid of facial expressions</b> (neutral, happy, angry, sad, etc.).
