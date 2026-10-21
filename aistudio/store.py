@@ -26,6 +26,18 @@ MIGRATIONS = [
     CREATE INDEX jobs_project ON jobs (tenant_id, project, created);
     CREATE INDEX jobs_state ON jobs (state);
     """,
+    """
+    CREATE TABLE items (
+        id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL DEFAULT 'local', actor TEXT NOT NULL DEFAULT 'local',
+        project TEXT NOT NULL, kind TEXT NOT NULL, category TEXT NOT NULL DEFAULT '', file TEXT NOT NULL,
+        sha TEXT NOT NULL DEFAULT '', prompt TEXT NOT NULL DEFAULT '', model TEXT NOT NULL DEFAULT '',
+        provider TEXT NOT NULL DEFAULT '', seed TEXT NOT NULL DEFAULT '', params TEXT NOT NULL DEFAULT '{}',
+        cost REAL NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT 'completed', favorite INTEGER NOT NULL DEFAULT 0,
+        created REAL NOT NULL DEFAULT 0, meta TEXT NOT NULL DEFAULT '{}');
+    CREATE UNIQUE INDEX items_identity ON items (tenant_id, actor, project, file, sha);
+    CREATE INDEX items_project ON items (tenant_id, project, created);
+    CREATE INDEX items_filters ON items (tenant_id, kind, model, status, favorite, created, cost);
+    """,
 ]
 
 _local = threading.local()

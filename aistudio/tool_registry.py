@@ -171,6 +171,7 @@ TOOLS = {
     "list_crew_runs": ("Read-only: the studio crew's runs in a project (agent, task, status, steps, LLM cost). Starting, stopping and undoing a run is human-only.", S(name=STR),
                        lambda ws, a: {"runs": _runs().list_runs(ws, a["name"])}),
     "get_crew_run": ("Read-only: one crew run with its step log, document diffs, proposals and batch.", S(name=STR, id=STR), lambda ws, a: _runs().get_run(ws, a["name"], a["id"])),
+    "search_library": ("Search the workspace library of generated media. Human-session only because it can reveal data across projects.", S(q={"type": "string", "optional": True}), lambda ws, a: __import__("aistudio.library", fromlist=["search"]).search(ws.root, a.get("q", ""))),
 }
 
 
@@ -184,7 +185,7 @@ PAID = ("propose", "analyze_character", "edit_still", "extend_clip", "generate_a
 APPROVAL = ("approve_budget", "approve_proposal", "approve_batch", "approve_shot", "run_proposal", "run_batch", "reject_proposal", "set_max_attempts",
             "estimate", "discard", "restore")
 HUMAN_ONLY = ("delete_project", "create_project", "list_projects", "list_trash", "restore_trash", "upload_image", "list_jobs", "get_job",
-              "list_crew_runs", "get_crew_run")      # reading runs is for humans and MCP; a crew agent has no use for it
+              "list_crew_runs", "get_crew_run", "search_library")      # reading runs is for humans and MCP; a crew agent has no use for it
 
 META = {}
 for _names, _cls, _w in ((FREE_READ, "free", False), (FREE_WRITE, "free", True), (PAID, "paid", False), (APPROVAL, "approval", False), (HUMAN_ONLY, "human_only", False)):

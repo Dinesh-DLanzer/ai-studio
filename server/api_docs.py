@@ -5,9 +5,16 @@ Fields: (method, path, agent, group, summary, body, returns).  agent=True: allow
 page's session token (a human): approvals, budget, providers, keys, limits, deleting.
 """
 GROUPS = ["Projects", "Story and documents", "Chat (producer)", "Assets and shots", "Budget, proposals and approvals", "Generation jobs", "Review and Export",
-          "Costs and verification", "Providers, models and limits", "Integrations", "Files and utility"]
+          "Costs and verification", "Library", "Providers, models and limits", "Integrations", "Files and utility"]
 
 R = [
+    ("GET", "/api/library", True, "Library", "Search the workspace generation library. Read-only; results can span projects.", "query parameters", '{"items": [...], "total"}'),
+    ("GET", "/api/library/{id}", True, "Library", "Read one library item.", "-", "library item"),
+    ("POST", "/api/library/{id}/favorite", False, "Library", "Mark or unmark a library item as favorite. Human session only.", '{"on": true}', "library item"),
+    ("POST", "/api/library/rebuild", False, "Library", "Rebuild the index from project media and cost logs. Human session only.", "-", '{"count": 0}'),
+    ("POST", "/api/library/promote", False, "Library", "Copy a project asset into the workspace library. Human session only.", '{"project": "...", "file": "stills/hero.png"}', "library item"),
+    ("POST", "/api/library/use", False, "Library", "Copy a workspace library asset into a project. Human session only.", '{"id": "...", "project": "...", "kind": "image"}', "library item"),
+    ("POST", "/api/library/remix", False, "Library", "Return a prefilled proposal request; does not create a proposal or spend money. Human session only.", '{"id": "...", "project": "..."}', "proposal request"),
     # ---- projects
     ("GET", "/api/projects", True, "Projects", "List projects.", "-", '{"projects": [{name, shots, assets, spent, estimate, approved, test, favorite}]}'),
     ("POST", "/api/projects", True, "Projects", "Create a project from the guided templates.", '{"name": "my-ad", "test_pipeline": false}', '{"name": "my-ad"}'),
