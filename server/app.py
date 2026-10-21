@@ -18,7 +18,7 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from starlette.background import BackgroundTask
 from fastapi.staticfiles import StaticFiles
 
-from aistudio import activity as activitymod, apikeys, comments as commentsmod, editor as editormod, importzip as importmod, jobs as jobsmod, notifications, review_package as reviewmod
+from aistudio import activity as activitymod, apikeys, comments as commentsmod, editor as editormod, importzip as importmod, jobs as jobsmod, notifications, pairing
 from aistudio.service import REPO, ServiceError, Workspace
 from server import api_docs
 
@@ -168,22 +168,41 @@ def create_app(root=None, token=None, rates_path=None, transport=None, static_di
         return request.headers.get("x-aistudio-token") or (bearer[7:].strip() if bearer.lower().startswith("bearer ") else "") or request.query_params.get("token") or ""
 
     def auth(request: Request):
-        """The page's session token = a human (everything).  An API key (aisk_...) = an agent: only the routes marked agent in api_docs,
-        i.e. what the MCP tools can do.  Anything else is refused."""
+        """The page's session token = a human (everything).  An API key (aisk_...) = an agent: only the routes marked agent in api_docs.
+        A device token (aisd_...) = a paired NLE device: only the routes marked device in api_docs.
+        Anything else is refused."""
         given = given_token(request)
         if secrets.compare_digest(given, token):
             request.state.scope = "session"
             return
         from_url = not (request.headers.get("authorization") or request.headers.get("x-aistudio-token"))
-        if from_url and given.startswith(apikeys.PREFIX):      # a key in a URL leaks through logs, history and referrers: headers only
-            raise HTTPException(401, "send API keys in the Authorization or X-AIStudio-Token header, not in the URL")
-        rec = apikeys.verify(ws.root, given) if given.startswith(apikeys.PREFIX) else None
-        if not rec:
-            raise HTTPException(401, "missing or wrong session token or API key")
-        route = request.scope.get("route")
-        if not api_docs.agent_allowed(request.method, getattr(route, "path", "")):
-            raise HTTPException(403, "this API key can read, write documents, estimate, propose and run what a human already approved; approving, budgets, providers, keys and deleting need the page")
-        request.state.scope = "agent"
+        if from_url and (given.startswith(apikeys.PREFIX) or given.startswith(pairing.DEVICE_PREFIX)):      # tokens in a URL leak through logs, history and referrers: headers only
+            raise HTTPException(401, "send tokens in the Authorization or X-AIStudio-Token header, not in the URL")
+        if given.startswith(apikeys.PREFIX):
+            rec = apikeys.verify(ws.root, given)
+            if not rec:
+                raise HTTPException(401, "missing or wrong session token or API key")
+            route = request.scope.get("route")
+            if not api_docs.agent_allowed(request.method, getattr(route, "path", "")):
+                raise HTTPException(403, "this API key can read, write documents, estimate, propose and run what a human already approved; approving, budgets, providers, keys and deleting need the page")
+            request.state.scope = "agent"
+            return
+        if given.startswith(pairing.DEVICE_PREFIX):
+            rec = pairing.verify_device(ws.root, given)
+            if not rec:
+                raise HTTPException(401, "missing, invalid, expired or revoked device token")
+            route = request.scope.get("route")
+            route_path = getattr(route, "path", "")
+            if not api_docs.device_allowed(request.method, route_path):
+                raise HTTPException(403, "device tokens are allowed only on bridge and proposal routes; approving, budgets, keys and settings require the web page")
+            request.state.scope = "device"
+            request.state.device = rec
+            return
+        raise HTTPException(401, "missing or wrong session token, API key, or device token")
+
+    def human_session(request):
+        if getattr(request.state, "scope", "") != "session":
+            raise HTTPException(403, "human session required")
 
     def guard(fn, *a, **kw):
         try:
@@ -1213,8 +1232,31 @@ def create_app(root=None, token=None, rates_path=None, transport=None, static_di
         return FileResponse(path, media_type="application/zip", filename=f"{name}-edit-bundle.zip",
                             background=BackgroundTask(Path(path).unlink, missing_ok=True))
 
+    @app.get("/api/projects/{name}/media", dependencies=[api])
+    def project_media(name: str, request: Request, approved: int = 1):
+        if getattr(request.state, "scope", "") not in ("session", "device"):
+            raise HTTPException(403, "media route requires human session or paired device token")
+        items = guard(ws.list_media, name, bool(approved))
+        return {"media": items}
+
+    @app.get("/api/projects/{name}/export/aftereffects.jsx", dependencies=[api])
+    def export_aftereffects(name: str, request: Request):
+        if getattr(request.state, "scope", "") not in ("session", "device"):
+            raise HTTPException(403, "export requires human session or paired device token")
+        body = guard(ws.export_ae_script, name)
+        return Response(body, media_type="application/javascript", headers={"content-disposition": f'attachment; filename="{name}.jsx"'})
+
+    @app.get("/api/projects/{name}/export/{fmt}", dependencies=[api])
+    def export_format(name: str, fmt: str, request: Request):
+        return edit_export_format(name, fmt, request)
+
     @app.get("/api/projects/{name}/edit/export/{fmt}", dependencies=[api])
-    def edit_export_format(name: str, fmt: str):
+    def edit_export_format(name: str, fmt: str, request: Request):
+        if getattr(request.state, "scope", "") not in ("session", "device"):
+            raise HTTPException(403, "export requires human session or paired device token")
+        if fmt in {"aftereffects.jsx", "aftereffects", "jsx"}:
+            body = guard(ws.export_ae_script, name)
+            return Response(body, media_type="application/javascript", headers={"content-disposition": f'attachment; filename="{name}.jsx"'})
         if fmt not in {"otio", "otioz", "xmeml", "fcpxml", "edl", "srt", "vtt", "bundle"}:
             raise HTTPException(404, "unknown export format")
         p, doc = guard(ws._storyboard._edit_for_export, name)
@@ -1438,6 +1480,40 @@ def create_app(root=None, token=None, rates_path=None, transport=None, static_di
         except apikeys.KeyError_ as e:
             raise HTTPException(404, str(e)) from None
         return {"ok": True}
+
+    @app.post("/api/pair/start", dependencies=[api])
+    def pair_start(request: Request):
+        human_session(request)
+        meta, _ = guard(pairing.start_pairing, ws.root, ws.secrets)
+        return {"id": meta["id"], "expires": meta["expires"], "message": "Pairing code sent to AI Studio notifications and terminal"}
+
+    @app.post("/api/pair/confirm")
+    async def pair_confirm(request: Request):
+        body = await request.json() if (await request.body()) else {}
+        try:
+            return pairing.confirm_pairing(
+                ws.root,
+                ws.secrets,
+                body.get("code"),
+                body.get("host"),
+                body.get("device_name"),
+            )
+        except pairing.PairingError as e:
+            raise HTTPException(400, str(e)) from None
+
+    @app.get("/api/pair/devices", dependencies=[api])
+    def pair_devices(request: Request):
+        human_session(request)
+        return {"devices": pairing.list_devices(ws.root)}
+
+    @app.delete("/api/pair/devices/{id}", dependencies=[api])
+    def pair_device_delete(id: str, request: Request):
+        human_session(request)
+        try:
+            pairing.revoke_device(ws.root, id)
+        except pairing.PairingError as e:
+            raise HTTPException(404, str(e)) from None
+        return {"ok": True, "revoked": id}
 
     @app.get("/api/integrations", dependencies=[api])
     def integrations(request: Request):

@@ -199,6 +199,9 @@ class Workspace(SettingsMixin):
     def export_project(self, name, include_discarded=False):
         return self._projects.export_project(name, include_discarded=include_discarded)
 
+    def list_media(self, name, approved=True):
+        return self._projects.list_media(name, approved=approved)
+
     def delete_project(self, name, confirm):
         return self._projects.delete_project(name, confirm)
 
@@ -364,6 +367,9 @@ class Workspace(SettingsMixin):
 
     def export_bundle(self, name):
         return self._storyboard.export_bundle(name)
+
+    def export_ae_script(self, name):
+        return self._storyboard.export_ae_script(name)
 
     def add_audio(self, name, filename, data):
         return self._storyboard.add_audio(name, filename, data)

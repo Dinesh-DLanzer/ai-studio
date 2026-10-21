@@ -65,23 +65,26 @@ A native Adobe Premiere Pro panel built on the Unified Extensible Platform (UXP 
 
 ## 4. Needed Server Routes
 
-The panel is designed to talk to the local AI Studio FastAPI server (`server/app.py`). While it currently implements backward-compatible fallbacks against existing endpoints (`/api/projects`, `/api/projects/{name}`, and `/files/{name}/{path}`), full operation according to **Plan 24 §3** requires the following server routes that do not yet exist in `server/app.py`:
+The panel communicates with the local AI Studio FastAPI server (`server/app.py`). The required server routes for NLE panel integration are implemented as follows:
 
 1. **`GET /api/projects/{name}/media?approved=1`**
-   - **Status:** *Missing in `server/app.py`*
-   - **Purpose:** Returns a curated, structured list of all approved media assets (clips, stills, voiceover, music) with shot IDs, timeline sequence ordering, aspect ratio, frame rate, and resolved local cache file paths.
-   - **Current Workaround:** Panel falls back to querying `GET /api/projects/{name}` and dynamically parsing `overview.shots` and `overview.files`.
+   - **Status:** **Implemented** in `server/app.py`.
+   - **Access:** Human session or paired device token.
+   - **Purpose:** Returns a curated, structured list of all approved media assets (clips, stills, audio) with shot IDs, sequence ordering, file sizes, SHA-256 hashes, and download paths.
+
 2. **`GET /api/projects/{name}/export/{fmt}`**
-   - **Status:** *Partially missing (`export-fcpxml` and `export-edl` exist under `/edit/`, but unified format route `/export/{fmt}` with `.otio` does not exist)*
-   - **Purpose:** Delivers timeline interchange files (`.otio` / `.xml`) for the sequence fallback path when `createSequenceFromMedia` is unavailable or fails.
-   - **Current Workaround:** Queries candidate URLs including `/api/projects/{name}/edit/export-fcpxml`.
+   - **Status:** **Implemented** in `server/app.py`.
+   - **Access:** Human session or paired device token.
+   - **Purpose:** Delivers timeline interchange files (`.otio`, `.otioz`, `.xmeml`, `.fcpxml`, `.edl`, `.srt`, `.vtt`, `.bundle`, and `aftereffects.jsx`) for sequence creation and fallbacks.
+
 3. **`POST /api/pair/start` & `POST /api/pair/confirm`**
-   - **Status:** *Missing in `server/app.py` (Planned in Plan 24 Checklist Item 1)*
-   - **Purpose:** Initiates 6-digit device pairing code generation and exchanges it for a scoped, human-session token with approval capabilities.
-   - **Current Workaround:** Manual API token entry.
+   - **Status:** **Implemented** in `server/app.py`.
+   - **Purpose:** Initiates 6-digit device pairing code generation (shown in notifications/stderr, never in API responses) and exchanges it for a scoped 30-day device token (`aisd_...`).
+   - **Scope:** Device tokens are allowed on bridge read routes and proposal creation (`POST clips/{id}/tool`, `POST proposals`). For security, approvals must be completed by a human in the AI Studio web interface.
+
 4. **`GET /api/jobs`**
-   - **Status:** *Missing in `server/app.py` (only `/api/jobs/{jid}` exists)*
-   - **Purpose:** Lists active background rendering jobs for the Jobs tab.
+   - **Status:** **Implemented** in `server/app.py`.
+   - **Purpose:** Lists active background rendering and export jobs for the Jobs tab.
 
 ---
 
