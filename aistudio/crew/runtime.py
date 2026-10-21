@@ -19,7 +19,7 @@ import secrets
 import time
 from pathlib import Path
 
-from aistudio import history, jobs, tool_registry
+from aistudio import approvals, history, jobs, tool_registry
 from aistudio.domain.common import ServiceError, _ident
 
 AUTONOMY = ("assist", "copilot")
@@ -137,7 +137,7 @@ def list_runs(ws, project):
     for f in sorted((ws.pdir(project) / "runs").glob("*.json"), reverse=True):
         try:
             r = json.loads(f.read_text(encoding="utf-8"))
-            out.append({k: r.get(k) for k in ("id", "agent", "task", "autonomy", "status", "started", "finished", "llm_usd")} | {"steps": len(r.get("steps", []))})
+            out.append({k: r.get(k) for k in ("id", "agent", "task", "autonomy", "status", "started", "finished", "llm_usd", "kind", "stages")} | {"steps": len(r.get("steps", []))})
         except ValueError:
             continue
     return sorted(out, key=lambda r: r.get("started") or 0, reverse=True)
@@ -254,10 +254,12 @@ def _act(ws, project, rec, allowed, step, action, autonomy):
             rec["suggested_changes"].append({"tool": tool, "args": args, "why": step["why"], "applied": False, "diff": ""})
             step.update(status="suggested", result="not applied (assist mode)")
             return "Assist mode: this proposal was recorded as a suggestion for the human and NOT created."
-        try:
-            prop = ws.propose(project, args["kind"], args["target"])      # reveal_code stays False: a human gets the code, never the agent
-        except ServiceError as e:
-            return fail("error", f"Could not propose: {e}")
+        prop = _open_proposal(ws.pdir(project), args["kind"], args["target"])      # running a stage twice must not pile up duplicates
+        if prop is None:
+            try:
+                prop = ws.propose(project, args["kind"], args["target"])      # reveal_code stays False: a human gets the code, never the agent
+            except ServiceError as e:
+                return fail("error", f"Could not propose: {e}")
         item = {k: prop.get(k) for k in ("id", "kind", "shot", "model", "price", "status", "hash")}
         rec["proposals"].append(item)
         step.update(status="proposed", result=_summary(item))
@@ -278,6 +280,21 @@ def _act(ws, project, rec, allowed, step, action, autonomy):
     return text
 
 
+def _open_proposal(p, kind, target):
+    """A still-pending, unexpired proposal for the same kind and target (reused instead of creating another)."""
+    now = time.time()
+    return next((x for x in approvals._load(p) if x["status"] == "pending" and x["kind"] == kind and x["shot"] == target and x["expires"] > now), None)
+
+
+def _open_batch(ws, project, pairs):
+    for b in ws.batches.list(project):
+        if b.get("status") == "awaiting_approval":
+            full = ws.batches.get(project, b["id"])
+            if {(i["kind"], i["target"]) for i in full["items"]} == pairs:
+                return full
+    return None
+
+
 def _suggest_diff(ws, project, tool, args):
     """A diff for the tools that replace one whole document; other writers just record the call."""
     p = ws.pdir(project)
@@ -295,7 +312,8 @@ def _finish(ws, project, rec, pre, p):
     rec["post_run"] = {c["doc"]: _sha(now[c["doc"]]) for c in rec["changes"]}     # undo touches only these, and only if still unedited
     if rec["autonomy"] == "copilot" and rec["proposals"]:
         try:
-            b = ws.batches.create(project, actor="crew", only={(x["kind"], x["shot"]) for x in rec["proposals"]})
+            pairs = {(x["kind"], x["shot"]) for x in rec["proposals"]}
+            b = _open_batch(ws, project, pairs) or ws.batches.create(project, actor="crew", only=pairs)
             rec["batch"] = {"id": b["id"], "total": b["total"], "status": b["status"], "note": "awaiting human approval; the crew cannot approve or run it"}
         except ServiceError as e:
             rec["batch"] = {"error": str(e)}

@@ -20,7 +20,7 @@ class TestCrewAgents(unittest.TestCase):
         a = agents.load("echo-writer", dirs=(FIX,))
         self.assertEqual((a["id"], a["engine"], a["limits"]["max_steps"], a["limits"]["max_llm_usd"]), ("echo-writer", "builtin", 6, 0.05))
         self.assertIn("propose", a["tools"])
-        self.assertEqual(agents.list_agents(dirs=(agents.BUILTIN_DIR,)), [])      # no personas ship yet
+        self.assertEqual(len(agents.list_agents(dirs=(agents.BUILTIN_DIR,))), 8)      # the stage-B crew ships (see test_crew_catalog)
 
     def test_unknown_and_forbidden_tools_are_errors(self):
         with self.assertRaises(agents.AgentError):
