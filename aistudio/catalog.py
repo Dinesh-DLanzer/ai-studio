@@ -64,7 +64,8 @@ class Catalog:
         if card is None and self.pricing:
             card = self.pricing.card(provider_id, ptype, model)
         out = default_profile(ptype, card)
-        for layer in (self.builtin(ptype, model), self.cached(provider_id, model), self.override(provider_id, model)):
+        user = self.override(provider_id, model)
+        for layer in (self.builtin(ptype, model), self.cached(provider_id, model), user and {**user, "source": "user"}):
             if layer:
                 out = _merge(out, layer)
         return out

@@ -1,0 +1,17 @@
+{
+  "owner": "acme", "name": "clipper",
+  "latest_version": {"openapi_schema": {"components": {"schemas": {
+    "duration": {"type": "integer", "enum": [5, 10]},
+    "aspect_ratio": {"type": "string", "enum": ["16:9", "9:16"]},
+    "Input": {"type": "object", "properties": {
+      "prompt": {"type": "string"},
+      "image": {"type": "string", "format": "uri"},
+      "end_image": {"type": "string", "format": "uri"},
+      "duration": {"allOf": [{"$ref": "#/components/schemas/duration"}], "default": 5},
+      "aspect_ratio": {"allOf": [{"$ref": "#/components/schemas/aspect_ratio"}]},
+      "reference_images": {"type": "array", "maxItems": 3, "items": {"type": "string"}},
+      "camera_motion": {"type": "string", "enum": ["pan_left", "zoom_in"]},
+      "seed": {"type": "integer"}
+    }}
+  }}}}
+}
