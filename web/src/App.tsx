@@ -28,6 +28,9 @@ const DiscardedTab = lazy(() => import("./pages/Discarded").then(({ DiscardedTab
 const CrewTab = lazy(() => import("./pages/Crew").then(({ CrewTab }) => ({ default: CrewTab })));
 const OverviewTab = lazy(() => import("./pages/Overview").then(({ OverviewTab }) => ({ default: OverviewTab })));
 const ReviewExport = lazy(() => import("./pages/ReviewExport"));
+const RecipesPage = lazy(() => import("./pages/Recipes"));
+const PublishPage = lazy(() => import("./pages/Publish"));
+const ReviewPage = lazy(() => import("./pages/Review"));
 const NotFound = lazy(() => import("./pages/NotFound"));
 
 function TokenGate({ onOk }: { onOk: () => void }) {
@@ -55,6 +58,9 @@ const Storyboard = () => <StoryTab {...useProject()} />;
 const Assets = () => <AssetsTab {...useProject()} />;
 const Shots = () => <ShotsTab {...useProject()} />;
 const Crew = () => <CrewTab {...useProject()} />;
+const Recipes = () => <RecipesPage {...useProject()} />;
+const Publish = () => <PublishPage {...useProject()} />;
+const Review = () => <ReviewPage {...useProject()} />;
 const Costs = () => <CostsTab {...useProject()} />;
 const Discarded = () => <DiscardedTab {...useProject()} />;
 function ChatPage() { const { name, load, openBudget, start, o, running } = useProject(); return <Chat project={name} reloadAll={load} onApplied={openBudget} openBudget={openBudget} start={start} running={running} refreshKey={o} />; }
@@ -102,7 +108,9 @@ export default function App() {
             <Route path="assets" element={<Assets />} />
             <Route path="shots" element={<Shots />} />
             <Route path="crew" element={<Crew />} />
-            <Route path="review" element={<ReviewExport />} />
+            <Route path="recipes" element={<Recipes />} />
+            <Route path="publish" element={<Publish />} />
+            <Route path="review" element={<Review />} />
             <Route path="costs" element={<Costs />} />
             <Route path="discarded" element={<Discarded />} />
             <Route path="*" element={<ProjectNotFound />} />
