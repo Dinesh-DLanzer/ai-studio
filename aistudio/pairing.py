@@ -124,6 +124,14 @@ def start_pairing(root, secrets_store, now=None):
 
 
 def confirm_pairing(root, secrets_store, code, host, device_name, now=None):
+    from aistudio import project_lock
+    lockdir = Path(root) / "settings"
+    lockdir.mkdir(parents=True, exist_ok=True)
+    with project_lock.lock(lockdir):      # read-check-mark-used must be one atomic step across processes (single-use code)
+        return _confirm_pairing(root, secrets_store, code, host, device_name, now)
+
+
+def _confirm_pairing(root, secrets_store, code, host, device_name, now=None):
     """Confirm a 6-digit pairing code and return a newly issued device token (once)."""
     now = time.time() if now is None else float(now)
     host = str(host or "").strip().lower()

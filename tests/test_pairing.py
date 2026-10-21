@@ -270,3 +270,57 @@ class TestPairingApi(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+@unittest.skipUnless(HAVE, "fastapi not installed")
+class TestAuthReviewFixes(unittest.TestCase):
+    def setUp(self):
+        self.root = tempfile.mkdtemp()
+        self.session_token = "s" * 32
+        os.environ["AISTUDIO_TOKEN"] = self.session_token
+        from aistudio.service import Workspace
+        Workspace(self.root).create_project("demo")
+        self.c = TestClient(create_app(self.root))
+        self.H = {"x-aistudio-token": self.session_token}
+
+    def tearDown(self):
+        os.environ.pop("AISTUDIO_TOKEN", None)
+
+    def _device_token(self):
+        cid = self.c.post("/api/pair/start", headers=self.H).json()["id"]
+        notifs = self.c.get("/api/approval-notifications", headers=self.H).json()["notifications"]
+        code = next(n["code"] for n in notifs if n["id"] == cid)
+        res = self.c.post("/api/pair/confirm", json={"code": code, "host": "premiere", "device_name": "t"})
+        return res.json()["device_token"]
+
+    def test_a_device_token_in_the_url_is_refused_even_with_an_unrelated_authorization_header(self):
+        tok = self._device_token()
+        self.assertEqual(self.c.get("/api/projects", headers={"x-aistudio-token": tok}).status_code, 200)
+        self.assertEqual(self.c.get("/api/projects", params={"token": tok}).status_code, 401)
+        self.assertEqual(self.c.get("/api/projects", params={"token": tok}, headers={"Authorization": "Basic eDp4"}).status_code, 401)
+
+    def test_pairing_confirm_is_single_use_across_threads(self):
+        import threading
+        secrets_store = SecretStore(self.root)
+        root = tempfile.mkdtemp()
+        _, code = pairing.start_pairing(root, secrets_store)
+        results = []
+
+        def go():
+            try:
+                results.append(pairing.confirm_pairing(root, secrets_store, code, "blender", "dev"))
+            except pairing.PairingError as e:
+                results.append(e)
+        ts = [threading.Thread(target=go) for _ in range(6)]
+        [t.start() for t in ts]
+        [t.join() for t in ts]
+        issued = [r for r in results if isinstance(r, dict)]
+        self.assertEqual(len(issued), 1, results)
+
+    def test_the_public_confirm_route_limits_request_volume(self):
+        codes = [self.c.post("/api/pair/confirm", json={"code": "000000", "host": "blender", "device_name": "x"}).status_code for _ in range(25)]
+        self.assertEqual(codes[-1], 429)
+
+    def test_review_package_route_is_wired(self):
+        res = self.c.post("/api/projects/demo/review-package", headers=self.H, json={})
+        self.assertNotEqual(res.status_code, 500)      # a missing import used to raise NameError here

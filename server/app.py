@@ -8,6 +8,7 @@ import contextlib
 import json
 import os
 import secrets
+import time
 import threading
 import uuid
 from pathlib import Path
@@ -18,7 +19,7 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from starlette.background import BackgroundTask
 from fastapi.staticfiles import StaticFiles
 
-from aistudio import activity as activitymod, apikeys, comments as commentsmod, editor as editormod, importzip as importmod, jobs as jobsmod, notifications, pairing
+from aistudio import activity as activitymod, apikeys, comments as commentsmod, editor as editormod, importzip as importmod, jobs as jobsmod, notifications, pairing, review_package as reviewmod
 from aistudio.service import REPO, ServiceError, Workspace
 from server import api_docs
 
@@ -163,6 +164,8 @@ def create_app(root=None, token=None, rates_path=None, transport=None, static_di
                 return JSONResponse({"error": "origin not allowed"}, status_code=403)
         return await call_next(request)
 
+    app.state.pair_attempts = []
+
     def given_token(request: Request):
         bearer = request.headers.get("authorization") or ""
         return request.headers.get("x-aistudio-token") or (bearer[7:].strip() if bearer.lower().startswith("bearer ") else "") or request.query_params.get("token") or ""
@@ -175,7 +178,9 @@ def create_app(root=None, token=None, rates_path=None, transport=None, static_di
         if secrets.compare_digest(given, token):
             request.state.scope = "session"
             return
-        from_url = not (request.headers.get("authorization") or request.headers.get("x-aistudio-token"))
+        bearer = request.headers.get("authorization") or ""
+        in_header = bool(request.headers.get("x-aistudio-token") or (bearer.lower().startswith("bearer ") and bearer[7:].strip()))
+        from_url = not in_header      # judged by where the token actually came from, not by whether some unrelated header exists
         if from_url and (given.startswith(apikeys.PREFIX) or given.startswith(pairing.DEVICE_PREFIX)):      # tokens in a URL leak through logs, history and referrers: headers only
             raise HTTPException(401, "send tokens in the Authorization or X-AIStudio-Token header, not in the URL")
         if given.startswith(apikeys.PREFIX):
@@ -1489,6 +1494,12 @@ def create_app(root=None, token=None, rates_path=None, transport=None, static_di
 
     @app.post("/api/pair/confirm")
     async def pair_confirm(request: Request):
+        now = time.monotonic()
+        recent = [x for x in app.state.pair_attempts if now - x < 60]
+        app.state.pair_attempts = recent
+        if len(recent) >= 20:      # public route: bound request volume so wrong guesses cannot lock every pending challenge in a loop
+            raise HTTPException(429, "too many pairing attempts; wait a minute")
+        app.state.pair_attempts.append(now)
         body = await request.json() if (await request.body()) else {}
         try:
             return pairing.confirm_pairing(
