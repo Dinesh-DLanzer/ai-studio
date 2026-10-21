@@ -4,6 +4,7 @@ import { api, fileUrl } from "../api";
 import { Button, Modal, PageHeader, Select, money } from "../ui";
 import { EmptyState } from "../components/kit";
 import { fmtDate, type TabProps } from "../ProjectPage";
+import { confirmDialog } from "../dialogs";
 
 export function DiscardedTab({ o, name, load }: TabProps) {
   const [msg, setMsg] = useState("");
@@ -12,11 +13,13 @@ export function DiscardedTab({ o, name, load }: TabProps) {
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [playing, setPlaying] = useState<string | null>(null);
 
-  const restore = async (rel: string) => {
+  const restore = async (rel: string, replace = false) => {
     try {
-      await api("POST", `/api/projects/${name}/restore`, { rel });
+      await api("POST", `/api/projects/${name}/restore`, { rel, ...(replace ? { replace: true } : {}) });
+      setMsg("");
       load();
     } catch (e: any) {
+      if (!replace && /already exists/.test(e.message) && await confirmDialog(`${e.message}\n\nThe file that is there now is moved to Discarded (nothing is deleted) and this version takes its place.`, { title: "Replace the current file?", ok: "Restore and replace" })) return restore(rel, true);
       setMsg(e.message);
     }
   };

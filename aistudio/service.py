@@ -242,8 +242,8 @@ class Workspace(SettingsMixin):
     def discard(self, name, rel, reason=""):
         return self._projects.discard(name, rel, reason=reason)
 
-    def restore(self, name, rel):
-        return self._projects.restore(name, rel)
+    def restore(self, name, rel, replace=False):
+        return self._projects.restore(name, rel, replace)
 
     def _rewrite_log(self, p, fn):
         return self._projects._rewrite_log(p, fn)

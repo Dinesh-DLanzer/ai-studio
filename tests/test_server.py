@@ -56,7 +56,9 @@ class TestServer(unittest.TestCase):
                 break
             time.sleep(0.05)
         self.assertEqual(r["status"], "done")
-        self.assertEqual(self.call("get", "/files/demo/stills/s01.png").status_code, 200)
+        shown = self.call("get", "/files/demo/stills/s01.png")
+        self.assertEqual(shown.status_code, 200)
+        self.assertEqual(shown.headers.get("cache-control"), "no-cache")      # a replaced image must not keep showing its old preview
         self.assertEqual(self.call("get", "/api/projects/demo").json()["costs"]["total"], 0.036)
 
     def test_file_serving_is_safe(self):

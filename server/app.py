@@ -890,7 +890,8 @@ def create_app(root=None, token=None, rates_path=None, transport=None, static_di
 
     @app.post("/api/projects/{name}/restore", dependencies=[api])
     async def restore(name: str, request: Request):
-        return {"file": guard(ws.restore, name, (await request.json()).get("rel", ""))}
+        b = await request.json()
+        return {"file": guard(ws.restore, name, b.get("rel", ""), bool(b.get("replace")))}
 
     @app.post("/api/projects/{name}/stills/{shot_id}/edit", dependencies=[api])
     async def still_edit(name: str, shot_id: str, request: Request):
@@ -1850,7 +1851,7 @@ def create_app(root=None, token=None, rates_path=None, transport=None, static_di
         if root not in target.parents or target.parent.name == "" or Path(path).parts[0] not in SERVE_DIRS \
                 or target.suffix.lower() not in ALLOWED_SUFFIX or not target.is_file():
             raise HTTPException(404, "not found")
-        return FileResponse(target)
+        return FileResponse(target, headers={"Cache-Control": "no-cache"})      # revalidate every time: a replaced file must not show its old preview
 
     static = Path(static_dir) if static_dir else REPO / "web" / "dist"
     if static.is_dir():

@@ -383,9 +383,9 @@ class ProjectDomain:
         self.ws._changed(name, "assets", "shots")
         return rec
 
-    def restore(self, name, rel):
+    def restore(self, name, rel, replace=False):
         try:
-            out = discard_mod.restore_file(self.ws.pdir(name), rel).relative_to(self.ws.pdir(name)).as_posix()
+            out = discard_mod.restore_file(self.ws.pdir(name), rel, replace=bool(replace)).relative_to(self.ws.pdir(name)).as_posix()
         except (ValueError, FileNotFoundError, FileExistsError) as e:
             raise ServiceError(str(e)) from None
         self.ws._changed(name, "assets", "shots")

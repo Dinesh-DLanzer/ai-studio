@@ -93,7 +93,9 @@ def discard_file(pdir, rel, reason="", cost=0.0):
     return rec
 
 
-def restore_file(pdir, rel_discarded):
+def restore_file(pdir, rel_discarded, replace=False):
+    """Bring a discarded file back. If a file already sits at its original path, refuse (nothing is overwritten) unless replace=True, which first
+    moves the current file to _discarded (restorable, with its reason) and then restores this one."""
     records = _load(pdir)
     idx = None
     for i, rec in enumerate(records):
@@ -111,7 +113,11 @@ def restore_file(pdir, rel_discarded):
         raise ValueError(f"unsafe original path in discarded.json: {rec['original']}")
     dst = pdir / orig
     if dst.exists():
-        raise FileExistsError(rec["original"])
+        if not replace:
+            raise FileExistsError(f"{rec['original']} already exists. Use Restore and replace to move the current file to Discarded and bring this one back.")
+        discard_file(pdir, rec["original"], "replaced by a restored version")
+        records = _load(pdir)
+        idx = next(i for i, r in enumerate(records) if r["file"] == str(rel_discarded))
     dst.parent.mkdir(parents=True, exist_ok=True)
     shutil.move(str(src), str(dst))
 

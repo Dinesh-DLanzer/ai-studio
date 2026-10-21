@@ -61,6 +61,22 @@ class TestDiscard(unittest.TestCase):
         with self.assertRaises(FileNotFoundError):
             D.restore_file(self.p, "clips/_discarded/zzz.mp4")
 
+    def test_restore_message_says_what_is_wrong_and_replace_swaps_the_files(self):
+        self.make(text="original")
+        D.discard_file(self.p, "clips/a.mp4", "replaced by an upload")
+        self.make(text="the replacement")
+        with self.assertRaisesRegex(FileExistsError, "already exists.*Restore and replace"):
+            D.restore_file(self.p, "clips/_discarded/a.mp4")
+        self.assertEqual((self.p / "clips/a.mp4").read_text(), "the replacement")        # nothing was overwritten by the refusal
+        D.restore_file(self.p, "clips/_discarded/a.mp4", replace=True)
+        self.assertEqual((self.p / "clips/a.mp4").read_text(), "original")
+        left = D.list_discarded(self.p)
+        self.assertEqual(len(left), 1)                                                       # the replacement is kept, restorable
+        self.assertEqual(left[0]["reason"], "replaced by a restored version")
+        self.assertEqual((self.p / left[0]["file"]).read_text(), "the replacement")
+        D.restore_file(self.p, left[0]["file"], replace=True)                                 # and it can be swapped back
+        self.assertEqual((self.p / "clips/a.mp4").read_text(), "the replacement")
+
     def test_list_empty(self):
         self.assertEqual(D.list_discarded(self.p), [])
 
