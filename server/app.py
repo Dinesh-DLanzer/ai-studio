@@ -78,12 +78,17 @@ def create_app(root=None, token=None, rates_path=None, transport=None, static_di
         return ws.batches.run(job["project"], job["target"], record)
 
     def run_crew_job(job, progress):
-        from aistudio.crew import agents as crew_agents, runtime as crew_runtime
+        from aistudio.crew import agents as crew_agents, runtime as crew_runtime, stages as crew_stages
         pl = job["payload"]
-        rec = crew_runtime.run(ws, job["project"], crew_agents.load(pl["agent"], ws.settings_dir), pl["task"], pl["autonomy"], run_id=job["id"], progress=progress)
+        if pl.get("continue"):          # a human's checkpoint decision: the stage run keeps its own record id
+            rec = crew_stages.continue_run(ws, job["project"], pl["continue"], pl["decision"], pl.get("note", ""), progress=progress)
+        elif pl.get("stages"):
+            rec = crew_stages.run_stages(ws, job["project"], pl["stages"], pl["autonomy"], pl.get("checkpoints"), run_id=job["id"], progress=progress)
+        else:
+            rec = crew_runtime.run(ws, job["project"], crew_agents.load(pl["agent"], ws.settings_dir), pl["task"], pl["autonomy"], run_id=job["id"], progress=progress)
         if rec["status"] == "error":
             raise ServiceError(rec["error"])
-        return {"run": rec["id"], "status": rec["status"], "steps": len(rec["steps"]), "llm_usd": rec["llm_usd"]}
+        return {"run": rec["id"], "status": rec["status"], "steps": len(rec.get("steps", rec.get("results", []))), "llm_usd": rec["llm_usd"]}
 
     handlers = {
         "crew_run": run_crew_job,
@@ -277,6 +282,85 @@ def create_app(root=None, token=None, rates_path=None, transport=None, static_di
         if not row or row["kind"] != "crew_run" or row["project"] != name:
             raise HTTPException(404, "unknown crew run")
         return jobsmod.cancel(ws.root, rid)
+
+    # ---- stage runs, the run plan and checkpoints (human session only: nothing here approves or spends; paid work stays a proposal)
+    def plan_args(src):
+        from aistudio.crew import stages as crew_stages
+        cps = src.get("checkpoints")
+        if isinstance(cps, str):
+            try:
+                cps = json.loads(cps) if cps else None
+            except ValueError:
+                raise HTTPException(400, "checkpoints must be JSON like {\"qa\": true}") from None
+        stages = src.get("stages") or "make_video"
+        if isinstance(stages, str):
+            stages = [s for s in stages.split(",") if s]
+        return stages, str(src.get("autonomy") or "copilot"), cps
+
+    @app.get("/api/projects/{name}/crew/plan", dependencies=[api])
+    def crew_plan_get(name: str, request: Request):
+        from aistudio.crew import stages as crew_stages
+        human_session(request)
+        stages, autonomy, cps = plan_args(dict(request.query_params))
+        return guard(crew_stages.build_run_plan, ws, name, stages, autonomy, cps)
+
+    @app.post("/api/projects/{name}/crew/plan", dependencies=[api])
+    async def crew_plan_post(name: str, request: Request):
+        from aistudio.crew import stages as crew_stages
+        human_session(request)
+        stages, autonomy, cps = plan_args(await request.json())
+        return guard(crew_stages.build_run_plan, ws, name, stages, autonomy, cps)
+
+    @app.post("/api/projects/{name}/crew/stages/{stage}/run", dependencies=[api])
+    async def crew_stage_run(name: str, stage: str, request: Request):
+        from aistudio.crew import stages as crew_stages
+        human_session(request)
+        b = await request.json()
+        _, autonomy, cps = plan_args({**b, "stages": stage})
+        plan = guard(crew_stages.build_run_plan, ws, name, stage, autonomy, cps)
+        if not b.get("plan_hash"):
+            raise HTTPException(400, "plan_hash is required: show the human the plan first (GET .../crew/plan) and send its plan_hash")
+        if b["plan_hash"] != plan["plan_hash"]:
+            raise HTTPException(409, "the plan changed since you reviewed it; review the new plan")
+        miss = crew_stages.prereqs(ws, name, crew_stages.expand(stage)[0])
+        if miss:
+            raise HTTPException(400, f"cannot run {stage}: " + "; ".join(miss))
+        res = start_job(request, name, "crew_run", payload={"stages": [stage] if stage != "make_video" else ["make_video"], "autonomy": autonomy, "checkpoints": cps})
+        return {**res, "run": res["job"], "plan": plan}
+
+    @app.post("/api/projects/{name}/crew/runs/{rid}/continue", dependencies=[api])
+    async def crew_run_continue(name: str, rid: str, request: Request):
+        from aistudio.crew import runtime as crew_runtime, stages as crew_stages
+        human_session(request)
+        b = await request.json()
+        decision = str(b.get("decision", ""))
+        rec = guard(crew_runtime.get_run, ws, name, rid)
+        if decision not in crew_stages.DECISIONS:
+            raise HTTPException(400, f"decision must be one of {list(crew_stages.DECISIONS)}")
+        if rec.get("kind") != "stage_run" or rec["status"] not in ("awaiting_checkpoint", "blocked"):
+            raise HTTPException(400, "only a stage run waiting at a checkpoint (or blocked) can continue")
+        if decision == "stop":
+            return guard(crew_stages.continue_run, ws, name, rid, "stop", str(b.get("note", "")))
+        res = start_job(request, name, "crew_run", payload={"continue": rid, "decision": decision, "note": str(b.get("note", ""))[:1000]})
+        return {**res, "run": rid}
+
+    # ---- Settings > Agents: prompt and limits only; tools can never be changed
+    @app.get("/api/agents", dependencies=[api])
+    def agents_list():
+        from aistudio.crew import agents as crew_agents
+        try:
+            return crew_agents.describe(ws.settings_dir)
+        except crew_agents.AgentError as e:
+            raise HTTPException(400, str(e)) from None
+
+    @app.put("/api/agents/{agent_id}", dependencies=[api])
+    async def agents_put(agent_id: str, request: Request):
+        from aistudio.crew import agents as crew_agents
+        human_session(request)
+        try:
+            return crew_agents.save_override(ws.settings_dir, agent_id, await request.json())
+        except crew_agents.AgentError as e:
+            raise HTTPException(400, str(e)) from None
 
     @app.get("/api/projects/{name}", dependencies=[api])
     def overview(name: str):
@@ -492,7 +576,19 @@ def create_app(root=None, token=None, rates_path=None, transport=None, static_di
 
     @app.post("/api/projects/{name}/chat", dependencies=[api])
     async def chat_send(name: str, request: Request):
+        from aistudio.crew import agents as crew_agents, stages as crew_stages
         b = await request.json()
+        mention = crew_stages.parse_mention(b.get("text", ""))
+        if mention:       # "@writer make shot 3 more emotional": a copilot crew run (free changes; paid work only proposed), never executed here
+            human_session(request)
+            guard(ws.pdir, name)
+            try:
+                crew_agents.load(mention[0], ws.settings_dir)
+            except crew_agents.AgentError as e:
+                raise HTTPException(400, str(e)) from None
+            res = start_job(request, name, "crew_run", payload={"agent": mention[0], "task": mention[1][:5000], "autonomy": "copilot"})
+            return {"routed_to": mention[0], "run": res["job"], "job": res["job"],
+                    "reply": f"@{mention[0]} is on it. Nothing paid runs: any paid work is only proposed for your approval."}
         return guard(ws.chat_send, name, b.get("text", ""), b.get("prefs"), b.get("attachments"))
 
     @app.get("/api/projects/{name}/brief", dependencies=[api])

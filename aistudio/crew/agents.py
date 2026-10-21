@@ -5,6 +5,7 @@ human_only tool, is an error - there is no way to allow-list one.  settings/agen
 (nothing else: a 'tools' key is an error), clamped to the hard limits below.
 """
 import json
+import os
 import re
 from pathlib import Path
 
@@ -136,3 +137,49 @@ def load(agent_id, settings_dir=None, dirs=None):
 
 def list_agents(settings_dir=None, dirs=None):
     return [load(f.stem, settings_dir, dirs) for d in (dirs or DIRS) if Path(d).is_dir() for f in sorted(Path(d).glob("*.md"))]
+
+
+# ---------------------------------------------------------------- Settings > Agents (settings/agents.json)
+def _overrides(settings_dir):
+    f = Path(settings_dir or "") / "agents.json"
+    if not settings_dir or not f.is_file():
+        return {}
+    try:
+        ov = json.loads(f.read_text(encoding="utf-8"))
+    except ValueError:
+        raise AgentError("settings/agents.json is not valid JSON") from None
+    if not isinstance(ov, dict):
+        raise AgentError("settings/agents.json must be an object")
+    return ov
+
+
+def describe(settings_dir=None, dirs=None):
+    """Every agent with its effective prompt and limits, which parts are overridden, and the hard caps.  Tools are shown, never editable."""
+    ov = _overrides(settings_dir)
+    return {"agents": [{**a, "overridden": sorted(ov.get(a["id"]) or {})} for a in list_agents(settings_dir, dirs)], "hard_limits": HARD}
+
+
+def save_override(settings_dir, agent_id, body, dirs=None):
+    """Store the prompt and/or limits override for one agent ({} resets it).  Validated like a definition: any other key (a 'tools' key
+    included) is an error and limits above the hard caps are refused.  Returns the effective agent."""
+    if not isinstance(agent_id, str) or not re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,63}", agent_id):
+        raise AgentError(f"invalid agent id: {agent_id!r}")
+    base = next((load_file(Path(d) / f"{agent_id}.md") for d in (dirs or DIRS) if (Path(d) / f"{agent_id}.md").is_file()), None)
+    if base is None:
+        raise AgentError(f"unknown agent '{agent_id}'")
+    if not isinstance(body, dict) or ("limits" in body and not isinstance(body["limits"], dict)):
+        raise AgentError("the override must be an object with prompt (text) and/or limits (an object)")
+    if isinstance(body.get("prompt"), str) and len(body["prompt"]) > 12000:
+        raise AgentError("the prompt override is limited to 12000 characters")
+    eff = apply_overrides(base, body)          # raises on any other key, a bad prompt, or limits above HARD
+    allov = _overrides(settings_dir)
+    if body:
+        allov[agent_id] = body
+    else:
+        allov.pop(agent_id, None)
+    f = Path(settings_dir) / "agents.json"
+    f.parent.mkdir(parents=True, exist_ok=True)
+    tmp = f.with_suffix(".tmp")
+    tmp.write_text(json.dumps(allov, indent=2, ensure_ascii=False), encoding="utf-8")
+    os.replace(tmp, f)
+    return eff
