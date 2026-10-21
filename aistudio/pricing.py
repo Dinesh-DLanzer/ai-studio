@@ -99,6 +99,9 @@ class Pricing:
         c = self.overrides.get(key(provider_id, model))
         if c:
             return c
+        # ComfyUI workflow models (wf:<id>) are always free
+        if model.startswith("wf:"):
+            return {"kind": "video", "per_second": {"720p": 0.0, "480p": 0.0}, "free": True}
         if ptype == "fake" and model in FAKE_CARDS:
             return FAKE_CARDS[model]
         if ptype == "openrouter":

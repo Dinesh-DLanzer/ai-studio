@@ -5,7 +5,7 @@ Fields: (method, path, agent, group, summary, body, returns).  agent=True: allow
 page's session token (a human): approvals, budget, providers, keys, limits, deleting.
 """
 GROUPS = ["Projects", "Story and documents", "Chat (producer)", "Assets and shots", "Budget, proposals and approvals", "Generation jobs", "Review and Export",
-          "Costs and verification", "Library", "Providers, models and limits", "Integrations", "Files and utility", "Settings"]
+          "Costs and verification", "Library", "Providers, models and limits", "Integrations", "Files and utility", "Settings", "ComfyUI workflows"]
 
 R = [
     ("GET", "/api/library", False, "Library", "Search the workspace generation library. Read-only; results can span projects.", "query parameters", '{"items": [...], "total"}'),
@@ -150,6 +150,12 @@ R = [
     ("POST", "/api/providers/{pid}/test", False, "Providers, models and limits", "Check that the key and connection work.", "-", '{"result": {ok, message}}'),
     ("GET", "/api/providers/{pid}/models", False, "Providers, models and limits", "Models a provider offers (live list or your own entries). ?refresh=1 re-reads.", "-", '{"models", "error"}'),
     ("POST", "/api/providers/{pid}/models", False, "Providers, models and limits", "Add a model by id when it is not listed.", '{"id": "vendor/model", "capability": "chat|vision|image|video"}', '{"models"}'),
+    # ---- ComfyUI workflows (plan 25)
+    ("GET", "/api/comfy/workflows", False, "ComfyUI workflows", "List registered ComfyUI workflow templates (human session only).", "-", '{"workflows": [{id, task, inputs, profile}]}'),
+    ("GET", "/api/comfy/workflows/{wf_id}", False, "ComfyUI workflows", "Get one workflow template with its full manifest and workflow JSON (human session only).", "-", 'workflow object (id, task, inputs, profile, workflow)'),
+    ("POST", "/api/comfy/workflows", False, "ComfyUI workflows", "Register a new ComfyUI workflow template from API JSON and manifest. Validates the mapping. Human session only.", '{"workflow": {...}, "manifest": {...}}', 'workflow object (id, task, inputs, profile)'),
+    ("POST", "/api/comfy/workflows/validate", False, "ComfyUI workflows", "Dry-run validation of a workflow and manifest without saving. Human session only.", '{"workflow": {...}, "manifest": {...}}', '{"ok": true, "id", "task", "inputs", "profile"}'),
+    ("DELETE", "/api/comfy/workflows/{wf_id}", False, "ComfyUI workflows", "Delete (move to trash) a registered workflow template. Human session only.", "-", '{"deleted": "id", "trash": "path"}'),
     ("GET", "/api/models", False, "Providers, models and limits", "Every known model across providers. ?capability= filters.", "-", '{"models", "errors"}'),
     ("PUT", "/api/prices/{pid}/{model}", False, "Providers, models and limits", "Set a price card for a model (per image or per second).", "price card", '{"price", "card"}'),
     ("DELETE", "/api/prices/{pid}/{model}", False, "Providers, models and limits", "Remove your price override.", "-", '{"ok": true}'),

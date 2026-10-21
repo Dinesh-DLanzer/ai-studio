@@ -476,6 +476,27 @@ class SettingsMixin:
             out.append(row)
         return {"role": role, "results": out}
 
+    # ---------------------------------------------------------------- ComfyUI workflows (plan 25)
+    def comfy_workflows_list(self):
+        from aistudio.comfy_workflows import list_workflows
+        return list_workflows(self.settings_dir)
+
+    def comfy_workflows_get(self, wf_id):
+        from aistudio.comfy_workflows import get_workflow
+        return get_workflow(self.settings_dir, wf_id)
+
+    def comfy_workflows_add(self, workflow_json, manifest_json):
+        from aistudio.comfy_workflows import add_workflow
+        return add_workflow(self.settings_dir, workflow_json, manifest_json)
+
+    def comfy_workflows_validate(self, workflow_json, manifest_json):
+        from aistudio.comfy_workflows import validate_workflow
+        return validate_workflow(self.settings_dir, workflow_json, manifest_json)
+
+    def comfy_workflows_delete(self, wf_id):
+        from aistudio.comfy_workflows import delete_workflow
+        return delete_workflow(self.settings_dir, wf_id)
+
     # ---------------------------------------------------------------- usage
     def usage_by_model(self, name):
         rows = costlog.read_log(self.pdir(name))
