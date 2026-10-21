@@ -11,6 +11,7 @@ unknown price is only allowed when "allow paid" is on and is logged as source "u
 Cost sources:  "reported" (the provider said so) > "computed" (usage x card) > "estimated" (card price for the request, no usage info).
 """
 import json
+from datetime import date
 from pathlib import Path
 
 from aistudio import rates as rates_mod
@@ -30,27 +31,45 @@ FAKE_CARDS = {
 }
 
 
+def _iso_date(v):
+    try:
+        return date.fromisoformat(v) if isinstance(v, str) and len(v) == 10 else None
+    except ValueError:
+        return None
+
+
 def validate_card(card):
-    """Returns a list of problems ([] = valid)."""
-    if not isinstance(card, dict) or card.get("kind") not in ("video", "image", "text"):
+    """Returns a list of problems ([] = valid). Optional on any card: minimum_seconds, per_reference_image, retrieved_at (ISO date), source."""
+    kinds = ("video", "image", "text", "audio", "utility")      # audio / utility: shape only, later plans add behaviour
+    if not isinstance(card, dict) or card.get("kind") not in kinds:
         return ["kind must be video, image or text"]
     num = lambda v: isinstance(v, (int, float)) and not isinstance(v, bool) and v >= 0
+    errs = [f"{f} must be a number >= 0" for f in ("minimum_seconds", "per_reference_image") if f in card and not num(card[f])]
+    if "retrieved_at" in card and not _iso_date(card["retrieved_at"]):
+        errs.append("retrieved_at must be an ISO date (YYYY-MM-DD)")
+    if "source" in card and not isinstance(card["source"], str):
+        errs.append("source must be text")
     k = card["kind"]
     if k == "image":
-        return [] if num(card.get("per_image")) else ["per_image must be a number >= 0"]
-    if k == "video":
+        errs += [] if num(card.get("per_image")) else ["per_image must be a number >= 0"]
+    elif k == "audio":
+        errs += [] if num(card.get("per_1k_chars")) or num(card.get("per_minute")) else ["audio needs per_1k_chars or per_minute (a number >= 0)"]
+    elif k == "utility":
+        errs += [] if num(card.get("per_run")) else ["per_run must be a number >= 0"]
+    elif k == "video":
         ps = card.get("per_second")
         if not isinstance(ps, dict) or not ps:
-            return ["per_second needs at least one resolution"]
-        for res, d in ps.items():
-            try:
-                rates_mod.rate_for({"models": {"m": {res: d}}}, "m", res, 4, True)
-            except (KeyError, ValueError, TypeError):
-                return [f"per_second for {res} is not a valid rate"]
-        return []
-    if card.get("free") is True or num(card.get("per_call")):
-        return []
-    return [] if num(card.get("input_per_1m")) and num(card.get("output_per_1m")) else ["text needs free, per_call, or input_per_1m and output_per_1m"]
+            errs.append("per_second needs at least one resolution")
+        else:
+            for res, d in ps.items():
+                try:
+                    rates_mod.rate_for({"models": {"m": {res: d}}}, "m", res, 4, True)
+                except (KeyError, ValueError, TypeError):
+                    errs.append(f"per_second for {res} is not a valid rate")
+                    break
+    elif not (card.get("free") is True or num(card.get("per_call")) or (num(card.get("input_per_1m")) and num(card.get("output_per_1m")))):
+        errs.append("text needs free, per_call, or input_per_1m and output_per_1m")
+    return errs
 
 
 class Pricing:
