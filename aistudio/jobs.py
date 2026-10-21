@@ -19,7 +19,7 @@ from aistudio.domain.common import ServiceError
 
 STATES = ("queued", "running", "provider_pending", "completed", "failed", "cancelled", "needs_sync")
 FINAL = ("completed", "failed", "cancelled", "needs_sync")
-FREE_KINDS = ("export",)            # local work with no provider cost: safe to run again after a restart
+FREE_KINDS = ("export", "previs")       # local work with no provider cost: safe to run again after a restart
 KEEP_DAYS = 30
 DEFAULT_CONCURRENCY = 2
 COLS = ("id", "tenant_id", "actor", "project", "kind", "target", "proposal_id", "batch_id", "state", "provider", "model", "provider_job",

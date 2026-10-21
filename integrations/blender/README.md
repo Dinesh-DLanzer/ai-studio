@@ -52,6 +52,8 @@ In Blender's **3D Viewport**, press <kbd>N</kbd> to toggle the sidebar, and clic
    - Keyframe or animate camera motion over the scene frame range (`frame_start` to `frame_end`).
    - Click **Send camera move**.
    - The extension samples `matrix_world`, focal length, and sensor dimensions frame-by-frame and POSTs the sample data to `/api/projects/{name}/shots/{shot}/camera-move`.
+   - The server classifies the move and answers with the proposed `direction`. **Nothing is saved yet**: a human applies it
+     with `POST /api/projects/{name}/shots/{shot}/direction` (or in the web UI), so a mis-read move never changes a shot.
 4. **Import Approved Clips:**
    - Click **Import approved clips**.
    - The extension downloads all completed and approved video clips (`clips/<shot>_final_*.mp4`) and arranges them consecutively on Channel 1 of the Blender Video Sequence Editor (VSE).
@@ -82,7 +84,7 @@ The following endpoints support blender integration:
    - **Purpose:** Supports `host: "blender"` for issuing 30-day paired device tokens.
 
 3. **`POST /api/projects/{name}/shots/{shot}/camera-move`**
-   - **Status:** Planned for camera motion classification.
+   - **Status:** **Implemented** in `server/app.py` (a human session **or a paired device token**; an API key is refused).
    - **Payload format:**
      ```json
      {
@@ -100,12 +102,40 @@ The following endpoints support blender integration:
            "sensor_width": 36.0,
            "sensor_height": 24.0
          }
-       ]
+       ],
+       "target": [0.0, 0.0, 0.0]
      }
      ```
-   - **Server behavior:** Forward the samples to `storyboard/camera_classify.py` to classify motion (e.g. dolly-in, orbit, pan, tilt, zoom) and update shot direction (`direction.movement`).
+     `samples` may also be a plain list of 4x4 matrices, and `lens_samples` a plain list of focal lengths in mm.
+     `target` (the point the camera orbits) is optional.
+   - **Limits:** at most 2000 samples, every number must be finite (NaN and infinity are refused), `fps` must be between 0 and 1000.
+   - **Server behavior:** the samples go to `storyboard/camera_classify.py`, which classifies the motion (e.g. dolly-in, orbit, pan, tilt, zoom).
+   - **Answer:** `{"shot": "s01", "classification": {"movement", "speed", "confidence", "evidence"}, "direction": {...}, "saved": false}`.
+     The classification and the proposed `direction` are **only a proposal**: nothing is written to the project.
 
-4. **`GET /api/projects/{name}/shots`**
+4. **`POST /api/projects/{name}/shots/{shot}/direction`**
+   - **Status:** **Implemented** in `server/app.py` (**human session only**: a device token may look, not write).
+   - **Payload format:** `{"direction": {"movement": "dolly-in", "speed": "normal"}, "replace": false}`.
+     The direction may also be sent as the body itself (`{"movement": "dolly-in"}`).
+   - **Server behavior:** validates the direction against the direction schema (movement, framing, angle, lens_mm, ...),
+     merges it into the shot's direction (or replaces it with `"replace": true`) and saves it through the validated
+     shots path, so the previous version stays in the document history. Unknown keys are kept.
+   - **Answer:** `{"shot": "s01", "direction": {...}}`.
+
+5. **`POST /api/projects/{name}/previs/render`**
+   - **Status:** **Implemented** in `server/app.py` (**human session only**).
+   - **Payload format:** `{"blend": "scenes/main.blend", "shots": ["s01", "s02"]}`.
+     The `.blend` file must be a path **inside the project** (no absolute paths, no `..`).
+   - **Server behavior:** runs headless Blender as a free local ledger job (`kind: "previs"`, no provider, no cost) and
+     writes the frames into the project's `previs/` folder.
+   - **Answer:** `{"job": "<id>"}`; poll `GET /api/jobs/{id}`.
+
+6. **`GET /api/projects/{name}/previs`**
+   - **Status:** **Implemented** in `server/app.py` (**human session only**).
+   - **Purpose:** lists the frames in `previs/` (`file`, `shot`, `bytes`, `registered`).
+     The frames are **not** registered as stills: a human still uploads them through the normal upload path.
+
+7. **`GET /api/projects/{name}/shots`**
    - **Status:** Recommended convenience route. Currently shots can be retrieved via `GET /api/projects/{name}` overview.
 
 ---
@@ -114,4 +144,7 @@ The following endpoints support blender integration:
 
 - **Headless test constraints:** Unit tests in `tests/test_blender_addon_package.py` execute in pure Python without requiring Blender or the `bpy` C-extension library.
 - **Live Blender Runtime:** Execution inside a live Blender GUI session (such as OpenGL/Eevee rendering and VSE timeline manipulation) requires a Blender installation and was not run in CI/headless unit tests.
-- **Camera Move Endpoint:** Since `POST /api/projects/{name}/shots/{shot}/camera-move` is not yet implemented on the server, end-to-end roundtrip classification was verified with mock responses.
+- **Previs rendering:** the server route is covered by `tests/test_blender_routes.py` with a mocked engine, so the real
+  `blender -b file.blend -P ...` round trip was not run here. Set the Blender path in `settings/blender.json`
+  (`{"binary": "/Applications/Blender.app/Contents/MacOS/Blender"}`) if it is not on the PATH.
+
