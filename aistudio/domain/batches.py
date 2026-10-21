@@ -104,11 +104,49 @@ class BatchDomain:
                                     if f.is_file() and f.relative_to(p).as_posix() not in excluded)
         return approvals.request_hash(kind, target, model, price, body)
 
+    def cleanup_abandoned(self, name, max_awaiting=10):
+        """Cap awaiting-approval batches and clean up abandoned rcp* recipe steps from shots.json and images.json."""
+        p = self.ws.pdir(name)
+        bdir = p / DIR
+        if not bdir.is_dir():
+            return
+        awaiting = []
+        for f in sorted(bdir.glob("*.json")):
+            try:
+                data = json.loads(f.read_text(encoding="utf-8"))
+                if isinstance(data, dict) and data.get("status") == "awaiting_approval":
+                    awaiting.append((f, data))
+            except Exception:
+                continue
+        if len(awaiting) > max_awaiting:
+            awaiting.sort(key=lambda x: x[1].get("created", 0))
+            to_prune = awaiting[:len(awaiting) - max_awaiting]
+            for f, b in to_prune:
+                runs = {it["recipe"]["run"] for it in b.get("items", []) if isinstance(it.get("recipe"), dict) and "run" in it["recipe"]}
+                if b.get("extra", {}).get("recipe", {}).get("run"):
+                    runs.add(b["extra"]["recipe"]["run"])
+                targets = {it["target"] for it in b.get("items", []) if str(it.get("target", "")).startswith("rcp")}
+                if runs or targets:
+                    shots_doc = self.ws._read(p, "shots.json")
+                    if shots_doc and "shots" in shots_doc:
+                        orig_len = len(shots_doc["shots"])
+                        shots_doc["shots"] = [s for s in shots_doc["shots"] if not (s.get("recipe") in runs or (s.get("id") in targets and not s.get("final_clip")))]
+                        if len(shots_doc["shots"]) != orig_len:
+                            self.ws.put_shots(name, shots_doc)
+                    images_doc = self.ws._read(p, "images.json")
+                    if images_doc and "images" in images_doc:
+                        orig_len = len(images_doc["images"])
+                        images_doc["images"] = [i for i in images_doc["images"] if not (i.get("recipe") in runs or (i.get("id") in targets and not (p / str(i.get("out", ""))).is_file()))]
+                        if len(images_doc["images"]) != orig_len:
+                            self.ws.put_images(name, images_doc)
+                f.unlink(missing_ok=True)
+
     # ---- lifecycle
     def create(self, name, actor="local", only=None, plan=None):
         """Freeze the current Generate-all plan (or just the (kind, target) pairs in `only`, used by crew runs, or an explicit `plan` of the
         same shape such as an identity sheet). Free: creates a file only; every item keeps its own price, hash, proposal and cost-log row."""
         p = self.ws.pdir(name)
+        self.cleanup_abandoned(name, max_awaiting=9)
         plan = plan or self.ws.generate_all_plan(name)
         if only is not None:
             plan["items"] = [it for it in plan["items"] if (it["kind"], it["target"]) in only]

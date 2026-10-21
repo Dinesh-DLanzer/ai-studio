@@ -1,7 +1,8 @@
 """Costs, pricing, budget estimation and job sync domain."""
-from datetime import datetime
+from datetime import datetime, timezone
 import hashlib
 import json
+import re
 
 from aistudio import budget as budget_mod, costlog, pricing as pricing_mod, project as project_mod, project_lock, roles as roles_mod
 from aistudio.domain import spec as spec_mod
@@ -106,7 +107,7 @@ class CostDomain:
             est = self._current_estimate(p, failure)
         except (KeyError, ValueError) as e:
             raise ServiceError(f"cannot estimate: {e}") from None
-        b = {**est, "approved": False, "created": datetime.now().isoformat(timespec="seconds"), **self.fingerprints(p), "plan": self.plan_snapshot(p)}
+        b = {**est, "approved": False, "created": datetime.now(timezone.utc).isoformat(timespec="seconds"), **self.fingerprints(p), "plan": self.plan_snapshot(p)}
         project_mod.save_json(p, "budget.json", b)
         return b
 
@@ -182,7 +183,29 @@ class CostDomain:
                 update = {"cost": new_cost, "cost_source": cost_source,
                           "result": "failed" if res["status"] == "failed" else "completed"}
                 if res["status"] == "done":
-                    (p / "clips" / f"{r['shot']}_final_a{r['attempt']}.mp4").write_bytes(res["bytes"])
+                    if r.get("stage") in spec_mod.AI_TOOLS:
+                        src = next((c for c in [*(p / "clips" / f"{r['shot']}{e}" for e in (".mp4", ".mov", ".webm")), p / r['shot']] if c.is_file()), p / "clips" / f"{r['shot']}.mp4")
+                        base = re.sub(r"\.v\d+$", "", src.stem)
+                        k = 1
+                        while src.with_name(f"{base}.v{k}{src.suffix}").exists():
+                            k += 1
+                        out = src.with_name(f"{base}.v{k}{src.suffix}")
+                        out.write_bytes(res["bytes"])
+                        source_sha = hashlib.sha256(src.read_bytes()).hexdigest() if src.is_file() else ""
+                        meta = {
+                            "kind": r["stage"],
+                            "target": r["shot"],
+                            "model": r.get("model", ""),
+                            "provider": r.get("provider", ""),
+                            "cost": new_cost,
+                            "actor": r.get("actor", ""),
+                            "created": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                            "source_sha": source_sha,
+                        }
+                        meta_path = out.with_name(out.name + ".meta.json")
+                        meta_path.write_text(json.dumps(meta, indent=2), encoding="utf-8")
+                    else:
+                        (p / "clips" / f"{r['shot']}_final_a{r['attempt']}.mp4").write_bytes(res["bytes"])
                 fixed.append(r["shot"])
                 updates.append((r.get("job_id"), r.get("shot"), r.get("stage"), r.get("attempt"), update))
         if updates:

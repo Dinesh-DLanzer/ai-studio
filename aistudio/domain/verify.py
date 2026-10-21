@@ -1,5 +1,5 @@
 """Verification, AI settings, model catalog, and background linting domain."""
-from datetime import datetime
+from datetime import datetime, timezone
 import uuid
 import json
 import os
@@ -113,7 +113,7 @@ class VerifyDomain:
                         project_lock.release(p, rid)
             if paid or res.get("cost"):
                 attempt = 1 + len([r for r in costlog.read_log(p) if r["stage"] == role])
-                costlog.append_log(p, {"timestamp": datetime.now().isoformat(timespec="seconds"), "shot": "_ai", "stage": role,
+                costlog.append_log(p, {"timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds"), "shot": "_ai", "stage": role,
                     "model": res["model"], "resolution": "", "seconds": "", "attempt": str(attempt), "job_id": "",
                     "cost": res.get("cost", 0), "result": "completed", "provider": res.get("provider", ""),
                     "cost_source": res.get("cost_source", ""), "actor": "local"})
@@ -163,7 +163,7 @@ class VerifyDomain:
         p = self.ws.pdir(name)
         art, rules, lang, brief, h = self._verify_inputs(p, scope)
         store = self.ws._read(p, "verify.json", {})
-        entry = {"hash": h, "when": datetime.now().isoformat(timespec="seconds"), "ai": None}
+        entry = {"hash": h, "when": datetime.now(timezone.utc).isoformat(timespec="seconds"), "ai": None}
         if ai:
             entry["ai"] = self._verify_ai(name, scope, art, brief, lang, rules)
         else:

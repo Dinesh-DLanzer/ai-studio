@@ -25,7 +25,7 @@ import shutil
 import subprocess
 import tempfile
 import zipfile
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from xml.sax.saxutils import escape as xml_escape
 
@@ -824,7 +824,7 @@ def render(pdir, edit, progress=None, options=None):
             raise EditError(f"cannot read the sound file {it['src']}")
     out_dir = pdir / "exports"
     out_dir.mkdir(exist_ok=True)
-    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
     final = out_dir / f"{pdir.name}_{stamp}.mp4"
     n = 2
     while final.exists():
@@ -1261,7 +1261,7 @@ def _summary(pdir, edit, files, probes):
             "subtitles": {"style": subs.get("style", "classic"), "cues": len(subs.get("cues", []))},
             "files": [{"src": src, "present": Path(f).is_file(), "duration": round((probes.get(src) or {}).get("duration") or 0, 3),
                        "audio": bool((probes.get(src) or {}).get("audio"))} for src, f in sorted(files.items())],
-            "created": datetime.now().isoformat(timespec="seconds")}
+            "created": datetime.now(timezone.utc).isoformat(timespec="seconds")}
 
 
 def export_bundle(pdir, edit, files):

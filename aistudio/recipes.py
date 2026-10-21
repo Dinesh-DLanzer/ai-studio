@@ -382,6 +382,23 @@ def plan(ws, name, recipe_id, inputs, actor="local"):
     run = secrets.token_hex(4)
     shots_doc = ws._read(p, "shots.json", {"aspect_ratio": "9:16", "final_resolution": "720p", "shots": []})
     images_doc = ws._read(p, "images.json", {"style": "", "images": []})
+    # Clean up previous unexecuted/abandoned rcp* steps from shots.json and images.json
+    active_runs = set()
+    bdir = p / "batches"
+    if bdir.is_dir():
+        for bf in bdir.glob("*.json"):
+            try:
+                bdata = json.loads(bf.read_text(encoding="utf-8"))
+                if bdata.get("status") in ("approved", "running", "completed"):
+                    if bdata.get("extra", {}).get("recipe", {}).get("run"):
+                        active_runs.add(bdata["extra"]["recipe"]["run"])
+                    for it in bdata.get("items", []):
+                        if isinstance(it.get("recipe"), dict) and "run" in it["recipe"]:
+                            active_runs.add(it["recipe"]["run"])
+            except Exception:
+                pass
+    shots_doc["shots"] = [s for s in shots_doc.get("shots", []) if not (str(s.get("id", "")).startswith("rcp") and s.get("recipe") not in active_runs and not s.get("final_clip"))]
+    images_doc["images"] = [i for i in images_doc.get("images", []) if not (str(i.get("id", "")).startswith("rcp") and i.get("recipe") not in active_runs and not (p / str(i.get("out", ""))).is_file())]
     old = (json.loads(json.dumps(shots_doc)), json.loads(json.dumps(images_doc)))
     aspect = _aspect(recipe, shots_doc)
     shots_doc["aspect_ratio"] = aspect
