@@ -219,3 +219,33 @@ class TestEntryPoints(Base):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestBilledSecondsCannotBeUnderstated(unittest.TestCase):
+    def setUp(self):
+        import shutil
+        import subprocess
+        if not shutil.which("ffmpeg"):
+            self.skipTest("ffmpeg missing")
+        from pathlib import Path
+        self.p = Path(tempfile.mkdtemp())
+        (self.p / "clips").mkdir()
+        subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-f", "lavfi", "-i", "color=c=black:s=64x64:d=6", "-pix_fmt", "yuv420p",
+                        str(self.p / "clips" / "real.mp4")], check=True)
+        (self.p / "clips" / "fake.mp4").write_bytes(b"not real media")
+
+    def test_real_length_is_billed_and_a_smaller_caller_value_is_refused(self):
+        from aistudio.domain.spec import clip_seconds
+        from aistudio.service import ServiceError
+        real = {"ptype": "runway"}
+        self.assertEqual(clip_seconds(self.p, {"source": "clips/real.mp4"}, real), 6)
+        self.assertEqual(clip_seconds(self.p, {"source": "clips/real.mp4", "seconds": 9}, real), 6)      # the provider bills the clip, not the claim
+        with self.assertRaisesRegex(ServiceError, "shorter than the clip"):
+            clip_seconds(self.p, {"source": "clips/real.mp4", "seconds": 1}, real)
+
+    def test_unreadable_media_is_refused_for_real_providers_but_fake_keeps_the_callers_number(self):
+        from aistudio.domain.spec import clip_seconds
+        from aistudio.service import ServiceError
+        with self.assertRaisesRegex(ServiceError, "cannot read the clip length"):
+            clip_seconds(self.p, {"source": "clips/fake.mp4", "seconds": 1}, {"ptype": "runway"})
+        self.assertEqual(clip_seconds(self.p, {"source": "clips/fake.mp4", "seconds": 4}, {"ptype": "fake"}), 4)

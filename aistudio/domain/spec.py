@@ -133,20 +133,25 @@ def _snap(profile, seconds, warnings):
     return best
 
 
-def clip_seconds(p, options):
-    """Billed seconds of a clip tool: the caller's `seconds`, else the source clip's length from ffprobe (rounded up). Never guessed."""
-    options = options or {}
-    if options.get("seconds") not in (None, ""):
-        n = options["seconds"]
-        if isinstance(n, bool) or not isinstance(n, int) or not 1 <= n <= 300:
-            raise ServiceError("seconds must be a whole number from 1 to 300")
-        return n
+def clip_seconds(p, options, entry=None):
+    """Billed seconds of a clip tool: the REAL clip length from ffprobe (rounded up), never a caller's smaller number.
+    A caller `seconds` below the real length is refused (it would understate the quote); above it is ignored (the provider bills the clip).
+    Only the built-in fake provider, which works on placeholder files that are not real media, may take the caller's number."""
     from math import ceil
     from aistudio import editor
+    options = options or {}
+    asked = options.get("seconds")
+    if asked not in (None, "") and (isinstance(asked, bool) or not isinstance(asked, int) or not 1 <= asked <= 300):
+        raise ServiceError("seconds must be a whole number from 1 to 300")
     info = options.get("source") and editor.probe(p / str(options["source"]))
-    if not info or not info.get("duration"):
-        raise ServiceError("cannot read the clip length (ffprobe missing or unreadable file); pass seconds")
-    return max(1, ceil(info["duration"]))
+    real = max(1, ceil(info["duration"])) if info and info.get("duration") else None
+    if real is None:
+        if entry is not None and entry.get("ptype") == "fake" and asked not in (None, ""):
+            return asked
+        raise ServiceError("cannot read the clip length (ffprobe missing or unreadable file), so the price cannot be quoted")
+    if asked not in (None, "") and asked < real:
+        raise ServiceError(f"seconds ({asked}) is shorter than the clip ({real}s): the provider bills the whole clip")
+    return real
 
 
 def resolve(ws, p, kind, target, options=None, loose=False):
@@ -179,7 +184,7 @@ def resolve(ws, p, kind, target, options=None, loose=False):
     if kind in AI_TOOLS:
         task = AI_TOOLS[kind]
         entry, _ = select_entry(ws, p, role, None, {"task": task}, kind.replace("_", " "))
-        seconds = clip_seconds(p, options)
+        seconds = clip_seconds(p, options, entry)
         price = ws.pricing().task_price(entry["card"], seconds, "720p")
         if price is None:
             raise ServiceError(f"No price for {entry['model']} ({task.replace('_', ' ')}, {seconds}s). Set it in Settings > Model Configuration.")

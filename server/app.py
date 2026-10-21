@@ -543,7 +543,8 @@ def create_app(root=None, token=None, rates_path=None, transport=None, static_di
 
     @app.post("/api/projects/{name}/consent/mark", dependencies=[api])
     async def consent_mark(name: str, request: Request):
-        b = await request.json()      # agent=False in api_docs: only the human session can mark (or an agent could never be stopped from unmarking)
+        human_session(request)      # also agent=False in api_docs: only the human session can mark
+        b = await request.json()
         return guard(ws.consent_mark, name, b.get("asset_id"))
 
     @app.post("/api/projects/{name}/character/analyze", dependencies=[api])
