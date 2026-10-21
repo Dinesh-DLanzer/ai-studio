@@ -15,6 +15,7 @@ from aistudio.domain import spec as spec_mod
 from aistudio.domain.common import REVIEW_PRICE, ServiceError, _ident, _sha
 from aistudio.providers import base as pbase
 from aistudio import character_check, consent as consent_mod
+from aistudio.context import get_context
 from aistudio.vision import clip_checklist, image_checklist
 
 
@@ -432,7 +433,8 @@ class PipelineDomain:
             sp = spec_mod.resolve(self.ws, p, kind, target)
             summary.update(profile=sp.profile, warnings=sp.warnings, end_frame=sp.end_frame or None,
                            price_breakdown=self.ws.pricing().breakdown(sp.entry["card"], sp.seconds, sp.resolution, sp.audio, len(sp.refs)))
-        return approvals.propose(p, kind, target, model, price, payload, reveal_code=reveal_code, summary=summary, options=options)
+        return approvals.propose(p, kind, target, model, price, payload, reveal_code=reveal_code, summary=summary,
+                                 actor=get_context().actor, options=options)
 
     def voiceover_plan(self, name, voice=None, actor="local"):
         """Freeze one TTS request for each voiced shot into an awaiting-approval batch."""

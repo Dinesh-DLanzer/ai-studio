@@ -13,6 +13,13 @@ from . import costlog, store
 MEDIA = {"stills": "image", "clips": "clip", "audio": "audio"}
 
 
+def _identity(data):
+    parts = [data["project"], data["file"], data["sha"]]
+    if data["tenant_id"] != "local" or data["actor"] != "local":
+        parts = [data["tenant_id"], data["actor"], *parts]
+    return hashlib.sha256("\0".join(parts).encode()).hexdigest()[:32]
+
+
 def _ensure_fts(root):
     try:
         store.execute(root, "CREATE VIRTUAL TABLE IF NOT EXISTS items_fts USING fts5(id UNINDEXED, prompt, project, model)")
@@ -48,9 +55,9 @@ def _safe_rel(pdir, rel):
 
 
 def _upsert(root, data):
-    data = {"tenant_id": "local", "actor": "local", "favorite": 0, "params": "{}", "meta": "{}", **data}
+    data = {"tenant_id": store.current_tenant(), "actor": store.current_actor(), "favorite": 0, "params": "{}", "meta": "{}", **data}
     # Stable identity lets rebuilds retain favorites; changed bytes produce a new version.
-    ident = hashlib.sha256((data["project"] + "\0" + data["file"] + "\0" + data["sha"]).encode()).hexdigest()[:32]
+    ident = _identity(data)
     data["id"] = ident
     store.execute(root, """INSERT INTO items (id,tenant_id,actor,project,kind,category,file,sha,prompt,model,provider,seed,params,cost,status,favorite,created,meta)
         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(tenant_id,actor,project,file,sha) DO UPDATE SET
@@ -67,8 +74,8 @@ def _upsert(root, data):
 def _upsert_many(root, items):
     ready = []
     for data in items:
-        data = {"tenant_id": "local", "actor": "local", "favorite": 0, "params": "{}", "meta": "{}", **data}
-        data["id"] = hashlib.sha256((data["project"] + "\0" + data["file"] + "\0" + data["sha"]).encode()).hexdigest()[:32]
+        data = {"tenant_id": store.current_tenant(), "actor": store.current_actor(), "favorite": 0, "params": "{}", "meta": "{}", **data}
+        data["id"] = _identity(data)
         ready.append(data)
     if not ready: return []
     sql = """INSERT INTO items (id,tenant_id,actor,project,kind,category,file,sha,prompt,model,provider,seed,params,cost,status,favorite,created,meta)
@@ -83,7 +90,7 @@ def _upsert_many(root, items):
             tx.execute("DELETE FROM items_fts")
             for d in ready: tx.execute("INSERT INTO items_fts (id,prompt,project,model) VALUES (?,?,?,?)", (d["id"], d["prompt"], d["project"], d["model"]))
     ids = [d["id"] for d in ready]
-    found = {r["id"]: r for r in store.query(root, "SELECT * FROM items WHERE id IN (" + ",".join("?" for _ in ids) + ")", ids)}
+    found = {r["id"]: r for r in store.query(root, "SELECT * FROM items WHERE tenant_id=? AND id IN (" + ",".join("?" for _ in ids) + ")", (store.current_tenant(), *ids))}
     return [found[i] for i in ids if i in found]
 
 
@@ -198,7 +205,7 @@ def _matches(row, filters):
 
 def search(root, q="", filters=None, limit=50, offset=0):
     filters = filters or {}
-    allrows = store.query(root, "SELECT * FROM items ORDER BY created DESC")
+    allrows = store.query(root, "SELECT * FROM items WHERE tenant_id=? ORDER BY created DESC", (store.current_tenant(),))
     query = str(q or "").lower()
     fts = _ensure_fts(root) if query else False
     ids = set()
@@ -210,17 +217,17 @@ def search(root, q="", filters=None, limit=50, offset=0):
 
 
 def get(root, ident):
-    rows = store.query(root, "SELECT * FROM items WHERE id=?", (str(ident),))
+    rows = store.query(root, "SELECT * FROM items WHERE id=? AND tenant_id=?", (str(ident), store.current_tenant()))
     return rows[0] if rows else None
 
 
 def set_favorite(root, ident, on):
-    store.execute(root, "UPDATE items SET favorite=? WHERE id=?", (int(bool(on)), str(ident)))
+    store.execute(root, "UPDATE items SET favorite=? WHERE id=? AND tenant_id=?", (int(bool(on)), str(ident), store.current_tenant()))
     return get(root, ident)
 
 
 def stats(root):
-    rows = store.query(root, "SELECT COUNT(*) AS count, COALESCE(SUM(cost),0) AS cost FROM items")
+    rows = store.query(root, "SELECT COUNT(*) AS count, COALESCE(SUM(cost),0) AS cost FROM items WHERE tenant_id=?", (store.current_tenant(),))
     return rows[0]
 
 
