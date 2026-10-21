@@ -196,7 +196,47 @@ def load_json(pdir, filename):
 
 def save_json(pdir, filename, data):
     path = Path(pdir) / filename
-    path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+    content = json.dumps(data, indent=2, ensure_ascii=False).encode("utf-8")
+    tracked = filename in {"shots.json", "images.json", "edit.json", "brief.json", "todos.json", "Story.md"}
+    if not tracked:
+        path.write_bytes(content)
+        return
+    previous = path.read_bytes() if tracked and path.is_file() else None
+    tmp = path.with_name(path.name + ".tmp")
+    try:
+        tmp.write_bytes(content)
+        tmp.replace(path)
+    except Exception:
+        try:
+            tmp.unlink()
+        except FileNotFoundError:
+            pass
+        raise
+    if previous is not None and previous != content:
+        from aistudio.history import record_previous
+        record_previous(pdir, filename, previous, content)
+
+
+def save_text(pdir, filename, text):
+    """Atomically save a tracked UTF-8 text document with prior-version history."""
+    if filename != "Story.md":
+        raise ValueError(f"unsupported text document: {filename}")
+    path = Path(pdir) / filename
+    content = str(text).encode("utf-8")
+    previous = path.read_bytes() if path.is_file() else None
+    tmp = path.with_name(path.name + ".tmp")
+    try:
+        tmp.write_bytes(content)
+        tmp.replace(path)
+    except Exception:
+        try:
+            tmp.unlink()
+        except FileNotFoundError:
+            pass
+        raise
+    if previous is not None and previous != content:
+        from aistudio.history import record_previous
+        record_previous(pdir, filename, previous, content)
 
 
 def validate_shots(data):

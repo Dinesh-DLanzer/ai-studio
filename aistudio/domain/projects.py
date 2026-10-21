@@ -16,6 +16,7 @@ from aistudio import (
     trash as trash_mod,
 )
 from aistudio.domain.common import DOC_FILES, ID_RE, MD_MARK, REPO, ServiceError, _ident
+from aistudio.schemas import load_doc
 
 
 class ProjectDomain:
@@ -134,7 +135,10 @@ class ProjectDomain:
             self.ws._apply_todo_md(name, text)
             self._sync_md(name, fn)
             return
-        (self.ws.pdir(name) / fn).write_text(text, encoding="utf-8")
+        if fn == "Story.md":
+            project_mod.save_text(self.ws.pdir(name), fn, text)
+        else:
+            (self.ws.pdir(name) / fn).write_text(text, encoding="utf-8")
         if fn == "Story.md":
             self.ws._changed(name, "story")
 
@@ -181,7 +185,7 @@ class ProjectDomain:
         values = {**self.ws._read(p, "brief.json", {}), **clean}
         for k in emptied:
             values.pop(k, None)
-        project_mod.save_json(p, "brief.json", values)
+        project_mod.save_json(p, "brief.json", load_doc("brief", values))
         self._sync_md(name, "brief.md")
         if "language" in clean and (p / "shots.json").exists():
             doc = self.ws._read(p, "shots.json", {"shots": []})

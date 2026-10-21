@@ -74,7 +74,7 @@ def zip_project(pdir, include_discarded=False):
     with zipfile.ZipFile(fd.name, "w", zipfile.ZIP_DEFLATED) as z:
         for f in sorted(pdir.rglob("*")):
             rel = f.relative_to(pdir)
-            if f.is_symlink() or not f.is_file() or (not include_discarded and "_discarded" in rel.parts):
+            if f.is_symlink() or not f.is_file() or ".history" in rel.parts or (not include_discarded and "_discarded" in rel.parts):
                 continue
             z.write(f, Path(pdir.name) / rel)
     return Path(fd.name)

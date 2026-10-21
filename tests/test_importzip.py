@@ -146,6 +146,11 @@ class TestImport(unittest.TestCase):
         z = build(good(), extra=[("__MACOSX/demo/._a", "x"), ("demo/.DS_Store", "x")])
         self.assertEqual(self.ws.import_project(z, None, "x.zip")["name"], "demo")
 
+    def test_history_directory_is_ignored(self):
+        z = build(good(), extra=[("demo/.history/brief.json/20261021T120000000Z.json", '{"old":true}')])
+        self.ws.import_project(z, None, "x.zip")
+        self.assertFalse((self.ws.pdir("demo") / ".history").exists())
+
 
 @unittest.skipUnless(HAVE, "needs the venv with fastapi + httpx")
 class TestRoute(unittest.TestCase):

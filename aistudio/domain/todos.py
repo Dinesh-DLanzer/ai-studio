@@ -4,6 +4,7 @@ import re
 
 from aistudio import chat as chat_mod, project as project_mod
 from aistudio.domain.common import MD_MARK, ServiceError
+from aistudio.schemas import load_doc
 
 
 class TodoDomain:
@@ -18,8 +19,14 @@ class TodoDomain:
                 {"id": "assets", "title": "Gather logo, colours and font for the editor", "done": False},
                 {"id": "edit", "title": "Edit: trim, on-screen text, end card, music, AI label", "done": False},
             ]
-            project_mod.save_json(p, "todos.json", t)
-        return t
+            self._save_todos(p, t)
+        return t.get("manual", []) if isinstance(t, dict) else t
+
+    def _save_todos(self, p, items):
+        current = self.ws._read(p, "todos.json")
+        doc = dict(current) if isinstance(current, dict) else {}
+        doc["manual"] = items
+        project_mod.save_json(p, "todos.json", load_doc("todos", doc))
 
     def todos(self, name):
         p = self.ws.pdir(name)
@@ -46,7 +53,7 @@ class TodoDomain:
             raise ServiceError("empty task")
         t = self._todo_store(p)
         t.append({"id": "t" + hashlib.sha1((title + str(len(t))).encode()).hexdigest()[:8], "title": title, "done": False})
-        project_mod.save_json(p, "todos.json", t)
+        self._save_todos(p, t)
         self.ws._changed(name, "todos")
         self.ws._sync_md(name, "TODO.md")
         return self.todos(name)
@@ -56,14 +63,14 @@ class TodoDomain:
         t = self._todo_store(p)
         item = next((x for x in t if x["id"] == tid), None) or (_ for _ in ()).throw(ServiceError("unknown task"))
         item["done"] = not item["done"]
-        project_mod.save_json(p, "todos.json", t)
+        self._save_todos(p, t)
         self.ws._changed(name, "todos")
         self.ws._sync_md(name, "TODO.md")
         return self.todos(name)
 
     def todo_remove(self, name, tid):
         p = self.ws.pdir(name)
-        project_mod.save_json(p, "todos.json", [x for x in self._todo_store(p) if x["id"] != tid])
+        self._save_todos(p, [x for x in self._todo_store(p) if x["id"] != tid])
         self.ws._changed(name, "todos")
         self.ws._sync_md(name, "TODO.md")
         return self.todos(name)
@@ -97,6 +104,9 @@ class TodoDomain:
                 continue
             seen.add(title)
             prev = by_title.get(title)
-            out.append({"id": prev["id"] if prev else "t" + hashlib.sha1((title + str(len(out))).encode()).hexdigest()[:8], "title": title, "done": m.group(1) != " "})
-        project_mod.save_json(p, "todos.json", out)
+            item = dict(prev) if prev else {}
+            item.update({"id": prev["id"] if prev else "t" + hashlib.sha1((title + str(len(out))).encode()).hexdigest()[:8],
+                         "title": title, "done": m.group(1) != " "})
+            out.append(item)
+        self._save_todos(p, out)
         self.ws._changed(name, "todos")
