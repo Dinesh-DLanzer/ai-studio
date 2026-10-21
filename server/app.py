@@ -459,6 +459,35 @@ def create_app(root=None, token=None, rates_path=None, transport=None, static_di
         guard(ws.add_file, name, rel, data, bool(replace))
         return {"ok": True}
 
+    @app.post("/api/projects/{name}/characters/{aid}/identity-sheet", dependencies=[api])
+    async def identity_sheet(name: str, aid: str, request: Request):
+        b = await request.json() if (await request.body()) else {}
+        return guard(ws.identity_sheet, name, aid, b.get("views"), "api-key" if getattr(request.state, "scope", "session") == "agent" else "local")
+
+    @app.post("/api/projects/{name}/variants", dependencies=[api])
+    async def propose_variants(name: str, request: Request):
+        b = await request.json()
+        return guard(ws.propose_variants, name, b.get("kind"), b.get("target"), b.get("count"), "api-key" if getattr(request.state, "scope", "session") == "agent" else "local")
+
+    @app.post("/api/projects/{name}/variants/select", dependencies=[api])
+    async def select_version(name: str, request: Request):
+        b = await request.json()
+        return guard(ws.select_version, name, b.get("kind"), b.get("target"), b.get("version"))
+
+    @app.post("/api/projects/{name}/drift-check", dependencies=[api])
+    async def drift_check(name: str, request: Request):
+        b = await request.json()
+        return guard(ws.drift_check, name, b.get("target"))
+
+    @app.get("/api/projects/{name}/consent", dependencies=[api])
+    def consent_list(name: str):
+        return {"consent": guard(ws.consent_list, name)}
+
+    @app.post("/api/projects/{name}/consent", dependencies=[api])
+    async def consent_record(name: str, request: Request):
+        b = await request.json()      # agent=False in api_docs: an API key never reaches here
+        return guard(ws.consent_record, name, b.get("subject"), b.get("statement"), b.get("kind", "real_person"))
+
     @app.post("/api/projects/{name}/character/analyze", dependencies=[api])
     async def analyze_character(name: str, request: Request):
         b = await request.json() if (await request.body()) else {}

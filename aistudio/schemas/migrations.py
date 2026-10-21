@@ -2,7 +2,7 @@
 from copy import deepcopy
 
 
-CURRENT = {"shots": 2, "images": 1, "edit": 1, "brief": 1, "todos": 1}
+CURRENT = {"shots": 2, "images": 2, "edit": 1, "brief": 1, "todos": 1}
 
 
 def migrate(kind, doc):
@@ -22,5 +22,8 @@ def migrate(kind, doc):
         version = 1
     if kind == "shots" and version == 1:
         # v2 adds optional direction, end-frame and keyframe fields; identity migration.
+        result["schema_version"] = 2
+    if kind == "images" and version == 1:
+        # v2 adds optional character views/role/consent; identity migration.
         result["schema_version"] = 2
     return result

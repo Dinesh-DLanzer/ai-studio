@@ -87,7 +87,7 @@ def create_project(root, name, format=None, brand_kit=None, kit_root=None):
     )
     
     (project_path / "images.json").write_text(
-        json.dumps({"schema_version": 1, "style": "", "images": []}, indent=2, ensure_ascii=False),
+        json.dumps({"schema_version": 2, "style": "", "images": []}, indent=2, ensure_ascii=False),
         encoding="utf-8"
     )
     
@@ -289,6 +289,9 @@ def validate_shots(data):
     return errors
 
 
+VIEWS = ("front", "three-quarter", "profile", "full-body", "expression")
+
+
 def validate_images(data, max_refs=4):
     errors = []
     images = data.get("images")
@@ -314,6 +317,12 @@ def validate_images(data, max_refs=4):
         if kind not in ("character", "background", "frame", "other"):
             errors.append(f"image {i}: kind must be character, background, or frame")
         
+        for v in img.get("views") or []:
+            if not (isinstance(v, dict) and v.get("view") in VIEWS and isinstance(v.get("id"), str) and isinstance(v.get("file"), str)):
+                errors.append(f"image {i}: each view needs id, file and view one of {', '.join(VIEWS)}")
+        if img.get("role") not in (None, "style", "product"):
+            errors.append(f"image {i}: role must be style or product")
+
         out = img.get("out")
         if not isinstance(out, str) or not (out.endswith(".png") or out.endswith(".jpg")):
             errors.append(f"image {i}: out must be a string ending with .png or .jpg")

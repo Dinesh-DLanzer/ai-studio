@@ -126,7 +126,7 @@ class StoryboardDomain:
         self.ws._changed(name, "assets", "shots")
         return self.ws.overview(name)
 
-    def upload_image(self, name, aid=None, path=None, data=None, kind=None, replace=False, prompt=""):
+    def upload_image(self, name, aid=None, path=None, data=None, kind=None, replace=False, prompt="", real_person=False, subject=""):
         """Import an image file or base64 data into project assets (stills/<id>.<ext> and images.json)."""
         p = self.ws.pdir(name)
         if not path and not data:
@@ -160,6 +160,9 @@ class StoryboardDomain:
         aid = self._slug(aid)
         _ident(aid, "asset id")
 
+        if real_person:      # an upload of a real person is refused until a human has recorded consent (before any file is written)
+            from aistudio import consent as consent_mod
+            consent_mod.require(p, subject or aid)
         # Let add_file validate image format, normalize to PNG/JPEG, handle replace, and write to stills/<aid>.<ext>
         self.ws.add_file(name, f"stills/{aid}.png", raw, replace=bool(replace))
 
@@ -190,6 +193,8 @@ class StoryboardDomain:
                     img["kind"] = target_kind
                 if prompt:
                     img["prompt"] = prompt
+                if real_person:
+                    img.update(real_person=True, subject=subject or aid)
                 found = True
                 break
 
@@ -201,6 +206,7 @@ class StoryboardDomain:
                 "prompt": prompt or f"{target_kind} {aid}",
                 "refs": [],
                 "aspect_ratio": "9:16" if target_kind == "frame" else "3:2",
+                **({"real_person": True, "subject": subject or aid} if real_person else {}),
             })
 
         if target_kind == "frame":

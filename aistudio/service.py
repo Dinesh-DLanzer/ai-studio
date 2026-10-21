@@ -253,6 +253,21 @@ class Workspace(SettingsMixin):
     def _image_spec(self, p, img_id):
         return self._characters._image_spec(p, img_id)
 
+    def remix(self, name, meta_rel, reveal_code=False):
+        return self.pipeline_domain.remix(name, meta_rel, reveal_code=reveal_code)
+
+    def propose_variants(self, name, kind, target, count, actor="local"):
+        return self.batches.create_variants(name, kind, target, count, actor=actor)
+
+    def select_version(self, name, kind, target, k):
+        return self.pipeline_domain.select_version(name, kind, target, k)
+
+    def drift_check(self, name, target):
+        return self.pipeline_domain.drift_check(name, target)
+
+    def identity_sheet(self, name, char_id, views=None, actor="local"):
+        return self._characters.identity_sheet(name, char_id, views=views, actor=actor)
+
     def analyze_character_image(self, name, rel):
         return self._characters.analyze_character_image(name, rel)
 
@@ -299,8 +314,17 @@ class Workspace(SettingsMixin):
     def import_stills(self, name, items):
         return self._storyboard.import_stills(name, items)
 
-    def upload_image(self, name, aid=None, path=None, data=None, kind=None, replace=False, prompt=""):
-        return self._storyboard.upload_image(name, aid=aid, path=path, data=data, kind=kind, replace=replace, prompt=prompt)
+    def upload_image(self, name, aid=None, path=None, data=None, kind=None, replace=False, prompt="", real_person=False, subject=""):
+        return self._storyboard.upload_image(name, aid=aid, path=path, data=data, kind=kind, replace=replace, prompt=prompt, real_person=real_person, subject=subject)
+
+    def consent_list(self, name):
+        from aistudio import consent
+        return consent.read(self.pdir(name))
+
+    def consent_record(self, name, subject, statement, kind="real_person"):
+        """HUMAN session only (the one route is agent=False). Not an MCP/crew tool."""
+        from aistudio import consent
+        return consent.record(self.pdir(name), subject, statement, kind)
 
     def edit_get(self, name):
         return self._storyboard.edit_get(name)

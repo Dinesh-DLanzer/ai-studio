@@ -13,7 +13,7 @@ class TestProject(unittest.TestCase):
         for f in ("brief.md", "Story.md", "TODO.md"):
             self.assertIn("demo", (p / f).read_text(encoding="utf-8"))
         self.assertEqual(json.loads((p / "shots.json").read_text()), {"schema_version": 2, "aspect_ratio": "9:16", "audio": False, "shots": []})
-        self.assertEqual(json.loads((p / "images.json").read_text()), {"schema_version": 1, "style": "", "images": []})
+        self.assertEqual(json.loads((p / "images.json").read_text()), {"schema_version": 2, "style": "", "images": []})
 
     def test_create_without_brand_kit_remains_blank(self):
         p = P.create_project(self.root, "blank", brand_kit=None)
