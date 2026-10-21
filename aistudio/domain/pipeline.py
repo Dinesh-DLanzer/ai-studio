@@ -294,7 +294,7 @@ class PipelineDomain:
             source = self._source_file(p, options.get("source"), "clip")
             sp = spec_mod.resolve(self.ws, p, "clip_extend", target, options)
             return {"source": source.relative_to(p.resolve()).as_posix(), "source_sha": _sha(source), "prompt": str(options.get("prompt", "")),
-                    "seconds": sp.seconds, "aspect_ratio": "16:9", "resolution": "720p", "provider": sp.provider}, sp.model, sp.price
+                    "seconds": sp.seconds, "aspect_ratio": "16:9", "resolution": sp.resolution, "provider": sp.provider}, sp.model, sp.price
         if kind == "review":
             if options.get("review_type") == "drift":      # PAID vision: only ever through this proposal (a human approves the exact price)
                 f = self._review_file(p, target)

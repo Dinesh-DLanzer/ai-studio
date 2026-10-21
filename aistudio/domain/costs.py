@@ -1,10 +1,9 @@
 """Costs, pricing, budget estimation and job sync domain."""
-import csv
 from datetime import datetime
 import hashlib
 import json
 
-from aistudio import budget as budget_mod, costlog, pricing as pricing_mod, project as project_mod, roles as roles_mod
+from aistudio import budget as budget_mod, costlog, pricing as pricing_mod, project as project_mod, project_lock, roles as roles_mod
 from aistudio.domain import spec as spec_mod
 from aistudio.domain.common import ServiceError
 from aistudio.providers import base as pbase
@@ -160,7 +159,7 @@ class CostDomain:
     def sync(self, name):
         """Resolve clips left pending by a timeout: fetch real status/cost and save the clip."""
         p = self.ws.pdir(name)
-        rows, fixed = costlog.read_log(p), []
+        rows, fixed, updates = costlog.read_log(p), [], []
         for r in rows:
             if r["result"] == "pending" and r["job_id"]:
                 req = {"seconds": int(r["seconds"] or 0), "resolution": r["resolution"] or "720p", "audio": False}
@@ -177,15 +176,22 @@ class CostDomain:
                         new_cost = max(float(new_cost or 0), float(r.get("cost") or 0))
                     except (TypeError, ValueError):
                         pass
-                r["cost"] = new_cost
-                r["cost_source"] = res.get("cost_source", "")
-                r["result"] = "failed" if res["status"] == "failed" else "completed"
+                cost_source = res.get("cost_source", "")
+                if res["status"] == "failed" and res.get("cost") is None:
+                    new_cost, cost_source = r.get("cost") or 0, "unreconciled"
+                update = {"cost": new_cost, "cost_source": cost_source,
+                          "result": "failed" if res["status"] == "failed" else "completed"}
                 if res["status"] == "done":
                     (p / "clips" / f"{r['shot']}_final_a{r['attempt']}.mp4").write_bytes(res["bytes"])
                 fixed.append(r["shot"])
-        if fixed:
-            with (p / "cost_log.csv").open("w", newline="", encoding="utf-8") as fh:
-                w = csv.DictWriter(fh, fieldnames=costlog.LOG_COLS)
-                w.writeheader()
-                w.writerows(rows)
+                updates.append((r.get("job_id"), r.get("shot"), r.get("stage"), r.get("attempt"), update))
+        if updates:
+            with costlog._WRITE_LOCK, project_lock.lock(p):
+                current = costlog._rows_for_write(p / "cost_log.csv")
+                for job_id, shot, stage, attempt, update in updates:
+                    matches = [row for row in current if (job_id and row.get("job_id") == job_id) or
+                               (row.get("shot"), row.get("stage"), row.get("attempt")) == (shot, stage, attempt)]
+                    if len(matches) == 1 and matches[0].get("result") == "pending":
+                        matches[0].update(update)
+                costlog._replace_rows(p / "cost_log.csv", current)
         return {"resolved": fixed}

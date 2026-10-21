@@ -194,6 +194,16 @@ class TestDirectionFailsClosed(unittest.TestCase):
         shots(ws, ("s1", 4, {"direction": {"movement": "orbit-left"}}))
         self.assertNotEqual(a, ws.batches.digest(p, "clip", "s1", "vid-a", 0.4))
 
+    def test_batch_digest_covers_existing_first_frame_bytes(self):
+        ws, p = make(self)
+        (p / "stills").mkdir(exist_ok=True)
+        frame = p / "stills" / "start.png"
+        frame.write_bytes(b"approved frame")
+        shots(ws, ("s1", 4, {"first_frame": "stills/start.png"}))
+        approved = ws.batches.digest(p, "clip", "s1", "vid-a", 0.4)
+        frame.write_bytes(b"changed frame")
+        self.assertNotEqual(approved, ws.batches.digest(p, "clip", "s1", "vid-a", 0.4))
+
 
 class TestCertainRefusalIsNotOfferedForApproval(unittest.TestCase):
     def test_propose_is_refused_up_front_for_a_request_the_adapter_will_reject(self):

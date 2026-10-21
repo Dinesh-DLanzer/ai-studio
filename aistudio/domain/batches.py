@@ -17,7 +17,7 @@ import time
 from pathlib import Path
 
 from aistudio import approvals, costlog, project_lock
-from aistudio.domain.common import ServiceError, _ident
+from aistudio.domain.common import ServiceError, _ident, _sha
 from aistudio.domain.pipeline import MAX_VARIANTS
 
 DIR = "batches"
@@ -71,7 +71,7 @@ class BatchDomain:
         return out
 
     # ---- request digest
-    def digest(self, p, kind, target, model, price, variant=None):
+    def digest(self, p, kind, target, model, price, variant=None, exclude_files=()):
         """Hash of the request specification as written in shots.json / images.json (files need not exist yet)."""
         if kind == "image":
             doc = self.ws._read(p, "images.json", {"images": []})
@@ -79,6 +79,7 @@ class BatchDomain:
             if spec is None:
                 raise ServiceError(f"unknown image id {target}")
             body = {"style": doc.get("style", ""), "spec": {k: spec.get(k) for k in ("id", "kind", "out", "prompt", "refs", "aspect_ratio")}}
+            files = [p / ref for ref in spec.get("refs", [])]
             if variant:
                 body["variant"] = variant
         else:
@@ -87,11 +88,20 @@ class BatchDomain:
                     "aspect_ratio": doc.get("aspect_ratio", "9:16")}
             if shot.get("end_frame"):
                 body["end_frame"] = shot["end_frame"]
+            image_doc = self.ws._read(p, "images.json", {"images": []})
+            image_paths = {i.get("id"): i.get("out") for i in image_doc.get("images", [])}
+            frame_paths = [image_paths.get(value, value) for value in (ff, shot.get("end_frame")) if value]
+            files = [p / value for value in frame_paths]
+            files.extend(p / image_paths.get(ref, ref) for ref in shot.get("refs", []) if ref)
+            body["refs"] = shot.get("refs", [])
             for k in ("direction", "camera", "keyframes"):      # content the human approved with the batch total: an edit before run is a change
                 if shot.get(k):
                     body[k] = shot[k]
             if variant:
                 body["variant"] = variant
+        excluded = {str(x) for x in exclude_files}
+        body["file_shas"] = sorted((f.relative_to(p).as_posix(), _sha(f)) for f in files
+                                    if f.is_file() and f.relative_to(p).as_posix() not in excluded)
         return approvals.request_hash(kind, target, model, price, body)
 
     # ---- lifecycle
@@ -150,6 +160,7 @@ class BatchDomain:
             batch["status"] = "running"
             self._save(name, batch)
         try:
+            generated_files = set()
             for item in batch["items"]:
                 if item["status"] == "done":
                     continue
@@ -161,13 +172,17 @@ class BatchDomain:
                     from aistudio import recipes
                     stop = recipes.run_item(self.ws, name, p, item, batch)
                 else:
-                    stop = self._run_item(name, p, item)
+                    stop = self._run_item(name, p, item, generated_files)
                 self._save(name, batch)
                 if on_item:
                     on_item(item, "end")
                 if stop:
                     batch["status"] = stop
                     return batch
+                if item["kind"] == "image":
+                    image = next((x for x in self.ws._read(p, "images.json", {"images": []}).get("images", []) if x.get("id") == item["target"]), None)
+                    if image and image.get("out"):
+                        generated_files.add(image["out"])
             batch["status"] = "done"
             return batch
         except BaseException as error:
@@ -177,7 +192,7 @@ class BatchDomain:
         finally:
             self._save(name, batch)
 
-    def _run_item(self, name, p, item):
+    def _run_item(self, name, p, item, exclude_files=()):
         """Run one item; returns None on success or the batch status to stop with."""
         try:
             price, model = self.ws.pipeline_domain._item_price(p, item["kind"], item["target"])
@@ -186,7 +201,7 @@ class BatchDomain:
                 changes.append(f"model {item['model']} -> {model}")
             if round(float(price), 6) != item["price"]:
                 changes.append(f"price ${item['price']:.3f} -> ${float(price):.3f}")
-            if self.digest(p, item["kind"], item["target"], model, price, item.get("variant")) != item["request_hash"]:
+            if self.digest(p, item["kind"], item["target"], model, price, item.get("variant"), exclude_files) != item["request_hash"]:
                 changes.append("request changed")
         except ServiceError as error:
             item.update(status="error", error=str(error))

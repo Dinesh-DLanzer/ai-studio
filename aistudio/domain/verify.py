@@ -7,7 +7,7 @@ import threading
 import time
 import urllib.request
 
-from aistudio import aisettings, character_check, chat as chat_mod, costlog, languages as lang_mod, project as project_mod, roles as roles_mod, verify as verify_mod
+from aistudio import aisettings, character_check, chat as chat_mod, costlog, languages as lang_mod, project as project_mod, project_lock, pricing as pricing_mod, roles as roles_mod, verify as verify_mod
 from aistudio.domain.common import ServiceError
 from aistudio.providers import base as pbase, config as pconf
 
@@ -89,34 +89,26 @@ class VerifyDomain:
         cfg = self.ai_settings()["settings"]
         runner = self.ws.runner()
         free = lambda e: bool(e["card"] and e["card"].get("kind") == "text" and e["card"].get("free"))
-        paid = any(not free(e) for e in runner.resolve(role, p) if e["problem"] is None)
-        if paid and self.ai_spent(name) >= cfg["ai_cap_usd"]:
-            raise ServiceError(f"The AI spending cap for this project (${cfg['ai_cap_usd']:.2f}) is reached. Raise it in AI settings or switch to a free model.")
+        entries = [e for e in runner.resolve(role, p) if e["problem"] is None]
+        paid = any(not free(e) for e in entries)
+        planned = max((float((e.get("card") or {}).get("per_call") or
+                            (8192 * float((e.get("card") or {}).get("output_per_1m") or 0) / 1_000_000))
+                       for e in entries if not free(e)), default=0.0)
+        unpriced_paid = any(not free(e) and not (e.get("card") or {}).get("per_call") and not (e.get("card") or {}).get("output_per_1m") for e in entries)
         allow = lambda e: (True, "") if free(e) or cfg["allow_paid"] else (False, "paid or unpriced model; turn on 'Allow paid models' (or set it as free) in Settings")
         try:
-            res = runner.chat(role, messages, {"max_tokens": 8192, "temperature": 0.4}, project_dir=p, allow=allow)
+            with project_lock.lock(p):
+                if paid and (self.ai_spent(name) + planned > cfg["ai_cap_usd"] or (cfg["allow_paid"] and unpriced_paid)):
+                    raise ServiceError(f"The AI spending cap for this project (${cfg['ai_cap_usd']:.2f}) would be exceeded by this call. Raise it in AI settings or switch to a free model.")
+                res = runner.chat(role, messages, {"max_tokens": 8192, "temperature": 0.4}, project_dir=p, allow=allow)
+                if paid or res.get("cost"):
+                    attempt = 1 + len([r for r in costlog.read_log(p) if r["stage"] == role])
+                    costlog.append_log(p, {"timestamp": datetime.now().isoformat(timespec="seconds"), "shot": "_ai", "stage": role,
+                        "model": res["model"], "resolution": "", "seconds": "", "attempt": str(attempt), "job_id": "",
+                        "cost": res.get("cost", 0), "result": "completed", "provider": res.get("provider", ""),
+                        "cost_source": res.get("cost_source", ""), "actor": "local"})
         except (pbase.ProviderError, roles_mod.ChainError, ValueError) as e:
             raise ServiceError(f"The {role} model is unavailable: {e}") from None
-        if paid or res.get("cost"):
-            attempt = 1 + len([r for r in costlog.read_log(p) if r["stage"] == role])
-            costlog.append_log(
-                p,
-                {
-                    "timestamp": datetime.now().isoformat(timespec="seconds"),
-                    "shot": "_ai",
-                    "stage": role,
-                    "model": res["model"],
-                    "resolution": "",
-                    "seconds": "",
-                    "attempt": str(attempt),
-                    "job_id": "",
-                    "cost": res.get("cost", 0),
-                    "result": "completed",
-                    "provider": res.get("provider", ""),
-                    "cost_source": res.get("cost_source", ""),
-                    "actor": "local",
-                },
-            )
         return res
 
     def languages(self):
@@ -211,6 +203,9 @@ class VerifyDomain:
             time.sleep(self.VERIFY_DELAY)
             p = self.ws.pdir(name)
             if not self.ai_settings()["settings"]["auto_verify"]:
+                return
+            entries = [e for e in self.ws.runner().resolve("verify", p) if e["problem"] is None]
+            if not entries or any(not self.ws.pricing().is_free(entry.get("card")) for entry in entries):
                 return
             _, _, _, _, h = self._verify_inputs(p, scope)
             saved = self.ws._read(p, "verify.json", {}).get(scope) or {}

@@ -17,13 +17,42 @@ import hashlib
 import hmac
 import json
 import secrets
+import os
+import tempfile
 import time
+from functools import wraps
 from dataclasses import dataclass, field
 from pathlib import Path
+
+from aistudio import project_lock
 
 FILE = "proposals.json"
 MAX_TRIES = 5
 _LIVE_GRANTS = {}
+
+
+def _locked(fn):
+    @wraps(fn)
+    def wrapped(pdir, *args, **kwargs):
+        with project_lock.lock(pdir):
+            return fn(pdir, *args, **kwargs)
+    return wrapped
+
+
+def _atomic_json(path, value):
+    path = Path(path)
+    tmp = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=path.parent,
+                                         prefix=f".{path.name}.", suffix=".tmp", delete=False) as f:
+            tmp = Path(f.name)
+            json.dump(value, f, ensure_ascii=False, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, path)
+    finally:
+        if tmp is not None:
+            tmp.unlink(missing_ok=True)
 
 
 class ApprovalError(Exception):
@@ -57,7 +86,7 @@ def _load(pdir):
 
 
 def _save(pdir, items):
-    (Path(pdir) / FILE).write_text(json.dumps(items, indent=2, ensure_ascii=False), encoding="utf-8")
+    _atomic_json(Path(pdir) / FILE, items)
 
 
 def _find(items, pid):
@@ -67,6 +96,7 @@ def _find(items, pid):
     raise ApprovalError(f"unknown proposal {pid}")
 
 
+@_locked
 def propose(pdir, kind, shot, model, price, payload, ttl=3600, reveal_code=False, now=None, summary=None, actor="local", options=None):
     now = time.time() if now is None else now
     if float(price) < 0:
@@ -90,6 +120,7 @@ def get(pdir, pid):
     return p
 
 
+@_locked
 def approve(pdir, pid, code, now=None):
     now = time.time() if now is None else now
     items = _load(pdir)
@@ -111,6 +142,7 @@ def approve(pdir, pid, code, now=None):
     return get(pdir, pid)
 
 
+@_locked
 def approve_human(pdir, pid, now=None):
     """Approval by a HUMAN-FACING channel (web UI behind the session token, or the terminal). No code needed: the channel itself
     is the proof. NEVER expose this through MCP or any agent-callable tool."""
@@ -128,6 +160,7 @@ def approve_human(pdir, pid, now=None):
     return get(pdir, pid)
 
 
+@_locked
 def reject(pdir, pid):
     items = _load(pdir)
     p = _find(items, pid)
@@ -136,6 +169,7 @@ def reject(pdir, pid):
     _save(pdir, items)
 
 
+@_locked
 def consume(pdir, pid, request_hash_value=None, *, kind=None, shot=None, model=None, price=None, payload=None, now=None):
     """Consume one approved request and return a one-use :class:`Grant`.
 
@@ -189,6 +223,7 @@ def _fallback_code(code_id, keychain_secret):
     return f"{int.from_bytes(digest[:8], 'big') % 10**6:06d}"
 
 
+@_locked
 def issue_code(pdir, reference, kind, request_hash_value, keychain_secret, ttl=600, now=None):
     """Issue a short-lived out-of-band code without storing it in the project."""
     now = time.time() if now is None else now
@@ -202,10 +237,11 @@ def issue_code(pdir, reference, kind, request_hash_value, keychain_secret, ttl=6
     items = [x for x in items if x.get("status") == "pending" and float(x.get("expires", 0)) > now]
     items.append({"id": code_id, "reference": str(reference), "kind": kind, "request_hash": request_hash_value,
                   "created": now, "expires": now + ttl, "status": "pending"})
-    f.write_text(json.dumps(items, ensure_ascii=False, indent=2), encoding="utf-8")
+    _atomic_json(f, items)
     return {"id": code_id, "code": code, "expires": now + ttl}
 
 
+@_locked
 def redeem_code(pdir, code_id, code, reference, kind, request_hash_value, keychain_secret, now=None):
     """Redeem exactly one fallback code, bound to the original request."""
     now = time.time() if now is None else now
@@ -219,7 +255,7 @@ def redeem_code(pdir, code_id, code, reference, kind, request_hash_value, keycha
         raise ApprovalError("unknown or already used approval code")
     if now > float(item.get("expires", 0)):
         item["status"] = "expired"
-        f.write_text(json.dumps(items, ensure_ascii=False, indent=2), encoding="utf-8")
+        _atomic_json(f, items)
         raise ApprovalError("approval code expired")
     if (item.get("reference"), item.get("kind"), item.get("request_hash")) != (str(reference), kind, request_hash_value):
         raise ApprovalError("approval code is bound to a different request")
@@ -227,13 +263,14 @@ def redeem_code(pdir, code_id, code, reference, kind, request_hash_value, keycha
         item["tries"] = int(item.get("tries", 0)) + 1
         if item["tries"] >= MAX_TRIES:
             item["status"] = "locked"       # a 6-digit code must not be guessable by a looping agent
-        f.write_text(json.dumps(items, ensure_ascii=False, indent=2), encoding="utf-8")
+        _atomic_json(f, items)
         raise ApprovalError("approval code locked after too many wrong tries" if item["status"] == "locked" else "wrong approval code")
     item["status"] = "used"
-    f.write_text(json.dumps(items, ensure_ascii=False, indent=2), encoding="utf-8")
+    _atomic_json(f, items)
     return True
 
 
+@_locked
 def redeem(pdir, grant, kind):
     """Redeem a live grant at the paid boundary; each grant can be redeemed once."""
     if not isinstance(grant, Grant):

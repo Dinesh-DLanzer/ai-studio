@@ -41,11 +41,54 @@ class TestSpendSafetyRegressions(unittest.TestCase):
                         with patch.object(self.ws, "runner", return_value=runner), \
                              patch.object(self.ws._verify, "ai_settings", return_value={"settings": {"allow_paid": True, "ai_cap_usd": 10}}), \
                              patch.object(Script, "chat", return_value=output):
+                            if model == "unknown-model":
+                                with self.assertRaises(ServiceError):
+                                    self.ws._ai_call("demo", role, [])
+                                continue
                             self.ws._ai_call("demo", role, [])
                         row = costlog.read_log(self.p)[-1]
                         self.assertEqual((row["stage"], row["model"], row["provider"], row["actor"]), (role, model, "g", "local"))
                         self.assertEqual(row["cost_source"], "unknown")
-        self.assertEqual(len(costlog.read_log(self.p)), 8)
+        self.assertEqual(len(costlog.read_log(self.p)), 4)
+
+    def test_concurrent_text_calls_respect_planned_cost_cap(self):
+        class Runner:
+            calls = 0
+            def resolve(self, role, p):
+                return [{"problem": None, "card": {"kind": "text", "output_per_1m": 1000.0}}]
+            def chat(self, *args, **kwargs):
+                self.calls += 1
+                return {"text": "ok", "cost": 9.0, "cost_source": "reported", "model": "paid", "provider": "fake"}
+        runner = Runner()
+        outcomes = []
+        def call():
+            try:
+                outcomes.append(self.ws._ai_call("demo", "verify", []))
+            except ServiceError as error:
+                outcomes.append(error)
+        with patch.object(self.ws, "runner", return_value=runner), \
+             patch.object(self.ws._verify, "ai_settings", return_value={"settings": {"allow_paid": True, "ai_cap_usd": 10.0}}):
+            threads = [threading.Thread(target=call) for _ in range(2)]
+            for thread in threads: thread.start()
+            for thread in threads: thread.join(5)
+        self.assertEqual(runner.calls, 1)
+        self.assertEqual(sum(isinstance(x, ServiceError) for x in outcomes), 1)
+
+    def test_background_verification_only_runs_free_model(self):
+        class Runner:
+            def __init__(self, card): self.card = card
+            def resolve(self, role, p): return [{"problem": None, "card": self.card}]
+        for card, should_run in (({"kind": "text", "free": True}, True),
+                                 ({"kind": "text", "output_per_1m": 1.0}, False), (None, False)):
+            with self.subTest(card=card):
+                with patch.object(self.ws, "is_test", return_value=False), \
+                     patch.object(self.ws, "runner", return_value=Runner(card)), \
+                     patch.object(self.ws._verify, "ai_settings", return_value={"settings": {"auto_verify": True}}), \
+                     patch.object(self.ws._verify, "_verify_inputs", return_value=({}, [], "", {}, "hash")), \
+                     patch.object(self.ws._verify, "verify_run") as verify_run, \
+                     patch("aistudio.domain.verify.time.sleep"):
+                    self.ws._verify._verify_bg("demo", "brief")
+                    self.assertEqual(verify_run.called, should_run)
 
     def test_provider_cost_survives_output_save_failure(self):
         prop = self.approved()

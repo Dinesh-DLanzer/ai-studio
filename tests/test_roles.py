@@ -191,6 +191,12 @@ class TestPaid(unittest.TestCase):
         out = r.vision("review", [], project_dir=p, grant=grant, allow_paid=True)
         self.assertEqual(out["cost_source"], "unknown")
 
+    def test_missing_non_text_cost_uses_approved_quote(self):
+        r, _ = setup()
+        self.assertEqual(r._cost("image", {}, {"kind": "image"}, extra={"quoted": 0.42}), (0.42, "estimated"))
+        self.assertEqual(r._cost("verify", {}, {"kind": "text", "input_per_1m": 1, "output_per_1m": 2}, usage={}), (0.0, "unknown"))
+        self.assertEqual(r._cost("verify", {}, {"kind": "text", "per_call": 0.01}, usage={}), (0.01, "computed"))
+
     def test_unknown_vision_primary_can_run_with_its_approval(self):
         r, p = setup(chains={"vision": ch(("g", "unknown"))})
         out = r.vision("review", [], project_dir=p,

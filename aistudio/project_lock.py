@@ -3,8 +3,11 @@ import json
 import math
 import os
 import time
+import threading
 from contextlib import contextmanager
 from pathlib import Path
+
+_local = threading.local()
 
 
 def _backend():
@@ -37,6 +40,17 @@ def _backend():
 @contextmanager
 def lock(pdir):
     """Serialize gate/approval/reservation state for one project across processes."""
+    key = str(Path(pdir).resolve())
+    depths = getattr(_local, "depths", None)
+    if depths is None:
+        depths = _local.depths = {}
+    if depths.get(key, 0):
+        depths[key] += 1
+        try:
+            yield
+        finally:
+            depths[key] -= 1
+        return
     backend = _backend()
     if backend is None:
         raise RuntimeError("Project spend lock unavailable; refusing unsafe execution")
@@ -50,8 +64,10 @@ def lock(pdir):
         except OSError as error:
             raise RuntimeError("Project spend lock unavailable; refusing unsafe execution") from error
         try:
+            depths[key] = 1
             yield
         finally:
+            depths.pop(key, None)
             try:
                 release(fh)
             except OSError:
