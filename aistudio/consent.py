@@ -215,6 +215,10 @@ def unverified_media(pdir):
     for path in _project_media(pdir):
         if path.suffix.lower() not in MEDIA_SUFFIXES or any(part.startswith(".") or part == "_discarded" for part in path.relative_to(Path(pdir)).parts):
             continue                       # the clearance list shows media only, not Story.md, json docs, history or trash
+        try:
+            path.resolve().relative_to(Path(pdir).resolve())       # a symlink pointing outside the project is never listed
+        except ValueError:
+            continue
         digest = _sha(path)
         if digest in shas:
             try:

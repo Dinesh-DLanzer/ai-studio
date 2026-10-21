@@ -752,9 +752,10 @@ def create_app(root=None, token=None, rates_path=None, transport=None, static_di
         return {"consent": guard(ws.consent_list, name)}
 
     @app.get("/api/projects/{name}/consent/provenance", dependencies=[api])
-    def consent_provenance(name: str):
+    def consent_provenance(name: str, request: Request):
+        human_session(request)
         from aistudio import consent
-        return {"unverified": guard(consent.unverified_media, ws.pdir(name))}
+        return {"unverified": guard(lambda: consent.unverified_media(ws.pdir(name)))}
 
     @app.post("/api/projects/{name}/consent", dependencies=[api])
     async def consent_record(name: str, request: Request):
@@ -924,7 +925,7 @@ def create_app(root=None, token=None, rates_path=None, transport=None, static_di
         entries = runner.resolve("video", ws.pdir(name))
         catalog = ws.catalog()
         from aistudio.providers.adapters.fake import FakeAdapter
-        is_test = ws._fake_for("video", ws.pdir(name))        # a test project proposes through the fake provider, exactly as the propose route does use the fake provider, which proposes every tool at $0
+        is_test = ws._fake_for("video", ws.pdir(name))        # test projects propose through the fake provider, as the propose route does
         for tool_id, task in AI_TOOLS.items():
             capable = is_test and task in FakeAdapter.task_methods
             reasons = []

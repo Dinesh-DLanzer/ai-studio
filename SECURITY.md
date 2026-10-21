@@ -70,7 +70,7 @@ AI Studio runs **on your own machine** and calls paid AI APIs with **your own ke
 - Clearance and consent routes are human-session only. API keys, device tokens, MCP, crew and recipes cannot create them, and `confirm=true` is never accepted.
 
 ## Paired devices
-- A paired device (for example an editor panel) gets a revocable `aisd_` token from a short human-confirmed pairing code. It can read project media and create proposals, but it cannot approve, spend, change settings, record consent or upload. Tokens are accepted only in a header, never in a URL, and are stored hashed.
+- A paired device (for example an editor panel) gets a revocable `aisd_` token from a short human-confirmed pairing code. It can read project media and create proposals, but it cannot approve or execute anything, change settings, record consent or upload. Tokens are accepted only in a header, never in a URL, and are stored hashed.
 
 ## Hosted mode (foundation only, not a supported deployment)
 - With `AISTUDIO_HOSTED` set, project folders, locks, spend reservations, approvals and trash live under `<root>/tenants/<tenant_id>/`, tenant ids are validated (no separators, `..` or symlinks), and the request context fails closed when no tenant is set. The local single-user layout is unchanged. Hosted authentication, organisation management and Postgres are **not implemented**; do not expose a hosted deployment to the internet. See `docs/adr-hosted-multitenant.md`.
