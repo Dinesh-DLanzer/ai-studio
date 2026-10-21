@@ -229,7 +229,65 @@ def create_app(root=None, token=None, rates_path=None, transport=None, static_di
     @app.post("/api/projects", dependencies=[api])
     async def create(request: Request):
         b = await request.json()
-        return {"name": guard(ws.create_project, b.get("name"), bool(b.get("test_pipeline")))}
+        return {"name": guard(ws.create_project, b.get("name"), bool(b.get("test_pipeline")), b.get("format") or None, b.get("brand_kit") or None)}
+
+    @app.get("/api/formats", dependencies=[api])
+    def formats_list():
+        from aistudio import formats as formatsmod
+        try: return {"formats": formatsmod.load_formats()}
+        except ValueError as e: raise HTTPException(500, str(e)) from None
+
+    @app.get("/api/camera-presets", dependencies=[api])
+    def camera_presets():
+        return json.loads((REPO / "catalog" / "camera_presets.json").read_text(encoding="utf-8"))
+
+    # brand kits: workspace-level, human session only (agent=False in api_docs); the kit is COPIED into a project when attached
+    from aistudio import brand_kits as kitsmod
+
+    def kit_call(fn, *a, **kw):
+        try: return fn(ws.root, *a, **kw)
+        except FileExistsError as e: raise HTTPException(409, str(e)) from None
+        except ValueError as e: raise HTTPException(400, str(e)) from None
+
+    @app.get("/api/brand-kits", dependencies=[api])
+    def brand_kits_list():
+        return {"kits": kit_call(kitsmod.list_kits), "fonts": sorted(kitsmod._font_families())}
+
+    @app.post("/api/brand-kits", dependencies=[api])
+    async def brand_kit_create(request: Request):
+        import base64
+        import tempfile
+        b = await request.json()
+        fields = {k: b[k] for k in ("palette", "fonts", "caption", "watermark", "end_card", "voice", "style_words", "avoid") if k in b}
+        raw = b.get("logo_b64")
+        if not raw:
+            return kit_call(kitsmod.create_kit, b.get("name") or "", **fields)
+        try: data = base64.b64decode(raw, validate=True)
+        except ValueError: raise HTTPException(400, "logo is not valid base64") from None
+        with tempfile.TemporaryDirectory() as td:
+            logo = Path(td) / "logo"
+            logo.write_bytes(data)
+            return kit_call(kitsmod.create_kit, b.get("name") or "", logo_path=logo, **fields)
+
+    @app.get("/api/brand-kits/{kid}", dependencies=[api])
+    def brand_kit_get(kid: str):
+        return kit_call(kitsmod.get_kit, kid)
+
+    @app.put("/api/brand-kits/{kid}", dependencies=[api])
+    async def brand_kit_update(kid: str, request: Request):
+        b = await request.json()
+        return kit_call(kitsmod.update_kit, kid, **{k: b[k] for k in ("name", "palette", "fonts", "caption", "watermark", "end_card", "voice", "style_words", "avoid") if k in b})
+
+    @app.delete("/api/brand-kits/{kid}", dependencies=[api])
+    def brand_kit_delete(kid: str):
+        kit_call(kitsmod.delete_kit, kid)      # moves to brand_kits/_trash, never erases
+        return {"ok": True}
+
+    @app.get("/api/brand-kits/{kid}/logo", dependencies=[api])
+    def brand_kit_logo(kid: str):
+        kit = kit_call(kitsmod.get_kit, kid)
+        if not kit.get("logo"): raise HTTPException(404, "this kit has no logo")
+        return FileResponse(ws.root / "brand_kits" / kid / kit["logo"])
 
     @app.post("/api/projects/import", dependencies=[api])
     async def import_project(request: Request, filename: str = "", name: str = ""):
@@ -905,6 +963,18 @@ def create_app(root=None, token=None, rates_path=None, transport=None, static_di
     @app.get("/api/models", dependencies=[api])
     def models_all(capability: str = ""):
         return guard(ws.models_all, capability or None)
+
+    @app.get("/api/capabilities", dependencies=[api])
+    def capabilities_all(capability: str = ""):
+        return guard(ws.capabilities_all, capability or None)
+
+    @app.put("/api/capabilities/{pid}/{model:path}", dependencies=[api])
+    async def capability_put(pid: str, model: str, request: Request):
+        return guard(ws.capability_put, pid, model, await request.json())
+
+    @app.delete("/api/capabilities/{pid}/{model:path}", dependencies=[api])
+    def capability_delete(pid: str, model: str):
+        return guard(ws.capability_delete, pid, model)
 
     @app.put("/api/prices/{pid}/{model:path}", dependencies=[api])
     async def price_put(pid: str, model: str, request: Request):
