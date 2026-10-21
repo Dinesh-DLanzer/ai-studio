@@ -36,6 +36,11 @@ class TestStore(unittest.TestCase):
                 raise RuntimeError
         self.assertEqual(len(store.query(self.root, "SELECT id FROM jobs")), 1)
 
+    def test_library_schema_has_local_tenant_and_actor(self):
+        store.execute(self.root, "INSERT INTO items (id, project, kind, file) VALUES ('i','p','image','stills/a.png')")
+        row = store.query(self.root, "SELECT tenant_id, actor FROM items WHERE id='i'")[0]
+        self.assertEqual((row["tenant_id"], row["actor"]), ("local", "local"))
+
     def test_threads_and_processes_write_concurrently(self):
         procs = [multiprocessing.Process(target=_writer, args=(self.root, 40, f"p{i}")) for i in range(2)]
         threads = [threading.Thread(target=_writer, args=(self.root, 40, f"t{i}")) for i in range(2)]

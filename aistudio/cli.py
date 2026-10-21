@@ -155,6 +155,14 @@ def main(argv=None, ask=input, out=print):
     p_jobs.add_argument("--state", default="")
     p_jobs.add_argument("--json", action="store_true")
 
+    p_library = sp.add_parser("library", help="Rebuild or search the workspace generation library")
+    lsp = p_library.add_subparsers(dest="library_cmd", required=True)
+    l_rebuild = lsp.add_parser("rebuild", help="Reindex project outputs")
+    l_rebuild.add_argument("--json", action="store_true")
+    l_search = lsp.add_parser("search", help="Search indexed media")
+    l_search.add_argument("query", nargs="?", default="")
+    l_search.add_argument("--json", action="store_true")
+
     p_crew = sp.add_parser("crew", help="Studio crew agents: run, status, undo (a human terminal; agents never approve or spend)")
     csp = p_crew.add_subparsers(dest="crew_cmd", required=True)
     c_run = csp.add_parser("run", help="Run an agent on a task")
@@ -225,6 +233,15 @@ def main(argv=None, ask=input, out=print):
             else:
                 for j in res:
                     out(f"{j['id']}  {j['project']:<20} {j['kind']:<8} {j['state']:<16} {j['target']}  {j['error']}".rstrip())
+
+        elif args.cmd == "library":
+            from aistudio import library as library_mod
+            res = library_mod.rebuild(ws.root) if args.library_cmd == "rebuild" else library_mod.search(ws.root, args.query)
+            if is_json:
+                out(json.dumps(res, indent=2, default=str))
+            else:
+                for item in (res if isinstance(res, list) else res["items"]):
+                    out(f"{item['project']}  {item['kind']:<8} {item['file']}  {item['prompt'][:70]}")
 
         elif args.cmd == "crew":
             from aistudio import jobs as jobsmod

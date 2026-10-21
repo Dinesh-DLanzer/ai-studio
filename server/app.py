@@ -180,6 +180,52 @@ def create_app(root=None, token=None, rates_path=None, transport=None, static_di
     def projects():
         return {"projects": ws.list_projects()}
 
+    from aistudio import library as librarymod
+
+    @app.get("/api/library", dependencies=[api])
+    def library_search(q: str = "", type: str = "", project: str = "", model: str = "", favorite: str = "", failed: str = "",
+                       date_from: str = "", date_to: str = "", cost_min: str = "", cost_max: str = "", limit: int = 50, offset: int = 0):
+        filters = {k: v for k, v in {"type": type, "project": project, "model": model}.items() if v}
+        for key, value in (("favorite", favorite), ("failed", failed)):
+            if value: filters[key] = value.lower() in ("1", "true", "yes")
+        for key, value in (("date_from", date_from), ("date_to", date_to), ("cost_min", cost_min), ("cost_max", cost_max)):
+            if value: filters[key] = value
+        return librarymod.search(ws.root, q, filters, limit, offset)
+
+    @app.post("/api/library/rebuild", dependencies=[api])
+    def library_rebuild():
+        return {"count": len(librarymod.rebuild(ws.root))}
+
+    @app.get("/api/library/{id}", dependencies=[api])
+    def library_get(id: str):
+        row = librarymod.get(ws.root, id)
+        if not row: raise HTTPException(404, "no such library item")
+        return row
+
+    @app.post("/api/library/{id}/favorite", dependencies=[api])
+    async def library_favorite(id: str, request: Request):
+        row = librarymod.set_favorite(ws.root, id, bool((await request.json()).get("on")))
+        if not row: raise HTTPException(404, "no such library item")
+        return row
+
+    @app.post("/api/library/promote", dependencies=[api])
+    async def library_promote(request: Request):
+        b = await request.json()
+        try: return librarymod.promote(ws.root, b.get("project", ""), b.get("file", ""))
+        except (ValueError, FileNotFoundError) as e: raise HTTPException(400, str(e)) from None
+
+    @app.post("/api/library/use", dependencies=[api])
+    async def library_use(request: Request):
+        b = await request.json()
+        try: return librarymod.use_in_project(ws.root, b.get("id", ""), b.get("project", ""), b.get("kind", "image"))
+        except (ValueError, FileNotFoundError) as e: raise HTTPException(400, str(e)) from None
+
+    @app.post("/api/library/remix", dependencies=[api])
+    async def library_remix(request: Request):
+        b = await request.json()
+        try: return librarymod.remix(ws.root, b.get("id", ""), b.get("project", ""))
+        except ValueError as e: raise HTTPException(400, str(e)) from None
+
     @app.post("/api/projects", dependencies=[api])
     async def create(request: Request):
         b = await request.json()
