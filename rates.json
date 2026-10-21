@@ -3,27 +3,37 @@
   "models": {
     "bytedance/seedance-2.5": {
       "720p": 0.231,
-      "480p": 0.103
+      "480p": 0.103,
+      "retrieved_at": "2026-09-30",
+      "source": "openrouter pricing_skus"
     },
     "bytedance/seedance-2.0": {
       "720p": 0.15,
-      "480p": 0.07
+      "480p": 0.07,
+      "retrieved_at": "2026-09-30",
+      "source": "openrouter pricing_skus"
     },
     "alibaba/wan-3.0": {
       "720p": 0.1,
-      "480p": 0.05
+      "480p": 0.05,
+      "retrieved_at": "2026-09-30",
+      "source": "openrouter pricing_skus"
     },
     "google/veo-3.1": {
       "720p": {
         "audio": 0.4,
         "no_audio": 0.2
-      }
+      },
+      "retrieved_at": "2026-09-30",
+      "source": "openrouter pricing_skus"
     },
     "google/veo-3.1-lite": {
       "720p": {
         "audio": 0.05,
         "no_audio": 0.03
-      }
+      },
+      "retrieved_at": "2026-09-30",
+      "source": "openrouter pricing_skus"
     }
   },
   "image_models": {

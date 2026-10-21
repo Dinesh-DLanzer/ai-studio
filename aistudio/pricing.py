@@ -17,6 +17,8 @@ from pathlib import Path
 from aistudio import rates as rates_mod
 
 KEY_SEP = "|"
+META = ("retrieved_at", "source")
+STALE_DAYS = 30
 FLAT_RATE = ("chatgpt", "codex_cli", "claude_cli", "agy_cli")
 
 
@@ -74,7 +76,10 @@ def validate_card(card):
 
 class Pricing:
     def __init__(self, legacy_rates=None, overrides=None):
-        self.rates = (legacy_rates or {}).get("models", {})
+        self.rates, self.meta = {}, {}      # the meta keys never reach rates.rate_for, so the math is unchanged
+        for m, d in (legacy_rates or {}).get("models", {}).items():
+            self.rates[m] = {k: v for k, v in d.items() if k not in META}
+            self.meta[m] = {k: v for k, v in d.items() if k in META}
         self.image_rates = (legacy_rates or {}).get("image_models", {})
         self.overrides = overrides or {}
 
@@ -98,7 +103,7 @@ class Pricing:
             return FAKE_CARDS[model]
         if ptype == "openrouter":
             if model in self.rates:
-                return {"kind": "video", "per_second": self.rates[model]}
+                return {"kind": "video", "per_second": self.rates[model], **self.meta[model]}
             if model in self.image_rates:
                 return {"kind": "image", "per_image": self.image_rates[model]}
             if model.endswith(":free") or model == "openrouter/free":
@@ -123,16 +128,49 @@ class Pricing:
         return best[1] if best else None
 
     # -- prices
-    def video_price(self, card, seconds, resolution="720p", audio=False):
+    def video_price(self, card, seconds, resolution="720p", audio=False, refs=0):
         if not card or card.get("kind") != "video":
             return None
         try:
-            return rates_mod.clip_cost({"models": {"m": card["per_second"]}}, "m", resolution, int(seconds), bool(audio))
+            billed = max(int(seconds), int(card.get("minimum_seconds") or 0))
+            base = rates_mod.clip_cost({"models": {"m": card["per_second"]}}, "m", resolution, billed, bool(audio))
         except (KeyError, ValueError):
             return None
+        return round(base + int(refs) * float(card.get("per_reference_image") or 0), 6)
 
-    def image_price(self, card):
-        return float(card["per_image"]) if card and card.get("kind") == "image" else None
+    def image_price(self, card, refs=0):
+        if not card or card.get("kind") != "image":
+            return None
+        return round(float(card["per_image"]) + int(refs) * float(card.get("per_reference_image") or 0), 6)
+
+    @staticmethod
+    def age_days(card, today=None):
+        """Days since the card's retrieved_at, or None when it has no (valid) date."""
+        d = _iso_date((card or {}).get("retrieved_at"))
+        return (today or date.today()).toordinal() - d.toordinal() if d else None
+
+    def age_warning(self, card, today=None):
+        """'' when the price is fresh, else a sentence for the approver. A warning only, never a block."""
+        age = self.age_days(card, today)
+        if age is None:
+            return "Price card has no date; check it is current before approving."
+        return f"Price card is {age} days old (retrieved {card['retrieved_at']}); check it is current." if age > STALE_DAYS else ""
+
+    def breakdown(self, card, seconds=0, resolution="720p", audio=False, refs=0, today=None):
+        """What a quote is made of: base (rate x billed seconds, or per_image), minimum_applied, refs charge, audio flag, total (== the quote), card date and age."""
+        out = {"base": None, "minimum_applied": False, "refs": 0.0, "audio": bool(audio), "total": None,
+               "retrieved_at": (card or {}).get("retrieved_at"), "age_days": self.age_days(card, today), "source": (card or {}).get("source")}
+        if not card:
+            return out
+        total = self.image_price(card, refs) if card.get("kind") == "image" else self.video_price(card, seconds, resolution, audio, refs)
+        if total is None:
+            return out
+        out["refs"] = round(int(refs) * float(card.get("per_reference_image") or 0), 6)
+        out["base"], out["total"] = round(total - out["refs"], 6), total
+        if card.get("kind") == "video":
+            out["minimum_applied"] = int(seconds) < int(card.get("minimum_seconds") or 0)
+            out["billed_seconds"] = max(int(seconds), int(card.get("minimum_seconds") or 0))
+        return out
 
     def is_free(self, card):
         if card and card.get("kind") == "image":
