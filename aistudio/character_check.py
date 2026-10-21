@@ -5,6 +5,7 @@ or merely a single-angle / face reference photo.
 """
 import json
 import re
+from pathlib import Path
 
 PROMPT_CHARACTER_ANALYSIS = """You are an expert character concept artist and vision quality evaluator.
 Analyze this uploaded image of a character.
@@ -77,3 +78,50 @@ def parse_character_analysis(text):
     except Exception:
         pass
     return dict(_FALLBACK_ANALYSIS)
+
+
+DRIFT_THRESHOLD = 0.6      # identity score below this is flagged by verification
+
+
+def build_drift_prompt(characters):
+    names = ", ".join(characters)
+    return (f"You are checking identity consistency. The first images are reference images of these characters, in order: {names}. "
+            "The LAST image (or frames) is a generated result. For each character that appears in the result, score from 0.0 to 1.0 how well "
+            "the face, hair, skin tone, age and outfit match that character's reference (1.0 = clearly the same person). "
+            'Respond with ONLY a JSON object: {"scores": {"<character id>": <0.0-1.0>}, "summary": "one sentence"}. '
+            "Leave out a character that does not appear in the result.")
+
+
+def parse_drift(text, characters):
+    """-> {"scores": {id: float}, "summary": str}. Unparseable output gives empty scores (never a made-up score, so nothing is flagged)."""
+    try:
+        for m in re.finditer(r"\{", str(text)):
+            try:
+                obj, _ = json.JSONDecoder().raw_decode(str(text), m.start())
+            except ValueError:
+                continue
+            if isinstance(obj, dict) and isinstance(obj.get("scores"), dict):
+                scores = {}
+                for k, v in obj["scores"].items():
+                    if k in characters and isinstance(v, (int, float)) and not isinstance(v, bool):
+                        scores[k] = round(min(1.0, max(0.0, float(v))), 3)
+                return {"scores": scores, "summary": str(obj.get("summary") or "").strip()}
+    except Exception:
+        pass
+    return {"scores": {}, "summary": "The vision model did not return identity scores."}
+
+
+def drift_findings(pdir, shot_ids, threshold=DRIFT_THRESHOLD):
+    """Verification findings for every shot whose stored check (checks/<id>.json) has a character below the threshold. Free: reads files."""
+    out = []
+    for sid in shot_ids:
+        f = Path(pdir) / "checks" / f"{sid}.json"
+        try:
+            scores = (json.loads(f.read_text(encoding="utf-8")) or {}).get("scores") or {}
+        except (OSError, ValueError, AttributeError):
+            continue
+        low = {k: v for k, v in scores.items() if isinstance(v, (int, float)) and v < threshold}
+        if low:
+            out.append({"where": sid, "severity": "medium", "issue": "identity drift: " + ", ".join(f"{k} {v:.2f}" for k, v in sorted(low.items())) + f" (below {threshold})",
+                        "fix": "Regenerate the shot with the character's identity views as references, or pick another variant."})
+    return out

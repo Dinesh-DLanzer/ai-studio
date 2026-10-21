@@ -474,6 +474,11 @@ def create_app(root=None, token=None, rates_path=None, transport=None, static_di
         b = await request.json()
         return guard(ws.select_version, name, b.get("kind"), b.get("target"), b.get("version"))
 
+    @app.post("/api/projects/{name}/drift-check", dependencies=[api])
+    async def drift_check(name: str, request: Request):
+        b = await request.json()
+        return guard(ws.drift_check, name, b.get("target"))
+
     @app.get("/api/projects/{name}/consent", dependencies=[api])
     def consent_list(name: str):
         return {"consent": guard(ws.consent_list, name)}

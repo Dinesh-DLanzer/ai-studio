@@ -262,6 +262,9 @@ class Workspace(SettingsMixin):
     def select_version(self, name, kind, target, k):
         return self.pipeline_domain.select_version(name, kind, target, k)
 
+    def drift_check(self, name, target):
+        return self.pipeline_domain.drift_check(name, target)
+
     def identity_sheet(self, name, char_id, views=None, actor="local"):
         return self._characters.identity_sheet(name, char_id, views=views, actor=actor)
 

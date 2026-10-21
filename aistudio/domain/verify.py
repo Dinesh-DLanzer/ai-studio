@@ -7,7 +7,7 @@ import threading
 import time
 import urllib.request
 
-from aistudio import aisettings, chat as chat_mod, costlog, languages as lang_mod, project as project_mod, roles as roles_mod, verify as verify_mod
+from aistudio import aisettings, character_check, chat as chat_mod, costlog, languages as lang_mod, project as project_mod, roles as roles_mod, verify as verify_mod
 from aistudio.domain.common import ServiceError
 from aistudio.providers import base as pbase, config as pconf
 
@@ -136,7 +136,7 @@ class VerifyDomain:
         elif scope == "assets":
             art, rules = {"images": imgs, "files_present": sorted(stills)}, verify_mod.lint_assets(imgs, stills, brief)
         elif scope == "shots":
-            art, rules = shots, verify_mod.lint_shots(shots, imgs, stills, lang)
+            art, rules = shots, verify_mod.lint_shots(shots, imgs, stills, lang) + character_check.drift_findings(p, [s["id"] for s in shots.get("shots", [])])
         elif scope == "todos":
             art = self.ws._todo_store(p)
             rules = verify_mod.lint_todos(art)

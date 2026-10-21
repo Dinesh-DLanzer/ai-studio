@@ -2,6 +2,7 @@ import tests._hermetic as HERM  # noqa: F401
 import json
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from aistudio import costlog, tool_registry
 from aistudio.service import ServiceError
@@ -310,6 +311,56 @@ class VariantTests(CastBase):
         self.assertEqual(res["discarded"], [2])
         self.assertGreater(costlog.split(self.p)["discarded"], 0)
         self.assertTrue(self.ws.approve_shot("demo", "s01")["final_ok"])
+
+
+class DriftTests(CastBase):
+    def setUp(self):
+        super().setUp()
+        for t in ("meena", "main_place", "s01"):
+            self.run_image(t)
+
+    def fake_review(self, score):
+        from aistudio.roles import RoleRunner
+        text = json.dumps({"scores": {"meena": score, "ghost": 0.1}, "summary": "checked"})
+        return patch.object(RoleRunner, "review", autospec=True, return_value={"text": text, "model": "fake/vision", "provider": "fake", "cost": 0.001, "cost_source": "fake"})
+
+    def test_parser_keeps_only_known_characters_and_never_invents_scores(self):
+        from aistudio import character_check as cc
+        self.assertEqual(cc.parse_drift('x {"scores": {"a": 1.4, "b": "hi", "z": 0.2}}', ["a", "b"])["scores"], {"a": 1.0})
+        self.assertEqual(cc.parse_drift("no json", ["a"])["scores"], {})
+
+    def test_check_is_a_proposal_only_and_the_paid_call_needs_approval(self):
+        rows = costlog.read_log(self.p)
+        prop = self.ws.drift_check("demo", "s01")
+        self.assertEqual((prop["kind"], prop["status"], prop["options"]), ("review", "pending", {"review_type": "drift"}))
+        self.assertGreater(prop["price"], 0)
+        with self.fake_review(0.9) as review:
+            with self.assertRaises(ServiceError):
+                self.ws.execute("demo", prop["id"])
+            self.assertEqual(review.call_count, 0)
+        self.assertEqual(costlog.read_log(self.p), rows)
+        self.assertFalse((self.p / "checks" / "s01.json").exists())
+
+    def test_approved_check_stores_scores_and_verification_flags_low_ones(self):
+        prop = self.ws.drift_check("demo", "s01")
+        self.ws.approve_human("demo", prop["id"])
+        with self.fake_review(0.35):
+            res = self.ws.execute("demo", prop["id"])
+        self.assertEqual(res["review"]["scores"], {"meena": 0.35})
+        saved = json.loads((self.p / "checks" / "s01.json").read_text())
+        self.assertEqual((saved["scores"], saved["threshold"]), ({"meena": 0.35}, 0.6))
+        self.assertEqual(costlog.read_log(self.p)[-1]["stage"], "vision")
+        with patch("aistudio.roles.RoleRunner.review", side_effect=AssertionError("no paid call from verification")):
+            findings = self.ws.verify_status("demo")["shots"]["findings"]
+        self.assertIn("identity drift", next(x for x in findings if x["where"] == "s01")["issue"])
+        saved["scores"] = {"meena": 0.9}
+        (self.p / "checks" / "s01.json").write_text(json.dumps(saved))
+        self.assertFalse([x for x in self.ws.verify_status("demo")["shots"]["findings"] if "identity drift" in x["issue"]])
+
+    def test_needs_a_character_reference(self):
+        with self.assertRaises(ServiceError):
+            self.ws.drift_check("demo", "main_place")
+        self.assertTrue(api_docs.agent_allowed("POST", "/api/projects/{name}/drift-check"))
 
 
 @unittest.skipUnless(HAVE_API, "needs fastapi + httpx")

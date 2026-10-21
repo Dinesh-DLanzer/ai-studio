@@ -235,6 +235,21 @@ class PipelineDomain:
             return {"source": source.relative_to(p.resolve()).as_posix(), "source_sha": _sha(source), "prompt": str(options.get("prompt", "")),
                     "seconds": sp.seconds, "aspect_ratio": "16:9", "resolution": "720p", "provider": sp.provider}, sp.model, sp.price
         if kind == "review":
+            if options.get("review_type") == "drift":      # PAID vision: only ever through this proposal (a human approves the exact price)
+                f = self._review_file(p, target)
+                doc = self.ws._read(p, "images.json", {"images": []})
+                by = {i.get("id"): i for i in doc["images"]}
+                shot = next((s for s in self.ws._read(p, "shots.json", {"shots": []})["shots"] if s["id"] == target), None)
+                if shot:      # the shot's own references, else those of its first-frame still
+                    ids = [r.get("id") if isinstance(r, dict) else str(r) for r in shot.get("refs") or []] or by.get(Path(shot.get("first_frame") or "").stem, {}).get("refs", [])
+                else:
+                    ids = by.get(target, {}).get("refs", [])
+                chars = [c for c in dict.fromkeys(ids) if by.get(c, {}).get("kind") == "character" and (p / by[c]["out"]).is_file() and c != target]
+                if not chars:
+                    raise ServiceError(f"{target} has no character with a made reference image to compare against")
+                e = self.ws._primary("vision", p)
+                return {"review_type": "drift", "target": target, "file": f.resolve().relative_to(p.resolve()).as_posix(), "file_sha": _sha(f), "provider": e["provider"]["id"],
+                        "characters": chars, "refs": [{"path": by[c]["out"], "sha": _sha(p / by[c]["out"])} for c in chars]}, e["model"], REVIEW_PRICE
             if options.get("review_type") == "character":
                 f = self._source_file(p, options.get("file"), "character image")
                 e = self.ws._primary("vision", p)
@@ -513,6 +528,10 @@ class PipelineDomain:
         return {"proposal": proposal, "from": meta_rel, "changed": changed, "seed": meta.get("seed", "not sent"),
                 "note": "Providers do not promise identical results, even with the same inputs."}
 
+    def drift_check(self, name, target):
+        """PROPOSE the paid identity-drift check of a shot or still (nothing is spent; a human approves the exact price)."""
+        return self.propose(name, "review", target, options={"review_type": "drift"})
+
     def _pin(self, role, p, payload, model):
         """The approved provider/model as a chain entry, so the shot's own model runs first (the rest of the chain stays as fallback)."""
         return self.ws.runner().entry_for(role, payload.get("provider"), model, p)
@@ -521,6 +540,16 @@ class PipelineDomain:
         f = inputs / payload["file"]
         outdir = p / "checks" / f.stem
         outdir.mkdir(parents=True, exist_ok=True)
+        if payload.get("review_type") == "drift":
+            f_frames = frames_mod.extract(f, outdir, 3, 4) if f.suffix == ".mp4" and f.read_bytes()[:7] != b"FAKEMP4" else ([] if f.suffix == ".mp4" else [str(f)])
+            raw = self.ws.runner().review(character_check.build_drift_prompt(payload["characters"]), [str(inputs / r["path"]) for r in payload["refs"]] + f_frames,
+                                          {"max_tokens": 800, "temperature": 0.0}, project_dir=p, grant=grant, allow_paid=self.ws.ai_settings()["settings"].get("allow_paid", False))
+            res = {**character_check.parse_drift(raw["text"], payload["characters"]), "target": target, "file": payload["file"], "model": raw["model"], "cost": raw["cost"],
+                   "threshold": character_check.DRIFT_THRESHOLD, "when": datetime.now().isoformat(timespec="seconds")}
+            log = {**log, "model": raw["model"], "provider": raw["provider"], "cost_source": raw["cost_source"]}
+            with self._logged_output(p, {**log, "timestamp": datetime.now().isoformat(timespec="seconds"), "resolution": "", "cost": raw["cost"]}):
+                project_mod.save_json(p / "checks", f"{target}.json", res)
+            return {"kind": "review", "review_type": "drift", "review": res}
         if payload.get("review_type") == "character":
             raw = self.ws.runner().review(character_check.build_character_check_prompt(), [str(f)], {"max_tokens": 1500, "temperature": 0.2}, project_dir=p, grant=grant, allow_paid=self.ws.ai_settings()["settings"].get("allow_paid", False))
             review = {**character_check.parse_character_analysis(raw["text"]), "file": payload["file"], "model": raw["model"], "cost": raw["cost"], "when": datetime.now().isoformat(timespec="seconds")}
