@@ -321,10 +321,23 @@ class Workspace(SettingsMixin):
         from aistudio import consent
         return consent.read(self.pdir(name))
 
-    def consent_record(self, name, subject, statement, kind="real_person"):
-        """HUMAN session only (the one route is agent=False). Not an MCP/crew tool."""
+    def _asset_sha(self, name, asset_id):
+        p = self.pdir(name)
+        img = next((i for i in self._read(p, "images.json", {"images": []})["images"] if i.get("id") == asset_id), None)
+        f = p / str(img["out"]) if img and img.get("out") else None
+        if not f or not f.is_file():
+            raise ServiceError(f"asset {asset_id} has no file to bind consent to")
+        return _sha(f)
+
+    def consent_record(self, name, subject, statement, kind="real_person", asset_id=None):
+        """HUMAN session only (the one route is agent=False). Not an MCP/crew tool. With asset_id the consent is bound to that file's bytes."""
         from aistudio import consent
-        return consent.record(self.pdir(name), subject, statement, kind)
+        return consent.record(self.pdir(name), subject, statement, kind, sha=self._asset_sha(name, asset_id) if asset_id else None)
+
+    def consent_mark(self, name, asset_id):
+        """HUMAN session only: mark the asset's current file bytes as a real person, so consent bound to those bytes is required whatever the flag says."""
+        from aistudio import consent
+        return consent.mark_real_person(self.pdir(name), asset_id, self._asset_sha(name, asset_id))
 
     def edit_get(self, name):
         return self._storyboard.edit_get(name)
@@ -361,6 +374,9 @@ class Workspace(SettingsMixin):
 
     def edit_still(self, name, still_id, prompt, edit_mode="inpaint_insertion", mask_mode="MASK_MODE_BACKGROUND"):
         return self._storyboard.edit_still(name, still_id, prompt, edit_mode=edit_mode, mask_mode=mask_mode)
+
+    def clip_tool(self, name, tool, clip_id, **kw):
+        return self._storyboard.clip_tool(name, tool, clip_id, **kw)
 
     def extend_clip(self, name, clip_id, prompt, seconds=5):
         return self._storyboard.extend_clip(name, clip_id, prompt, seconds=seconds)
