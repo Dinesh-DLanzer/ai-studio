@@ -110,6 +110,7 @@ export default function Help() {
                   <li>Every paid action shows its exact price and runs only after a human approves that exact request. If the prompt, model, price or input image changes afterwards, the approval is void.</li>
                   <li>A budget must be approved first. Generation stops at 130% of the estimate and after 3 final attempts per shot, unless you override on purpose.</li>
                   <li>Nothing is ever deleted: replaced or rejected files go to Discarded, deleted projects go to the trash, and both can be restored.</li>
+                  <li>Real people need recorded consent for the exact file. A file the app cannot prove the origin of (an upload or an import) is marked <b>Unverified</b> until you clear it with <b>Clear for use</b>.</li>
                   <li>Agents and API keys can propose but never approve. Provider keys are write-only: once saved they are never shown again.</li>
                 </ul>
               </Card>

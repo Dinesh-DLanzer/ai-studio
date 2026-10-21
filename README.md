@@ -25,6 +25,9 @@ Describe your idea to **Tara**, the built-in producer. She interviews you, write
 
 | | |
 |---|---|
+| **Cinematic direction and cast** | Camera moves, framing and lens per shot (sent natively when the model supports it, written into the prompt when not), start and end frames, identity sheets, variants with a version strip, and drift checks so characters stay the same. |
+| **Audio, library and publishing** | Voiceover, music, sound effects, lip sync and captions through the providers you add; a library of reusable assets; a YouTube upload that only a human can start, private by default. |
+| **Works with your editor** | Export OTIO, FCP XML, EDL and subtitles; edit a still or clip in an external app and bring it back; panels for Premiere, Resolve, After Effects and Blender (see `integrations/`). |
 | **Tara, your producer** | A chat that interviews you (idea, characters, places, logo, brand colours, length, language, budget), writes the storyboard, then shows a **production checklist** with one *Next* button and **Generate all**. |
 | **Storyboard to assets** | `Story.md` becomes the shot list and the asset list: shared style, character and background master images, one scene frame per shot. Upload your own images or generate them. |
 | **Clips, one at a time** | Every clip shows its exact price first. Watch it, listen, approve it or discard it (nothing is ever erased). |
@@ -97,6 +100,7 @@ Spending money on AI is the risky part, so the rules live in the engine, not in 
 - Every paid action (image, clip, edit, extension, character analysis or vision review) is a **proposal** with its exact price. A human approves that proposal in the page or terminal. It runs once; if the prompt, model, price or input file changes, the approval is void.
 - A budget must be approved first. A stop-loss (130%) and a 3-attempts-per-shot limit are enforced by the engine.
 - **Tara cannot generate, approve or upload anything.** She is told the project's real state every turn, and the page's checklist is the source of truth.
+- Real people need recorded consent bound to the exact file, and a file the app cannot prove the origin of stays **unverified** until a human clears it in the page.
 - Agents and API keys can propose but never approve. Tara can suggest an action card but never approves or executes it. Provider keys are write-only.
 - The server binds to `127.0.0.1`, needs a token, and rejects foreign Host and Origin headers. See [SECURITY.md](SECURITY.md) for the honest limits.
 
@@ -202,7 +206,9 @@ docs/img/      the screenshots in this README
 - Providers change prices and filters. Verify prices and model names before a big run.
 - Not in the editor yet: stickers, filters, effects, automatic captions.
 - Free chat models vary in quality. An unreadable answer is retried once, and you can pick a more reliable model in Settings.
-- Single-user and local only. Multi-user or hosted use is not supported.
+- Single-user and local. Hosted, multi-user use is a foundation only (per-tenant folders and checks); authentication, organisations and Postgres are not built, so do not expose it.
+- Many provider adapters and editor panels are tested against fixtures and fake apps, not live accounts or real Premiere, Resolve, After Effects, Blender or ComfyUI installs. Try each once with a small request.
+- Windows file locking is covered by simulated tests only.
 
 ## Contributing
 

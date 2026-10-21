@@ -205,11 +205,16 @@ def _unverified_shas(pdir):
     return {digest for digest, (path, _meta) in metadata.items() if digest not in verified}
 
 
+MEDIA_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".tif", ".tiff", ".mp4", ".mov", ".webm", ".mkv", ".mp3", ".wav", ".m4a", ".aac", ".ogg", ".flac"}
+
+
 def unverified_media(pdir):
     """List unverified project media by relative file and current SHA for the human clearance UI."""
     shas = _unverified_shas(pdir)
     out = []
     for path in _project_media(pdir):
+        if path.suffix.lower() not in MEDIA_SUFFIXES or any(part.startswith(".") or part == "_discarded" for part in path.relative_to(Path(pdir)).parts):
+            continue                       # the clearance list shows media only, not Story.md, json docs, history or trash
         digest = _sha(path)
         if digest in shas:
             try:

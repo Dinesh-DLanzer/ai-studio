@@ -908,6 +908,7 @@ def create_app(root=None, token=None, rates_path=None, transport=None, static_di
 
     @app.get("/api/projects/{name}/clip-tools", dependencies=[api])
     def clip_tools(name: str):
+        import shutil
         from aistudio import tools as local_tools
         from aistudio.domain.spec import AI_TOOLS
         from aistudio.providers import config as provider_config
@@ -917,15 +918,17 @@ def create_app(root=None, token=None, rates_path=None, transport=None, static_di
         for tool_id in local_ids:
             ready = tool_id in available_local
             result.append({"id": tool_id, "kind": "local", "available": ready,
-                           "reason": None if ready else ("ffmpeg is not installed" if not __import__("shutil").which("ffmpeg") else "required FFmpeg filter is unavailable"),
+                           "reason": None if ready else ("ffmpeg is not installed" if not shutil.which("ffmpeg") else "required FFmpeg filter is unavailable"),
                            "consent": "Source consent is checked when required"})
         runner = ws.runner()
         entries = runner.resolve("video", ws.pdir(name))
         catalog = ws.catalog()
+        from aistudio.providers.adapters.fake import FakeAdapter
+        is_test = ws._fake_for("video", ws.pdir(name))        # a test project proposes through the fake provider, exactly as the propose route does use the fake provider, which proposes every tool at $0
         for tool_id, task in AI_TOOLS.items():
-            capable = False
+            capable = is_test and task in FakeAdapter.task_methods
             reasons = []
-            for entry in entries:
+            for entry in ([] if is_test else entries):
                 if entry.get("problem"):
                     reasons.append(str(entry["problem"]))
                     continue

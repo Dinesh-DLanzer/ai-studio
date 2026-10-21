@@ -32,9 +32,9 @@ export default function CastPanel({ project, spec, stills, hasMaster, onBatch, o
       .catch(() => {});
   }, [base, spec.id]);
   const loadConsent = useCallback(() => api<{ consent: Consent[] }>("GET", `${base}/consent`).then((r) => setConsent(r.consent)).catch(() => {}), [base]);
-  const loadProvenance = useCallback(() => api<{ unverified: UnverifiedFile[] }>("GET", `${base}/consent/provenance`).then((r) => setUnverified(r.unverified)), [base]);
+  const loadProvenance = useCallback(() => api<{ unverified: UnverifiedFile[] }>("GET", `${base}/consent/provenance`).then((r) => setUnverified(r.unverified.filter((f) => f.file.startsWith(`stills/${spec.id}.`) || f.file.startsWith(`stills/${spec.id}_`)))), [base, spec.id]);
   useEffect(() => { void loadConsent(); }, [loadConsent]);
-  useEffect(() => { void loadProvenance(); }, [loadProvenance]);
+  useEffect(() => { loadProvenance().catch(() => {}); }, [loadProvenance, stills.join("|")]);   // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     setDrift(null);
     fetch(fileUrl(project, `checks/${spec.id}.json`)).then((r) => (r.ok ? r.json() : null)).then(setDrift).catch(() => {});
@@ -66,7 +66,7 @@ export default function CastPanel({ project, spec, stills, hasMaster, onBatch, o
   const clearForUse = (item: UnverifiedFile) => run(async () => {
     if (!(await confirmDialog(`I confirm this file does not show a real person: ${item.file}. This records human clearance for these exact file bytes.`, { title: "Clear file for use?", ok: "I confirm" }))) return;
     await api("POST", `${base}/consent/clear`, { sha: item.sha, clearance: "not_a_real_person" });
-    toast("ok", `${item.file} is cleared for use.`); await loadProvenance();
+    toast("ok", `${item.file} is cleared for use.`); await loadProvenance().catch(() => {});
   });
 
   return (
