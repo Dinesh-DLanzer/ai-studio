@@ -3,6 +3,7 @@
 Everything here returns plain JSON-able dicts for the web API, and NEVER returns a secret (only whether it is set and its last 4 characters).
 """
 import re
+from datetime import date
 import shutil
 import time
 
@@ -339,6 +340,7 @@ class SettingsMixin:
         errs = pricing_mod.validate_card(card)
         if errs:
             raise _err("; ".join(errs))
+        card = {**card, "retrieved_at": date.today().isoformat(), "source": "manual"}      # a price the user typed is dated today
         doc = self._models_doc()
         doc.setdefault("prices", {})[pricing_mod.key(pid, model)] = card
         self._save_models_doc(doc)

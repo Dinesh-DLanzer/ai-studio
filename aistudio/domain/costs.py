@@ -149,7 +149,13 @@ class CostDomain:
 
     def costs(self, name):
         p = self.ws.pdir(name)
-        return {"split": costlog.split(p), "rows": costlog.read_log(p), "budget": self.ws._read(p, "budget.json", {})}
+        rows = costlog.read_log(p)
+        for r in rows:      # quoted vs charged: flag a charge more than 10% above the quote (rows from before the column have no quote)
+            try:
+                r["over_quoted"] = float(r["quoted"]) > 0 and float(r["cost"]) > float(r["quoted"]) * 1.1
+            except (KeyError, TypeError, ValueError):
+                r["over_quoted"] = False
+        return {"split": costlog.split(p), "rows": rows, "budget": self.ws._read(p, "budget.json", {})}
 
     def sync(self, name):
         """Resolve clips left pending by a timeout: fetch real status/cost and save the clip."""

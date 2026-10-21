@@ -5,6 +5,7 @@ import unittest
 from datetime import date
 from pathlib import Path
 
+from aistudio import costlog
 from aistudio.pricing import Pricing, validate_card, key
 
 V = {"kind": "video", "per_second": {"720p": 0.1}}
@@ -92,6 +93,19 @@ class TestQuotesAgree(unittest.TestCase):
         self.assertEqual(_age(self.ws.pricing(), {"ptype": "fake", "card": V}), [])
         self.ws.approve_human("demo", prop["id"])
         self.assertEqual(self.ws.execute("demo", prop["id"])["kind"], "clip")
+        row = costlog.read_log(self.p)[-1]
+        self.assertEqual(float(row["quoted"]), 0.6)      # the quote is stored next to the charge
+
+    def test_costs_flags_overrun(self):
+        costlog.append_log(self.p, {"shot": "a", "stage": "final", "attempt": "1", "cost": 1.2, "quoted": 1.0, "result": "completed"})
+        costlog.append_log(self.p, {"shot": "b", "stage": "final", "attempt": "1", "cost": 1.1, "quoted": 1.0, "result": "completed"})
+        costlog.append_log(self.p, {"shot": "c", "stage": "final", "attempt": "1", "cost": 9, "result": "completed"})      # no quote: never flagged
+        self.assertEqual([r["over_quoted"] for r in self.ws.costs("demo")["rows"]], [True, False, False])
+
+    def test_price_override_is_dated_today(self):
+        card = self.ws.price_put("fk", "vid-a", {**V, "retrieved_at": "2020-01-01", "source": "me"})["card"]
+        self.assertEqual((card["retrieved_at"], card["source"]), (date.today().isoformat(), "manual"))
+        self.assertEqual(self.ws.pricing().age_days(card), 0)
 
     def test_pricing_hash_changes_with_new_fields(self):
         h = self.ws.costs_domain.fingerprints(self.p)["pricing_hash"]
