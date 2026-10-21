@@ -220,7 +220,7 @@ class TestHardeningYouTube(unittest.TestCase):
         edit_doc = {
             "tracks": {
                 "video": [
-                    {"id": "t1", "file": "clips/scene1.mp4"}
+                    {"id": "t1", "src": "clips/scene1.mp4"}
                 ]
             }
         }

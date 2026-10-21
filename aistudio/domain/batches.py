@@ -130,13 +130,13 @@ class BatchDomain:
                     shots_doc = self.ws._read(p, "shots.json")
                     if shots_doc and "shots" in shots_doc:
                         orig_len = len(shots_doc["shots"])
-                        shots_doc["shots"] = [s for s in shots_doc["shots"] if not (s.get("recipe") in runs or (s.get("id") in targets and not s.get("final_clip")))]
+                        shots_doc["shots"] = [s for s in shots_doc["shots"] if not ((s.get("recipe") in runs or s.get("id") in targets) and not s.get("final_clip"))]
                         if len(shots_doc["shots"]) != orig_len:
                             self.ws.put_shots(name, shots_doc)
                     images_doc = self.ws._read(p, "images.json")
                     if images_doc and "images" in images_doc:
                         orig_len = len(images_doc["images"])
-                        images_doc["images"] = [i for i in images_doc["images"] if not (i.get("recipe") in runs or (i.get("id") in targets and not (p / str(i.get("out", ""))).is_file()))]
+                        images_doc["images"] = [i for i in images_doc["images"] if not ((i.get("recipe") in runs or i.get("id") in targets) and not (p / str(i.get("out", ""))).is_file())]
                         if len(images_doc["images"]) != orig_len:
                             self.ws.put_images(name, images_doc)
                 f.unlink(missing_ok=True)

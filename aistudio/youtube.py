@@ -271,10 +271,12 @@ def check_consent(project_dir):
                 for track in edit_doc.get("tracks", {}).values():
                     if isinstance(track, list):
                         for item in track:
-                            rel = item.get("file") or item.get("source") or item.get("path")
-                            if rel:
-                                fp = p / rel
-                                if fp.is_file():
+                            if not isinstance(item, dict):
+                                continue
+                            rel = item.get("src") or item.get("file") or item.get("source") or item.get("path")
+                            if isinstance(rel, str) and rel:
+                                fp = (p / rel).resolve()
+                                if fp.is_relative_to(p.resolve()) and fp.is_file():
                                     h = _sha(fp)
                                     if h in marked:
                                         shas_to_check.append(h)

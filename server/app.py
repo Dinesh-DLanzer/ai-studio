@@ -711,7 +711,7 @@ def create_app(root=None, token=None, rates_path=None, transport=None, static_di
 
     @app.put("/api/projects/{name}/images", dependencies=[api])
     async def put_images(name: str, request: Request):
-        guard(ws.put_images, name, await request.json())
+        guard(ws.put_images, name, await request.json(), is_agent=request.state.scope == "agent")
         return {"ok": True}
 
     @app.post("/api/projects/{name}/upload", dependencies=[api])
