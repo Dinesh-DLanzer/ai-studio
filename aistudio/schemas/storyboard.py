@@ -1,5 +1,5 @@
 """Pydantic schemas for storyboard shots, images and timeline assets."""
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 from pydantic import Field
 from .base import SchemaModel
 
@@ -16,6 +16,9 @@ class Shot(SchemaModel):
     final_clip: Optional[str] = None
     note: Optional[str] = None
     camera: Optional[str] = None
+    direction: Optional[Dict[str, Any]] = None
+    end_frame: Optional[str] = None
+    keyframes: Optional[List[Dict[str, Any]]] = None
     action: Optional[str] = None
     voice_mode: Optional[str] = None
     voice_line: Optional[str] = None

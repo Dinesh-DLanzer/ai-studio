@@ -136,6 +136,14 @@ The sections before the shots become the project's assets: each "### <Name>" und
 <what we see>
 **Camera**
 <one camera move>
+**Camera move:** <a supported camera movement such as dolly-in, orbit-left or tracking>
+**Framing:** <a supported framing such as wide, medium or close-up>
+**Angle:** <eye-level, low, high, dutch, overhead or ground>
+**Lens:** <lens in mm and optional aperture, e.g. 35mm, f/2.0>
+**Lighting:** <plain-English lighting direction>
+**Preset:** <optional camera preset id>
+**End frame:** <optional existing image id or path>
+**Keyframe:** <optional time in seconds, then image id or path>
 **Action**
 <one action>
 **Voice** (ON-CAMERA)        (use ON-CAMERA if a character speaks to camera, OFF-CAMERA for narration, SILENT for none)

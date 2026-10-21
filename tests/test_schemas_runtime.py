@@ -29,7 +29,7 @@ class TestRuntimeSchemas(unittest.TestCase):
         self.ws.put_shots("demo", shots)
         self.ws.put_images("demo", images)
         self.assertEqual(project.load_json(self.ws.pdir("demo"), "shots.json"),
-                         {**shots, "schema_version": 1})
+                         {**shots, "schema_version": 2})
         self.assertEqual(project.load_json(self.ws.pdir("demo"), "images.json"),
                          {**images, "schema_version": 1})
 
@@ -71,16 +71,16 @@ class TestRuntimeSchemas(unittest.TestCase):
         original = {"shots": [], "future": {"a": 1}}
         before = json.loads(json.dumps(original))
         migrated = migrate("shots", original)
-        self.assertEqual(migrated, {**original, "schema_version": 1})
+        self.assertEqual(migrated, {**original, "schema_version": 2})
         self.assertEqual(original, before)
         loaded = load_doc("shots", original)
-        self.assertEqual(loaded, {**original, "schema_version": 1})
+        self.assertEqual(loaded, {**original, "schema_version": 2})
         project.save_json(self.ws.pdir("demo"), "shots.json", loaded)
         self.assertEqual(project.load_json(self.ws.pdir("demo"), "shots.json"), loaded)
         self.assertEqual(load_doc("shots", project.load_json(self.ws.pdir("demo"), "shots.json")), loaded)
 
-    def test_all_document_kinds_have_current_v1(self):
-        self.assertEqual(CURRENT, {"shots": 1, "images": 1, "edit": 1, "brief": 1, "todos": 1})
+    def test_all_document_kinds_have_current_versions(self):
+        self.assertEqual(CURRENT, {"shots": 2, "images": 1, "edit": 1, "brief": 1, "todos": 1})
 
     def test_put_error_strings_remain_unchanged(self):
         cases = (
@@ -101,7 +101,7 @@ class TestRuntimeSchemas(unittest.TestCase):
         path = self.ws.pdir("demo")
         shots = project.load_json(path, "shots.json")
         images = project.load_json(path, "images.json")
-        self.assertEqual(shots["schema_version"], 1)
+        self.assertEqual(shots["schema_version"], 2)
         self.assertEqual(images["schema_version"], 1)
         self.assertEqual(project.validate_shots(shots), [])
         self.assertEqual(project.validate_images(images), [])
