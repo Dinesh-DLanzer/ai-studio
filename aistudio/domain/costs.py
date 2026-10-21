@@ -170,7 +170,14 @@ class CostDomain:
                     continue
                 if res["status"] == "pending":
                     continue
-                r["cost"] = res.get("cost", 0)
+                new_cost = res.get("cost", 0)
+                if res["status"] == "done" and res.get("cost_source") != "reported":
+                    # not billed-by-provider: the recomputed number lacks reference/audio charges, so the quote logged at execute is a floor
+                    try:
+                        new_cost = max(float(new_cost or 0), float(r.get("cost") or 0))
+                    except (TypeError, ValueError):
+                        pass
+                r["cost"] = new_cost
                 r["cost_source"] = res.get("cost_source", "")
                 r["result"] = "failed" if res["status"] == "failed" else "completed"
                 if res["status"] == "done":
