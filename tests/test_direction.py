@@ -193,3 +193,14 @@ class TestDirectionFailsClosed(unittest.TestCase):
         a = ws.batches.digest(p, "clip", "s1", "vid-a", 0.4)
         shots(ws, ("s1", 4, {"direction": {"movement": "orbit-left"}}))
         self.assertNotEqual(a, ws.batches.digest(p, "clip", "s1", "vid-a", 0.4))
+
+
+class TestCertainRefusalIsNotOfferedForApproval(unittest.TestCase):
+    def test_propose_is_refused_up_front_for_a_request_the_adapter_will_reject(self):
+        ws, p = make(self)
+        (p / "stills").mkdir(exist_ok=True)
+        for n in ("a", "b"):
+            (p / "stills" / f"{n}.png").write_bytes(b"x")
+        # the fake adapter has no preflight objection: normal shots still resolve (guards against over-blocking)
+        shots(ws, ("s1", 4, {}))
+        resolve(ws, p, "clip", "s1")

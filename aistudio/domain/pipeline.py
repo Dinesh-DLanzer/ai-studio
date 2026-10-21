@@ -188,7 +188,8 @@ class PipelineDomain:
                 payload["camera_native"] = sp.camera["native"]
             if end:      # only present when asked for, so the request digest of ordinary clips is unchanged
                 payload.update(end_frame=end, end_frame_sha=_sha(p / end))
-            found = [r for r in sp.refs if (p / r["path"]).is_file()]      # ids without a still on disk have nothing to send (the quote still counts them)
+            root = p.resolve()
+            found = [r for r in sp.refs if (p / r["path"]).resolve().is_relative_to(root) and (p / r["path"]).is_file()]      # contained in the project      # ids without a still on disk have nothing to send (the quote still counts them)
             if found:      # reference images are bound by path and bytes like the frames
                 payload["refs"] = [{"path": r["path"], "sha": _sha(p / r["path"])} for r in found]
             return payload, sp.model, sp.price

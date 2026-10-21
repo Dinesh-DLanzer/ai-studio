@@ -36,7 +36,7 @@ image(model, prompt, refs=(), aspect_ratio="9:16", opts=None): POST /models/{mod
 
 video_submit(model, req): POST /models/{model}:predictLongRunning body
   {"instances":[inst], "parameters":{"aspectRatio": req["aspect_ratio"], "durationSeconds": int(req["seconds"]), "resolution": req["resolution"]}}
-  where inst = {"prompt": req["prompt"]} plus, when req.get("first_frame") is a path, "image": {"bytesBase64Encoded": b64_of(path), "mimeType": mime_of(path)}.
+  where inst = {"prompt": req["prompt"]} plus, when req.get("first_frame") is a path, "image": {"inlineData": {"mimeType", "data"}} (verified 2026-10-21; the extension call still uses bytesBase64Encoded).
   Response {"name": "models/veo-3.1-.../operations/abc"} -> return {"job_id": name, "model": model}.
 video_poll(job): GET /{job_id} -> if not body.get("done"): {"status":"pending","error":None,"cost":None}.
   If done and body has "error": {"status":"failed","error": error.get("message") or "generation failed","cost":None}.
@@ -172,24 +172,34 @@ class GoogleAdapter(Adapter):
     def _veo_image(path):
         return {"inlineData": {"mimeType": mime_of(path), "data": b64_of(path)}}
 
-    def video_submit(self, model, req):
+    @staticmethod
+    def preflight(model, req):
+        """Why Veo will refuse this request (None when fine). Used by video_submit and at propose time so a certain refusal is never approved."""
         first, last, refs = req.get("first_frame"), req.get("last_frame"), list(req.get("refs") or [])
-        seconds = int(req["seconds"])
+        seconds = int(req.get("seconds") or 0)
         if req.get("camera_native"):
-            raise Rejected("Veo has no native camera parameters; put the camera wording in the prompt")
+            return "Veo has no native camera parameters; put the camera wording in the prompt"
         if last and not first:
-            raise Rejected("Veo needs a start image to use an end frame")
+            return "Veo needs a start image to use an end frame"
         if refs:
             if "lite" in model:
-                raise Rejected("Veo 3.1 Lite does not accept reference images")
+                return "Veo 3.1 Lite does not accept reference images"
             if len(refs) > 3:
-                raise Rejected("Veo accepts at most 3 reference images, %d given" % len(refs))
+                return "Veo accepts at most 3 reference images, %d given" % len(refs)
             if seconds != 8:
-                raise Rejected("Veo reference images need an 8 second clip, %d given" % seconds)
+                return "Veo reference images need an 8 second clip, %d given" % seconds
             if first or last:
-                raise Rejected("Veo reference images together with a start or end frame are not verified, so they are not sent")
-        if req["resolution"] in ("1080p", "4k") and seconds != 8:
-            raise Rejected("Veo %s needs an 8 second clip, %d given" % (req["resolution"], seconds))
+                return "Veo reference images together with a start or end frame are not verified, so they are not sent"
+        if req.get("resolution") in ("1080p", "4k") and seconds != 8:
+            return "Veo %s needs an 8 second clip, %d given" % (req["resolution"], seconds)
+        return None
+
+    def video_submit(self, model, req):
+        problem = self.preflight(model, req)
+        if problem:
+            raise Rejected(problem)
+        first, last, refs = req.get("first_frame"), req.get("last_frame"), list(req.get("refs") or [])
+        seconds = int(req["seconds"])
         inst = {"prompt": req["prompt"]}
         if first:
             inst["image"] = self._veo_image(first)

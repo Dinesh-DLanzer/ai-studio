@@ -176,3 +176,14 @@ class TestVeoFrames(unittest.TestCase):
 
     def test_features(self):
         self.assertEqual(GoogleAdapter.request_features, {"end_frame", "refs"})
+
+
+class PreflightTests(unittest.TestCase):
+    def test_preflight_matches_the_refusals_and_has_no_side_effects(self):
+        from aistudio.providers.adapters.google import GoogleAdapter as G
+        ok = {"first_frame": None, "last_frame": None, "refs": [], "seconds": 8, "resolution": "720p"}
+        self.assertIsNone(G.preflight("veo-3.1-generate-preview", ok))
+        self.assertIn("start image", G.preflight("veo-3.1-generate-preview", {**ok, "last_frame": "x.png"}))
+        self.assertIn("8 second", G.preflight("veo-3.1-generate-preview", {**ok, "refs": ["a"], "seconds": 4}))
+        self.assertIn("Lite", G.preflight("veo-3.1-lite-generate-preview", {**ok, "refs": ["a"]}))
+        self.assertIn("native camera", G.preflight("veo-3.1-generate-preview", {**ok, "camera_native": {"x": 1}}))

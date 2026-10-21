@@ -145,6 +145,11 @@ class Adapter:
     type = ""
     capabilities = frozenset()
     default_base_url = ""
+    @staticmethod
+    def preflight(model, req):
+        """Optional: a reason this adapter will certainly refuse the request, checked when a proposal is made. None = no objection."""
+        return None
+
     request_features = frozenset()      # request features this adapter really transmits (for example "end_frame"); none is ever dropped silently
 
     def __init__(self, conn, transport=None):

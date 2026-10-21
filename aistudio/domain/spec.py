@@ -13,6 +13,16 @@ ROLE = {"image": "image", "image_edit": "image", "clip": "video", "clip_extend":
 KIND = {"video": "video", "image": "image"}
 
 
+def cfg_types():
+    from aistudio.providers import config as cfg
+    return cfg.PROVIDER_TYPES
+
+
+def cfg_adapter(ptype):
+    from aistudio.providers import config as cfg
+    return cfg.adapter_class(ptype)
+
+
 @dataclass
 class GenerationSpec:
     kind: str
@@ -210,6 +220,16 @@ def resolve(ws, p, kind, target, options=None, loose=False):
     cam = {"prompt_text": shot.get("camera") or prompt_text, "native": native}
     if cam["prompt_text"] and profile["camera"]["mode"] == "none":
         warnings.append("this model has no camera control; the camera note stays in the prompt only")
+    if not loose and entry.get("ptype") in cfg_types():      # a request the adapter will certainly refuse is never offered for approval
+        try:
+            adapter = cfg_adapter(entry["ptype"])
+            sent = [r for r in shot_refs if (p / r["path"]).is_file()]
+            objection = adapter.preflight(entry["model"], {"first_frame": ff or None, "last_frame": end or None, "refs": sent, "seconds": seconds,
+                                                           "resolution": res, "camera_native": cam["native"]})
+        except Exception:
+            objection = None
+        if objection:
+            raise ServiceError(f"{entry['model']} cannot run this shot: {objection}")
     price = runner.video_price(entry, {"seconds": seconds, "resolution": res, "audio": audio}, len(shot_refs))      # reference charges are part of the quote
     if price is None:
         raise ServiceError(f"No price for {entry['model']} at {res} ({seconds}s). Set it in Settings > Model Configuration.")
