@@ -170,6 +170,9 @@ class TestBlenderRoutes(unittest.TestCase):
         res = self.c.post(DIRECTION.format(shot="s01"), headers=self.human_headers,
                           json={"direction": {"lens_mm": -5}})
         self.assertEqual(res.status_code, 400)
+        res = self.c.post(DIRECTION.format(shot="s01"), headers=self.human_headers,
+                          json={"direction": "dolly-in"})
+        self.assertEqual(res.status_code, 400)
         self.assertNotIn("direction", self.shots()[0])
 
     def test_direction_merges_into_the_existing_direction(self):

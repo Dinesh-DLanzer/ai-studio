@@ -786,7 +786,7 @@ def create_app(root=None, token=None, rates_path=None, transport=None, static_di
         """Apply a validated direction to a shot (human session only: a device may look, not write)."""
         human_session(request)
         b = await json_body(request)
-        direction = b.get("direction") if isinstance(b.get("direction"), dict) else {k: v for k, v in b.items() if k != "replace"}
+        direction = b["direction"] if "direction" in b else {k: v for k, v in b.items() if k != "replace"}
         return guard(ws.apply_direction, name, shot, direction, bool(b.get("replace")))
 
     @app.post("/api/projects/{name}/previs/render", dependencies=[api])
