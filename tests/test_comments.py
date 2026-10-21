@@ -190,5 +190,60 @@ class TestComments(unittest.TestCase):
             zpath.unlink(missing_ok=True)
 
 
+class TestCommentRoutes(unittest.TestCase):
+    def setUp(self):
+        from fastapi.testclient import TestClient
+        from server.app import create_app
+
+        self.root = tempfile.mkdtemp()
+        self.app = create_app(self.root, token="session-token", static_dir="/nonexistent")
+        self.c = TestClient(self.app)
+        self.S = {"x-aistudio-token": "session-token"}
+
+        # Create API key for agent tests
+        key_res = self.c.post("/api/keys", json={"name": "agent-key"}, headers=self.S)
+        self.key = key_res.json()["key"]
+        self.A = {"x-aistudio-token": self.key}
+
+        # Create project
+        self.c.post("/api/projects", json={"name": "demo"}, headers=self.S)
+
+    def test_comment_routes_permissions(self):
+        # GET is agent allowed
+        res = self.c.get("/api/projects/demo/comments", headers=self.A)
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.json(), {"comments": []})
+
+        # POST comment: Agent forbidden (403), Session allowed (200)
+        c_body = {"target": "edit", "text": "Need tighter cut", "author": "Human", "time": 1.5}
+        self.assertEqual(self.c.post("/api/projects/demo/comments", json=c_body, headers=self.A).status_code, 403)
+        res_post = self.c.post("/api/projects/demo/comments", json=c_body, headers=self.S)
+        self.assertEqual(res_post.status_code, 200)
+        cid = res_post.json()["id"]
+
+        # PATCH comment: Agent forbidden (403), Session allowed (200)
+        patch_body = {"id": cid, "action": "resolve"}
+        self.assertEqual(self.c.patch("/api/projects/demo/comments", json=patch_body, headers=self.A).status_code, 403)
+        res_patch = self.c.patch("/api/projects/demo/comments", json=patch_body, headers=self.S)
+        self.assertEqual(res_patch.status_code, 200)
+        self.assertEqual(res_patch.json()["status"], "resolved")
+
+        # Import feedback: Agent forbidden (403), Session allowed (200)
+        fb_body = json.dumps({"comments": [{"target": "edit", "text": "Feedback from reviewer", "author": "Rev"}]})
+        self.assertEqual(self.c.post("/api/projects/demo/comments/import-feedback", content=fb_body, headers=self.A).status_code, 403)
+        res_fb = self.c.post("/api/projects/demo/comments/import-feedback", content=fb_body, headers=self.S)
+        self.assertEqual(res_fb.status_code, 200)
+        self.assertEqual(res_fb.json()["imported"], 1)
+
+        # Review package export: Agent forbidden (403)
+        self.assertEqual(self.c.post("/api/projects/demo/review-package", json={}, headers=self.A).status_code, 403)
+
+        # DELETE comment: Agent forbidden (403), Session allowed (200)
+        self.assertEqual(self.c.delete(f"/api/projects/demo/comments?id={cid}", headers=self.A).status_code, 403)
+        res_del = self.c.delete(f"/api/projects/demo/comments?id={cid}", headers=self.S)
+        self.assertEqual(res_del.status_code, 200)
+        self.assertTrue(res_del.json()["deleted"])
+
+
 if __name__ == "__main__":
     unittest.main()

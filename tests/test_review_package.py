@@ -1,5 +1,6 @@
 import html
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -153,6 +154,46 @@ class TestReviewPackage(unittest.TestCase):
 
         # The escaped versions should exist
         self.assertIn(html.escape(xss_script, quote=True), html_text)
+
+    def test_cli_review_export_and_import(self):
+        from aistudio import cli
+
+        exports_dir = self.pdir / "exports"
+        exports_dir.mkdir(exist_ok=True)
+        video_file = exports_dir / f"{self.pname}_cli.mp4"
+        if not make_tiny_mp4(video_file):
+            self.skipTest("ffmpeg not available or failed to create test MP4")
+
+        # Set AISTUDIO_HOME to test root
+        old_home = os.environ.get("AISTUDIO_HOME")
+        os.environ["AISTUDIO_HOME"] = str(self.root)
+        try:
+            out_zip = self.root / "cli_pkg.zip"
+            lines = []
+            rc = cli.main(["review", "export", self.pname, "--out", str(out_zip), "--json"], out=lines.append)
+            self.assertEqual(rc, 0)
+            self.assertTrue(out_zip.is_file())
+            self.assertIn(str(out_zip), "".join(lines))
+
+            # Test review import CLI
+            fb_file = self.root / "feedback.json"
+            fb_file.write_text(json.dumps({
+                "comments": [{"target": "edit", "text": "CLI feedback", "author": "Reviewer via CLI"}]
+            }), encoding="utf-8")
+
+            import_lines = []
+            rc_imp = cli.main(["review", "import", self.pname, str(fb_file), "--json"], out=import_lines.append)
+            self.assertEqual(rc_imp, 0)
+            res = json.loads("".join(import_lines))
+            self.assertEqual(res["imported"], 1)
+
+            c_list = comments.list_comments(self.pdir)
+            self.assertTrue(any(c["author"] == "Reviewer via CLI" for c in c_list))
+        finally:
+            if old_home is not None:
+                os.environ["AISTUDIO_HOME"] = old_home
+            else:
+                os.environ.pop("AISTUDIO_HOME", None)
 
 
 if __name__ == "__main__":

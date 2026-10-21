@@ -18,7 +18,7 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from starlette.background import BackgroundTask
 from fastapi.staticfiles import StaticFiles
 
-from aistudio import activity as activitymod, apikeys, editor as editormod, importzip as importmod, jobs as jobsmod, notifications
+from aistudio import activity as activitymod, apikeys, comments as commentsmod, editor as editormod, importzip as importmod, jobs as jobsmod, notifications, review_package as reviewmod
 from aistudio.service import REPO, ServiceError, Workspace
 from server import api_docs
 
@@ -1021,6 +1021,66 @@ def create_app(root=None, token=None, rates_path=None, transport=None, static_di
         path = guard(ws.export_bundle, name)
         return FileResponse(path, media_type="application/zip", filename=f"{name}-edit-bundle.zip",
                             background=BackgroundTask(Path(path).unlink, missing_ok=True))
+
+    @app.get("/api/projects/{name}/comments", dependencies=[api])
+    def comments_list(name: str, target: str = "", status: str = ""):
+        pdir = guard(ws.pdir, name)
+        return {"comments": guard(commentsmod.list_comments, pdir, target=target or None, status=status or None)}
+
+    @app.post("/api/projects/{name}/comments", dependencies=[api])
+    async def comment_add(name: str, request: Request):
+        human_session(request)
+        pdir = guard(ws.pdir, name)
+        body = await request.json() if (await request.body()) else {}
+        return guard(commentsmod.add_comment, pdir,
+                     target=body.get("target", "edit"),
+                     text=body.get("text", ""),
+                     author=body.get("author", "User"),
+                     time=body.get("time"),
+                     cid=body.get("id"),
+                     source=body.get("source"))
+
+    @app.patch("/api/projects/{name}/comments", dependencies=[api])
+    async def comment_patch(name: str, request: Request):
+        human_session(request)
+        pdir = guard(ws.pdir, name)
+        body = await request.json() if (await request.body()) else {}
+        cid = body.get("id") or ""
+        action = str(body.get("action") or body.get("status") or "").lower()
+        if action in ("resolved", "resolve"):
+            return guard(commentsmod.resolve_comment, pdir, cid)
+        elif action in ("open", "reopen"):
+            return guard(commentsmod.reopen_comment, pdir, cid)
+        else:
+            raise HTTPException(400, f"unknown comment action: {action!r} (must be 'resolve' or 'reopen')")
+
+    @app.delete("/api/projects/{name}/comments", dependencies=[api])
+    async def comment_delete(name: str, request: Request, id: str = ""):
+        human_session(request)
+        pdir = guard(ws.pdir, name)
+        if not id and (await request.body()):
+            body = await request.json()
+            id = body.get("id", "")
+        if not id:
+            raise HTTPException(400, "missing comment id")
+        return guard(commentsmod.delete_comment, pdir, id)
+
+    @app.post("/api/projects/{name}/review-package", dependencies=[api])
+    async def review_package_export(name: str, request: Request):
+        human_session(request)
+        guard(ws.pdir, name)
+        body = await request.json() if (await request.body()) else {}
+        include_prompts = bool(body.get("include_prompts", False))
+        path = guard(reviewmod.export, ws, name, out=None, include_prompts=include_prompts)
+        return FileResponse(path, media_type="application/zip", filename=f"{name}-review.zip",
+                            background=BackgroundTask(Path(path).unlink, missing_ok=True))
+
+    @app.post("/api/projects/{name}/comments/import-feedback", dependencies=[api])
+    async def comments_import_feedback(name: str, request: Request):
+        human_session(request)
+        guard(ws.pdir, name)
+        data = await request.body()
+        return guard(commentsmod.import_feedback, ws, name, data)
 
     @app.post("/api/projects/{name}/audio", dependencies=[api])
     async def audio_upload(name: str, filename: str, request: Request):
