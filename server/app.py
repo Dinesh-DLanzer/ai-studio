@@ -288,6 +288,18 @@ def create_app(root=None, token=None, rates_path=None, transport=None, static_di
         if getattr(request.state, "scope", "") != "session":      # also enforced by api_docs (agent=False); belt and braces
             raise HTTPException(403, "starting, stopping or undoing a crew run needs the human session")
 
+    @app.get("/api/recipes", dependencies=[api])
+    def recipes_list(project: str = "", available: int = 0):
+        from aistudio import recipes
+        return {"recipes": guard(recipes.list_recipes, ws, project or None, bool(available))}
+
+    @app.post("/api/projects/{name}/recipes/{rid}/plan", dependencies=[api])
+    async def recipe_plan(name: str, rid: str, request: Request):
+        from aistudio import recipes
+        human_session(request)      # only creates an awaiting-approval batch; the human then approves it at the exact total
+        body = await request.json() if (await request.body()) else {}
+        return guard(recipes.plan, ws, name, rid, body.get("inputs") or {}, "local")
+
     @app.post("/api/projects/{name}/crew/runs", dependencies=[api])
     async def crew_run_start(name: str, request: Request):
         from aistudio.crew import agents as crew_agents, runtime as crew_runtime

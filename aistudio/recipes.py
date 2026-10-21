@@ -228,6 +228,11 @@ def list_recipes(ws, project=None, only_available=False):
     return out
 
 
+def is_number_input(recipe_id, key):
+    """CLI helper: --input values arrive as strings; number inputs must be passed as numbers."""
+    return any(i["key"] == key and i["type"] == "number" for i in get(recipe_id).get("inputs", []))
+
+
 # ---------------------------------------------------------------- inputs (validated, then only ever substituted as text)
 def _file_input(p, key, value, suffixes):
     rel = value

@@ -106,6 +106,11 @@ TOOLS = {
     "generate_all_plan": ("Freeze the plan for everything left to generate as a batch (exact prices; nothing is spent or approved). Returns a batch id; a human must approve it with approve_batch.", S(name=STR), lambda ws, a: ws.batches.create(a["name"], actor="mcp")),
     "build_identity_sheet": ("Build a character's identity sheet: a batch of image proposals for its missing views (front, three-quarter, profile, full-body, expression), conditioned on the master image. Nothing is spent or approved; a human must approve the returned batch with approve_batch.",
                              S(name=STR, character=STR, views={"type": "array", "optional": True}), lambda ws, a: ws.identity_sheet(a["name"], a["character"], a.get("views"), actor="mcp")),
+    "list_recipes": ("Read-only: one-click recipes (product ad, product showcase, photo to clip, ...) with their inputs, and whether every step can run with the configured models (reasons when not). Free.",
+                     S(name={"type": "string", "optional": True}), lambda ws, a: {"recipes": __import__("aistudio.recipes", fromlist=["list_recipes"]).list_recipes(ws, a.get("name") or None)}),
+    "plan_recipe": ("Plan a recipe in a project: validates the inputs, prices every paid step and creates ONE awaiting-approval batch (nothing is approved, run or spent). A human must approve it with approve_batch at the exact total. Real-person recipes need a recorded consent.",
+                    S(name=STR, recipe=STR, inputs={"type": "object"}),
+                    lambda ws, a: __import__("aistudio.recipes", fromlist=["plan"]).plan(ws, a["name"], a["recipe"], a.get("inputs") or {}, actor="mcp")),
     "get_batch": ("Status of a batch and each of its items.", S(name=STR, id=STR), lambda ws, a: ws.batches.get(a["name"], a["id"])),
     "approve_batch": (
         "Request human approval for the exact batch total. Uses MCP elicitation when available; otherwise returns a one-time code challenge. confirm=true is not accepted.",
@@ -176,7 +181,7 @@ TOOLS = {
 
 
 FREE_READ = ("get_project", "read_doc", "get_brief", "get_model_setup", "get_todos", "get_verification", "get_proposal", "get_spec", "get_costs",
-             "list_providers", "production_progress", "get_batch", "get_edit", "unregistered_stills")
+             "list_providers", "production_progress", "get_batch", "get_edit", "unregistered_stills", "list_recipes")
 FREE_WRITE = ("write_doc", "update_brief", "rename_asset", "rename_shot", "convert_story", "update_shots", "update_images", "update_edit",
               "import_stills", "add_todo", "toggle_todo", "remove_todo", "export_edit", "export_project")
 PAID = ("propose", "analyze_character", "edit_still", "extend_clip", "generate_all_plan", "build_identity_sheet")
@@ -185,7 +190,7 @@ PAID = ("propose", "analyze_character", "edit_still", "extend_clip", "generate_a
 APPROVAL = ("approve_budget", "approve_proposal", "approve_batch", "approve_shot", "run_proposal", "run_batch", "reject_proposal", "set_max_attempts",
             "estimate", "discard", "restore")
 HUMAN_ONLY = ("delete_project", "create_project", "list_projects", "list_trash", "restore_trash", "upload_image", "list_jobs", "get_job",
-              "list_crew_runs", "get_crew_run", "search_library")      # reading runs is for humans and MCP; a crew agent has no use for it
+              "list_crew_runs", "get_crew_run", "search_library", "plan_recipe")      # reading runs is for humans and MCP; a crew agent has no use for it
 
 META = {}
 for _names, _cls, _w in ((FREE_READ, "free", False), (FREE_WRITE, "free", True), (PAID, "paid", False), (APPROVAL, "approval", False), (HUMAN_ONLY, "human_only", False)):
