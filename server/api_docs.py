@@ -68,7 +68,9 @@ R = [
     ("POST", "/api/projects/{name}/batches/{bid}/run", False, "Generation jobs", "Run an approved batch on the server, one item at a time. Each item is re-checked (model, price, request) first; a change stops that item as needs_reapproval. Returns a job id; poll the batch for progress.", "-", '{"job": "<id>"}'),
     # ---- generation jobs
     ("POST", "/api/projects/{name}/proposals/{pid}/execute", True, "Generation jobs", "Run a proposal a human ALREADY approved (spends money in real projects). Fails if not approved, changed, expired or over budget. Returns a job id.", '{"override": false}', '{"job": "<id>"}'),
-    ("GET", "/api/jobs/{jid}", True, "Generation jobs", "Poll a job: running (with progress for exports), done (result) or error.", "-", '{"status": "running|done|error", "result"?, "error"?, "progress"?}'),
+    ("GET", "/api/jobs", True, "Generation jobs", "The durable job ledger (survives a server restart). ?project= and ?state= filter it.", "-", '{"jobs": [{id, project, kind, target, state, progress, error, provider_job, batch_id, actor, created, updated}]}'),
+    ("GET", "/api/jobs/{jid}", True, "Generation jobs", "Poll a job: running (with progress for exports), done (result; also while the provider is still rendering) or error (failed, cancelled or needs_sync after a restart). state has the exact ledger state.", "-", '{"status": "running|done|error", "state", "result"?, "error"?, "progress"?}'),
+    ("POST", "/api/jobs/{jid}/cancel", False, "Generation jobs", "Cancel a job. Queued: stops at once. Running or waiting on a provider: asks it to stop, and the provider may still bill. Human session only.", "-", "the job row"),
     ("POST", "/api/projects/{name}/sync", False, "Generation jobs", "Resolve timed-out or interrupted jobs (fetches the real cost and clip if they finished).", "-", "sync report"),
     # ---- review and export
     ("GET", "/api/projects/{name}/edit", True, "Review and Export", "The editor's edit list (timeline: video, text, audio), what is missing, ffmpeg availability and past exports.", "-", '{"edit", "saved", "missing", "tools", "exports"}'),

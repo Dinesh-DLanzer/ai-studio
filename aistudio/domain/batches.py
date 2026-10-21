@@ -108,7 +108,7 @@ class BatchDomain:
         self._save(name, batch)
         return batch
 
-    def run(self, name, bid):
+    def run(self, name, bid, on_item=None):
         """Run an approved batch, item by item, stopping at the first problem. Returns the final batch."""
         p = self.ws.pdir(name)
         with project_lock.lock(p):
@@ -123,8 +123,12 @@ class BatchDomain:
                     continue
                 item["status"] = "running"
                 self._save(name, batch)
+                if on_item:
+                    on_item(item, "start")   # the job ledger records one child job per item
                 stop = self._run_item(name, p, item)
                 self._save(name, batch)
+                if on_item:
+                    on_item(item, "end")
                 if stop:
                     batch["status"] = stop
                     return batch

@@ -147,6 +147,11 @@ def main(argv=None, ask=input, out=print):
     p_plan.add_argument("project")
     p_plan.add_argument("--json", action="store_true")
 
+    p_jobs = sp.add_parser("jobs", help="List jobs from the durable job ledger")
+    p_jobs.add_argument("project", nargs="?", default="")
+    p_jobs.add_argument("--state", default="")
+    p_jobs.add_argument("--json", action="store_true")
+
     p_exp = sp.add_parser("export-project", help="Export project as zip")
     p_exp.add_argument("project")
     p_exp.add_argument("--include-discarded", action="store_true")
@@ -192,6 +197,15 @@ def main(argv=None, ask=input, out=print):
                 out(json.dumps(res, indent=2))
             else:
                 out(f"Project '{res.get('name', args.project)}' moved to trash: {res.get('trash')}")
+
+        elif args.cmd == "jobs":
+            from aistudio import jobs as jobsmod
+            res = jobsmod.list_jobs(ws.root, args.project or None, args.state or None)
+            if is_json:
+                out(json.dumps(res, indent=2))
+            else:
+                for j in res:
+                    out(f"{j['id']}  {j['project']:<20} {j['kind']:<8} {j['state']:<16} {j['target']}  {j['error']}".rstrip())
 
         elif args.cmd == "pending":
             proposals = ws.overview(args.project)["proposals"]

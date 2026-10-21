@@ -79,3 +79,10 @@ def save_activity(pdir: Path, items: list) -> None:
         tmp.replace(f)
     except Exception:
         pass
+
+
+def job_events(root, project: str, limit: int = 50) -> list:
+    """Recent jobs of the project from the durable ledger (any process, any restart), for the live event stream."""
+    from aistudio import jobs
+    keep = ("id", "kind", "target", "state", "progress", "error", "provider", "model", "batch_id", "updated")
+    return [{k: j[k] for k in keep} for j in jobs.list_jobs(root, project=project, limit=limit)]
