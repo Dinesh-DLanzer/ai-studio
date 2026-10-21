@@ -17,7 +17,7 @@ Contract (tests in tests/test_discard.py):
 from pathlib import Path
 import json
 import shutil
-from datetime import datetime
+from datetime import datetime, timezone
 
 
 def _check(pdir, rel):
@@ -59,11 +59,32 @@ def discard_file(pdir, rel, reason="", cost=0.0):
             dst = ddir / f"{stem}__{n}{suffix}"
             n += 1
     shutil.move(str(src), str(dst))
+
+    # Move sidecars belonging to src into _discarded
+    sidecar_names = [f"{src.name}.meta.json"]
+    if f"{src.stem}.meta.json" != f"{src.name}.meta.json":
+        sidecar_names.append(f"{src.stem}.meta.json")
+    for sc_name in sidecar_names:
+        sc = src.parent / sc_name
+        if sc.is_file():
+            dst_sc = ddir / f"{dst.name}.meta.json"
+            shutil.move(str(sc), str(dst_sc))
+
+    # Clean any orphaned .meta.json sidecars in src.parent (media file no longer present)
+    for orphan in src.parent.glob("*.meta.json"):
+        if orphan.is_file():
+            base_name = orphan.name[:-10]
+            if not (src.parent / base_name).is_file():
+                orphan_dst = ddir / orphan.name
+                if orphan_dst.exists():
+                    orphan_dst = ddir / f"{orphan.stem}__{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}.meta.json"
+                shutil.move(str(orphan), str(orphan_dst))
+
     rec = {
         "file": dst.relative_to(pdir).as_posix(),
         "cost": cost,
         "reason": reason,
-        "when": datetime.now().isoformat(),
+        "when": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "original": Path(rel).as_posix(),
     }
     records = _load(pdir)
@@ -93,6 +114,15 @@ def restore_file(pdir, rel_discarded):
         raise FileExistsError(rec["original"])
     dst.parent.mkdir(parents=True, exist_ok=True)
     shutil.move(str(src), str(dst))
+
+    # Restore sidecar if present in _discarded
+    for sc_candidate in [src.parent / f"{src.name}.meta.json", src.parent / f"{src.stem}.meta.json"]:
+        if sc_candidate.is_file():
+            orig_meta = dst.parent / f"{dst.name}.meta.json"
+            if not orig_meta.exists():
+                shutil.move(str(sc_candidate), str(orig_meta))
+            break
+
     del records[idx]
     _save(pdir, records)
     return dst

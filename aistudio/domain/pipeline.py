@@ -2,7 +2,7 @@
 from contextlib import contextmanager
 import json
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 import shutil
 import tempfile
@@ -188,14 +188,35 @@ class PipelineDomain:
     def _require_consent(self, p, kind, target):
         """Generation touching an asset marked real_person is refused without a human-recorded consent entry (propose AND execute)."""
         doc = self.ws._read(p, "images.json", {"images": []})
+        shas = []
         if kind == "image":
             spec = next((i for i in doc["images"] if i.get("id") == target), {})
             ids = [target, *spec.get("refs", [])]
+            if spec.get("out") and (p / spec["out"]).is_file():
+                shas.append(_sha(p / spec["out"]))
+            for r in spec.get("refs", []):
+                ref_img = next((i for i in doc["images"] if i.get("id") == r), None)
+                ref_path = p / str(ref_img["out"]) if ref_img and ref_img.get("out") else (p / "stills" / f"{r}.png")
+                if ref_path.is_file():
+                    shas.append(_sha(ref_path))
         else:
             shot = next((s for s in self.ws._read(p, "shots.json", {"shots": []})["shots"] if s["id"] == target), {})
             ids = [r.get("id") if isinstance(r, dict) else str(r) for r in shot.get("refs") or []]
             ids += [Path(shot[k]).stem for k in ("first_frame", "end_frame") if shot.get(k)]
+            for r in shot.get("refs") or []:
+                rid = r.get("id") if isinstance(r, dict) else str(r)
+                ref_img = next((i for i in doc["images"] if i.get("id") == rid), None)
+                ref_path = p / str(ref_img["out"]) if ref_img and ref_img.get("out") else (p / "stills" / f"{rid}.png")
+                if ref_path.is_file():
+                    shas.append(_sha(ref_path))
+            for k in ("first_frame", "end_frame"):
+                if shot.get(k):
+                    cand = p / shot[k]
+                    if cand.is_file():
+                        shas.append(_sha(cand))
         consent_mod.require_assets(p, doc, ids)
+        if shas:
+            consent_mod.require_shas(p, shas)
 
     def _require_source_consent(self, p, kind, target, options):
         """Editing, extending or restyling a real person's asset needs the same human-recorded consent, and consent is also bound to the file bytes:
@@ -265,9 +286,9 @@ class PipelineDomain:
             voice_id = str(voice.get("voice_id", ""))
         if kind == "tts" and not voice_id:
             raise ServiceError("tts needs a voice_id")
-        cloned = bool(options.get("cloned") or (kind == "tts" and voice.get("cloned")))
-        subject = str(options.get("voice_subject") or voice_id).strip()
-        if kind == "tts" and cloned:
+        cloned = bool(options.get("cloned") or (kind == "tts" and voice.get("cloned")) or kind == "voice_clone" or task == "voice_clone")
+        subject = str(options.get("voice_subject") or options.get("subject") or voice_id).strip()
+        if (kind in ("tts", "voice_clone") or task == "voice_clone") and cloned:
             consent_mod.require(p, subject, "voice")
         files, duration = [], 0
         for key in (("source",) if kind == "transcribe" else ("video", "audio") if kind == "lipsync" else ()):
@@ -594,7 +615,7 @@ class PipelineDomain:
             source = inputs / payload["source"]
             res = self.ws.runner().image_edit(source.as_posix(), payload["prompt"], edit_mode=payload["edit_mode"], mask_mode=payload["mask_mode"], project_dir=p, grant=grant)
             out = p / "stills" / f"{source.stem}_edit_a{attempt}.png"
-            row = {**log, "model": res["model"], "provider": res["provider"], "cost_source": res["cost_source"], "timestamp": datetime.now().isoformat(timespec="seconds"), "resolution": "", "cost": res["cost"]}
+            row = {**log, "model": res["model"], "provider": res["provider"], "cost_source": res["cost_source"], "timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds"), "resolution": "", "cost": res["cost"]}
             with self._logged_output(p, row):
                 out.parent.mkdir(parents=True, exist_ok=True)
                 out.write_bytes(res["bytes"])
@@ -607,7 +628,7 @@ class PipelineDomain:
             res = self.ws.runner().video_extend(source.as_posix(), payload["prompt"], seconds=payload["seconds"], aspect_ratio=payload["aspect_ratio"], resolution=payload["resolution"], project_dir=p, grant=grant)
             job = res.get("job") or {}
             row = {**log, "model": res.get("model") or model, "provider": res.get("provider") or log["provider"], "cost_source": res.get("cost_source", ""),
-                   "timestamp": datetime.now().isoformat(timespec="seconds"), "resolution": payload["resolution"], "seconds": str(payload["seconds"]), "job_id": job.get("job_id", "")}
+                   "timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds"), "resolution": payload["resolution"], "seconds": str(payload["seconds"]), "job_id": job.get("job_id", "")}
             if res.get("status") == "pending":
                 costlog.append_log(p, {**row, "cost": price, "result": "pending", "cost_source": "estimated"})
                 return {"kind": kind, "pending": True, "job_id": row["job_id"]}
@@ -632,7 +653,7 @@ class PipelineDomain:
             log = {**log, "model": res["model"], "provider": res["provider"], "cost_source": res["cost_source"]}
             data = res["bytes"]
             out = out.with_suffix(".jpg" if data[:3] == b"\xff\xd8\xff" else ".png")
-            with self._logged_output(p, {**log, "timestamp": datetime.now().isoformat(timespec="seconds"), "resolution": "2K", "cost": res["cost"]}):
+            with self._logged_output(p, {**log, "timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds"), "resolution": "2K", "cost": res["cost"]}):
                 out.parent.mkdir(parents=True, exist_ok=True)
                 out.write_bytes(data)
             self._write_meta(p, out, payload, {**log, "resolution": "2K"}, grant, res["cost"], kind, target, refs=[(r["path"], r["sha"]) for r in payload.get("refs", [])])
@@ -652,7 +673,7 @@ class PipelineDomain:
                                          required={"task": "image_to_video" if ff else "text_to_video", "end_frame": bool(end), "refs": len(payload.get("refs", []))})
             job = res.get("job") or {}
             row = {**log, "model": res.get("model") or model, "provider": res.get("provider") or log["provider"], "cost_source": res.get("cost_source", ""),
-                   "timestamp": datetime.now().isoformat(timespec="seconds"), "resolution": payload["resolution"], "seconds": str(payload["seconds"]),
+                   "timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds"), "resolution": payload["resolution"], "seconds": str(payload["seconds"]),
                    "job_id": job.get("job_id", "")}
             if res["status"] == "pending":
                 costlog.append_log(p, {**row, "cost": price, "result": "pending", "cost_source": "estimated"})
@@ -676,7 +697,7 @@ class PipelineDomain:
                                           resolution=payload["resolution"], project_dir=p, grant=grant)
         job = res.get("job") or {}
         row = {**log, "model": res.get("model") or log["model"], "provider": res.get("provider") or log["provider"], "cost_source": res.get("cost_source", ""),
-               "timestamp": datetime.now().isoformat(timespec="seconds"), "resolution": payload["resolution"], "seconds": str(payload["seconds"]), "job_id": job.get("job_id", "")}
+               "timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds"), "resolution": payload["resolution"], "seconds": str(payload["seconds"]), "job_id": job.get("job_id", "")}
         if res.get("status") == "pending":
             costlog.append_log(p, {**row, "cost": price, "result": "pending", "cost_source": "estimated"})
             return {"kind": kind, "pending": True, "job_id": row["job_id"]}
@@ -702,7 +723,7 @@ class PipelineDomain:
                                           seconds=payload.get("seconds", 0), language=payload.get("language", ""),
                                           options=payload.get("params", {}), chars=payload.get("chars", 0))
         row = {**log, "model": res.get("model", model), "provider": res.get("provider", payload.get("provider", "")),
-               "cost_source": res.get("cost_source", ""), "timestamp": datetime.now().isoformat(timespec="seconds"),
+               "cost_source": res.get("cost_source", ""), "timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds"),
                "seconds": str(payload.get("seconds", "")), "cost": res.get("cost", 0)}
         if res.get("status") == "pending":
             # a pending paid job may be billing already: keep the full quote as its cost so spend and the stop-loss do not drop to 0 when the
@@ -748,7 +769,7 @@ class PipelineDomain:
         meta = {"kind": kind, "target": target, "prompt": payload.get("prompt", ""), "negative": payload.get("negative", ""), "model": row.get("model", ""), "provider": row.get("provider", ""),
                 "seed": payload.get("seed", "not sent"), "refs": [{"id": Path(r).stem, "path": r, "sha": s} for r, s in refs],
                 "params": {"kind": kind, "resolution": row.get("resolution", ""), **{k: v for k, v in payload.items() if k not in skip}},
-                "spec_hash": grant.request_hash, "cost": cost, "created": datetime.now().isoformat(timespec="seconds"), "actor": grant.actor}
+                "spec_hash": grant.request_hash, "cost": cost, "created": datetime.now(timezone.utc).isoformat(timespec="seconds"), "actor": grant.actor}
         try:
             project_mod.save_json(p, out.relative_to(p).as_posix() + ".meta.json", meta)
         except OSError:
@@ -798,16 +819,16 @@ class PipelineDomain:
             raw = self.ws.runner().review(character_check.build_drift_prompt(payload["characters"]), [str(inputs / r["path"]) for r in payload["refs"]] + f_frames,
                                           {"max_tokens": 800, "temperature": 0.0}, project_dir=p, grant=grant, allow_paid=self.ws.ai_settings()["settings"].get("allow_paid", False))
             res = {**character_check.parse_drift(raw["text"], payload["characters"]), "target": target, "file": payload["file"], "model": raw["model"], "cost": raw["cost"],
-                   "threshold": character_check.DRIFT_THRESHOLD, "when": datetime.now().isoformat(timespec="seconds")}
+                   "threshold": character_check.DRIFT_THRESHOLD, "when": datetime.now(timezone.utc).isoformat(timespec="seconds")}
             log = {**log, "model": raw["model"], "provider": raw["provider"], "cost_source": raw["cost_source"]}
-            with self._logged_output(p, {**log, "timestamp": datetime.now().isoformat(timespec="seconds"), "resolution": "", "cost": raw["cost"]}):
+            with self._logged_output(p, {**log, "timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds"), "resolution": "", "cost": raw["cost"]}):
                 project_mod.save_json(p / "checks", f"{target}.json", res)
             return {"kind": "review", "review_type": "drift", "review": res}
         if payload.get("review_type") == "character":
             raw = self.ws.runner().review(character_check.build_character_check_prompt(), [str(f)], {"max_tokens": 1500, "temperature": 0.2}, project_dir=p, grant=grant, allow_paid=self.ws.ai_settings()["settings"].get("allow_paid", False))
-            review = {**character_check.parse_character_analysis(raw["text"]), "file": payload["file"], "model": raw["model"], "cost": raw["cost"], "when": datetime.now().isoformat(timespec="seconds")}
+            review = {**character_check.parse_character_analysis(raw["text"]), "file": payload["file"], "model": raw["model"], "cost": raw["cost"], "when": datetime.now(timezone.utc).isoformat(timespec="seconds")}
             log = {**log, "model": raw["model"], "provider": raw["provider"], "cost_source": raw["cost_source"]}
-            with self._logged_output(p, {**log, "timestamp": datetime.now().isoformat(timespec="seconds"), "resolution": "", "cost": raw["cost"]}):
+            with self._logged_output(p, {**log, "timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds"), "resolution": "", "cost": raw["cost"]}):
                 project_mod.save_json(outdir, "character_review.json", review)
             return {"kind": "review", "review_type": "character", "review": review}
         if f.suffix == ".mp4":
@@ -826,9 +847,9 @@ class PipelineDomain:
         res = {**clip_checklist.parse_review(raw["text"]), "cost": raw["cost"]}
         log = {**log, "model": raw["model"], "provider": raw["provider"], "cost_source": raw["cost_source"]}
         review = {k: res[k] for k in ("verdict", "findings", "summary")}
-        review.update({"target": target, "model": raw["model"], "cost": res.get("cost", 0), "when": datetime.now().isoformat(timespec="seconds"),
+        review.update({"target": target, "model": raw["model"], "cost": res.get("cost", 0), "when": datetime.now(timezone.utc).isoformat(timespec="seconds"),
                        "advisory": "A human still approves. A vision model cannot judge the spoken language."})
-        with self._logged_output(p, {**log, "timestamp": datetime.now().isoformat(timespec="seconds"), "resolution": "", "cost": res.get("cost", 0)}):
+        with self._logged_output(p, {**log, "timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds"), "resolution": "", "cost": res.get("cost", 0)}):
             project_mod.save_json(outdir, "review.json", review)
         return {"kind": "review", "review": review}
 
@@ -837,41 +858,42 @@ class PipelineDomain:
         through the normal discard path (moved to _discarded with its cost, restorable, never deleted). The shot (clip) or the asset (still)
         records selected_version, and the timeline / first-frame source now points at the chosen file. A human decision (not an agent route)."""
         p = self.ws.pdir(name)
-        if kind not in ("image", "clip"):
-            raise ServiceError("versions are for images and clips")
-        k = self._variant({"variant": k}) or (_ for _ in ()).throw(ServiceError("choose a version number"))
-        _ident(target, "target")
-        d = "stills" if kind == "image" else "clips"
-        pat = re.escape(target) + (r"\.v(\d+)\.[A-Za-z0-9]+" if kind == "image" else r"\.v(\d+)_final_a\d+\.mp4")
-        found = {}
-        for f in sorted((p / d).glob(f"{target}.v*")) if (p / d).is_dir() else []:
-            m = re.fullmatch(pat, f.name)
-            if m and f.is_file():
-                found.setdefault(int(m.group(1)), f.relative_to(p).as_posix())
-        if k not in found:
-            raise ServiceError(f"version {k} of {target} does not exist (have: {', '.join(map(str, sorted(found))) or 'none'})")
-        chosen = found[k]
-        for n, rel in sorted(found.items()):
-            if n != k:
-                self.ws.discard(name, rel, f"version {n} not selected (kept v{k})")
-        if kind == "clip":
-            doc = self.ws._read(p, "shots.json")
-            shot = next((s for s in doc["shots"] if s["id"] == target), None) or (_ for _ in ()).throw(ServiceError(f"unknown shot {target}"))
-            shot.update(selected_version=k, final_clip=chosen)
-            project_mod.save_json(p, "shots.json", doc)
-        else:
-            doc = self.ws._read(p, "images.json", {"images": []})
-            img = next((i for i in doc["images"] if i["id"] == target), None) or (_ for _ in ()).throw(ServiceError(f"unknown image id {target}"))
-            old = img["out"]
-            img.update(selected_version=k, out=chosen)
-            shots = self.ws._read(p, "shots.json", {"shots": []})
-            for s in shots.get("shots", []):
-                if s.get("first_frame") == old:
-                    s["first_frame"] = chosen
-            project_mod.save_json(p, "images.json", doc)
-            project_mod.save_json(p, "shots.json", shots)
-        self.ws._changed(name, "assets", "shots")
-        return {"kind": kind, "target": target, "selected_version": k, "file": chosen, "discarded": sorted(n for n in found if n != k)}
+        with project_lock.lock(p):
+            if kind not in ("image", "clip"):
+                raise ServiceError("versions are for images and clips")
+            k = self._variant({"variant": k}) or (_ for _ in ()).throw(ServiceError("choose a version number"))
+            _ident(target, "target")
+            d = "stills" if kind == "image" else "clips"
+            pat = re.escape(target) + (r"\.v(\d+)\.[A-Za-z0-9]+" if kind == "image" else r"\.v(\d+)_final_a\d+\.mp4")
+            found = {}
+            for f in sorted((p / d).glob(f"{target}.v*")) if (p / d).is_dir() else []:
+                m = re.fullmatch(pat, f.name)
+                if m and f.is_file():
+                    found.setdefault(int(m.group(1)), f.relative_to(p).as_posix())
+            if k not in found:
+                raise ServiceError(f"version {k} of {target} does not exist (have: {', '.join(map(str, sorted(found))) or 'none'})")
+            chosen = found[k]
+            for n, rel in sorted(found.items()):
+                if n != k:
+                    self.ws.discard(name, rel, f"version {n} not selected (kept v{k})")
+            if kind == "clip":
+                doc = self.ws._read(p, "shots.json")
+                shot = next((s for s in doc["shots"] if s["id"] == target), None) or (_ for _ in ()).throw(ServiceError(f"unknown shot {target}"))
+                shot.update(selected_version=k, final_clip=chosen)
+                project_mod.save_json(p, "shots.json", doc)
+            else:
+                doc = self.ws._read(p, "images.json", {"images": []})
+                img = next((i for i in doc["images"] if i["id"] == target), None) or (_ for _ in ()).throw(ServiceError(f"unknown image id {target}"))
+                old = img["out"]
+                img.update(selected_version=k, out=chosen)
+                shots = self.ws._read(p, "shots.json", {"shots": []})
+                for s in shots.get("shots", []):
+                    if s.get("first_frame") == old:
+                        s["first_frame"] = chosen
+                project_mod.save_json(p, "images.json", doc)
+                project_mod.save_json(p, "shots.json", shots)
+            self.ws._changed(name, "assets", "shots")
+            return {"kind": kind, "target": target, "selected_version": k, "file": chosen, "discarded": sorted(n for n in found if n != k)}
 
     def approve_shot(self, name, shot_id):
         p = self.ws.pdir(name)

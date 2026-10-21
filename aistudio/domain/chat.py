@@ -1,5 +1,5 @@
 """Chat domain: producer chat turns, chat history, attachments, and pending story management."""
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 import json
 import re
@@ -153,7 +153,7 @@ class ChatDomain:
         files = self._chat_attachments(name, p, attachments)
         history = self.ws._read(p, "chat.json", [])
         brief = self.ws._read(p, "brief.json", {})
-        now = datetime.now().isoformat(timespec="seconds")
+        now = datetime.now(timezone.utc).isoformat(timespec="seconds")
         res = {}
         test = self.ws.is_test(p)
         fake_chat = self.ws._fake_for("chat", p)

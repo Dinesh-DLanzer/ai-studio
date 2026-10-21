@@ -305,8 +305,8 @@ class Workspace(SettingsMixin):
     def put_shots(self, name, doc):
         return self._storyboard.put_shots(name, doc)
 
-    def put_images(self, name, doc):
-        return self._storyboard.put_images(name, doc)
+    def put_images(self, name, doc, is_agent=False):
+        return self._storyboard.put_images(name, doc, is_agent=is_agent)
 
     # ---------------------------------------------------------------- blender domain delegation
     def camera_move(self, name, shot, payload):
@@ -352,8 +352,36 @@ class Workspace(SettingsMixin):
 
     def _asset_sha(self, name, asset_id):
         p = self.pdir(name)
-        img = next((i for i in self._read(p, "images.json", {"images": []})["images"] if i.get("id") == asset_id), None)
-        f = p / str(img["out"]) if img and img.get("out") else None
+        aid = str(asset_id or "").strip()
+        f = None
+        # 1. images.json
+        img = next((i for i in self._read(p, "images.json", {"images": []})["images"] if i.get("id") == aid), None)
+        if img and img.get("out"):
+            cand = p / str(img["out"])
+            if cand.is_file():
+                f = cand
+        # 2. shots.json (videos, clips, frames)
+        if not f:
+            shots = self._read(p, "shots.json", {"shots": []}).get("shots", [])
+            shot = next((s for s in shots if s.get("id") == aid), None)
+            if shot:
+                for k in ("final_clip", "video", "clip", "first_frame"):
+                    if shot.get(k) and (p / str(shot[k])).is_file():
+                        f = p / str(shot[k])
+                        break
+        # 3. Direct or relative paths under project
+        if not f:
+            for cand in (
+                p / aid,
+                p / "clips" / aid,
+                p / "stills" / aid,
+                p / "videos" / aid,
+                p / "clips" / f"{aid}.mp4",
+                p / "stills" / f"{aid}.png",
+            ):
+                if cand.is_file():
+                    f = cand
+                    break
         if not f or not f.is_file():
             raise ServiceError(f"asset {asset_id} has no file to bind consent to")
         return _sha(f)

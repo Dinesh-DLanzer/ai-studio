@@ -22,6 +22,8 @@ Use PostgreSQL for hosted durable rows, with **Row Level Security (RLS)** polici
 
 Store project media in S3 compatible object storage under tenant scoped prefixes. Issue short lived signed URLs only after authorization. Encrypt provider credentials separately per organisation using KMS envelope encryption. Secrets must not be shared across tenants. Add tenant aware audit records for membership, key, project, approval, policy and data lifecycle changes.
 
+**Project and Lock Partitioning:** Projects and filesystem locks (`project_lock.lock`) are currently flat filesystem paths without tenant partitioning. Before hosted mode is enabled, projects and lock coordination must be explicitly tenant-partitioned (e.g. `<tenant_id>/<project>` hierarchy or tenant-scoped distributed locks) so that concurrent tenants cannot collide, access each other's projects, or block one another.
+
 ### Spending and billing
 
 An organisation owns a spend policy: approval threshold, monthly cap and whether autopilot is permitted. The policy evaluator can allow, require an administrator, or deny based on the remaining monthly capacity. Agents are propose only. Plan 10's project and workspace limits remain additional limits; organisation caps are an aggregate ceiling. Every spend decision and use of an approval grant must be attributable to an actor in the hosted tier.

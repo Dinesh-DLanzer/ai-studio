@@ -711,7 +711,7 @@ def create_app(root=None, token=None, rates_path=None, transport=None, static_di
 
     @app.put("/api/projects/{name}/images", dependencies=[api])
     async def put_images(name: str, request: Request):
-        guard(ws.put_images, name, await request.json())
+        guard(ws.put_images, name, await request.json(), is_agent=request.state.scope == "agent")
         return {"ok": True}
 
     @app.post("/api/projects/{name}/upload", dependencies=[api])
@@ -1384,9 +1384,29 @@ def create_app(root=None, token=None, rates_path=None, transport=None, static_di
         human_session(request)
         from aistudio import youtube
         body = await request.json()
-        findings = guard(youtube.run_preflight, ws.pdir(name), body.get("preset", ""))
-        return guard(youtube.upload_video, ws, name, body.get("preset", ""), body.get("privacy", "private"),
-                     body.get("confirm_title", ""), findings, runner)
+        preset = body.get("preset", "")
+        post_sha = body.get("sha256", "")
+        post_title = body.get("title") or body.get("confirm_title", "")
+        post_privacy = body.get("privacy", "")
+        if not post_sha:
+            raise HTTPException(400, "previewed sha256 is required")
+        if not post_title:
+            raise HTTPException(400, "previewed title is required")
+        if not post_privacy:
+            raise HTTPException(400, "previewed privacy is required")
+        if post_privacy not in ("private", "unlisted", "public"):
+            raise HTTPException(400, "invalid privacy")
+        findings = guard(youtube.run_preflight, ws.pdir(name), preset)
+        channel_status = guard(youtube.status, ws.secrets)
+        preview_info = guard(youtube.preview, ws.pdir(name), preset, findings, post_privacy, channel_status.get("channel_title", ""))
+        if post_sha != preview_info["sha256"]:
+            raise HTTPException(400, "sha256 mismatch")
+        if post_title != preview_info["title"]:
+            raise HTTPException(400, "title mismatch")
+        if post_privacy != preview_info["privacy"]:
+            raise HTTPException(400, "privacy mismatch")
+        return guard(youtube.upload_video, ws, name, preset, post_privacy,
+                     post_title, findings, runner, sha256=post_sha, title=post_title)
 
     # ---- the timeline also leaves as Final Cut Pro XML, a CMX 3600 EDL, captions and a Canva / Google Vids bundle (all free)
     @app.get("/api/projects/{name}/edit/export-fcpxml", dependencies=[api])

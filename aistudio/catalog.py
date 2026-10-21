@@ -42,7 +42,7 @@ def default_profile(ptype, card=None):
             "audio": "optional" if video else "none", "frames": {"start": True, "end": False, "keyframes": 0},
             "references": {"max": 1 if video else 14 if image else 0, "roles": []},
             "camera": {"mode": "prompt", "native": [], "param": None}, "seed": False, "negative_prompt": False, "tools": "json",
-            "source": "default", "verified_at": None}
+            "source": "default", "verified_at": None, "provider_type": ptype}
 
 
 class Catalog:
@@ -100,6 +100,7 @@ class Catalog:
         for layer in (comfy_layer, self.builtin(ptype, model), self.cached(provider_id, model), user and {**user, "source": "user"}):
             if layer:
                 out = _merge(out, layer)
+        out["provider_type"] = ptype
         return out
 
     def store(self, provider_id, model, partial):
@@ -120,27 +121,28 @@ class Catalog:
 
 def missing(profile, ptype, req):
     """Why a model cannot serve a request, or None. req = {"task", "end_frame": bool, "refs": int}."""
+    ptype = ptype or (profile or {}).get("provider_type") or (profile or {}).get("ptype") or ""
     task = req.get("task")
     if task in AI_TOOL_TASKS + AUDIO_TASKS:      # fail closed: profile and adapter must both declare support
         if task not in profile["tasks"]:
             return f"no {task.replace('_', ' ')} support"
-        if ptype in cfg.PROVIDER_TYPES and task not in cfg.adapter_class(ptype).task_methods:
+        if not ptype or ptype not in cfg.PROVIDER_TYPES or task not in cfg.adapter_class(ptype).task_methods:
             return f"its adapter cannot run {task.replace('_', ' ')} yet"
     if task and profile["tasks"] and task not in profile["tasks"]:
         return f"no {task.replace('_', ' ')} support"
     if req.get("end_frame"):
         if not profile["frames"]["end"]:
             return "no end-frame support"
-        if ptype in cfg.PROVIDER_TYPES and "end_frame" not in cfg.adapter_class(ptype).request_features:
+        if not ptype or ptype not in cfg.PROVIDER_TYPES or "end_frame" not in cfg.adapter_class(ptype).request_features:
             return "its adapter cannot send an end frame yet"
     if req.get("keyframes"):
         if profile["frames"].get("keyframes", 0) < req["keyframes"]:
             return f"accepts {profile['frames'].get('keyframes', 0)} keyframe(s), {req['keyframes']} given"
-        if ptype in cfg.PROVIDER_TYPES and "keyframes" not in cfg.adapter_class(ptype).request_features:
+        if not ptype or ptype not in cfg.PROVIDER_TYPES or "keyframes" not in cfg.adapter_class(ptype).request_features:
             return "its adapter cannot send keyframes yet"
     if req.get("refs", 0) > profile["references"]["max"]:
         return f"accepts at most {profile['references']['max']} reference image(s), {req['refs']} given"
-    if req.get("refs") and str(task).endswith("_video") and ptype in cfg.PROVIDER_TYPES and "refs" not in cfg.adapter_class(ptype).request_features:
+    if req.get("refs") and str(task).endswith("_video") and (not ptype or ptype not in cfg.PROVIDER_TYPES or "refs" not in cfg.adapter_class(ptype).request_features):
         return "its adapter cannot send reference images yet"
     return None
 
@@ -148,4 +150,4 @@ def missing(profile, ptype, req):
 def suggest(catalog, req):
     """Built-in models that have what the request needs (named in error messages)."""
     return [f"{e['provider_type']}:{e['pattern']}" for e in catalog.entries
-            if e["provider_type"] != "fake" and missing(_merge(default_profile(e["provider_type"]), e["profile"]), "", req) is None]
+            if e["provider_type"] != "fake" and missing(_merge(default_profile(e["provider_type"]), e["profile"]), e["provider_type"], req) is None]

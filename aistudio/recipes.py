@@ -298,15 +298,25 @@ def _fill(template, values):
 def _consent(ws, p, policy, rels):
     """Same rule as pipeline._require_consent: an asset flagged real_person needs a human-recorded consent. A 'required' recipe also needs
     at least one image that a human flagged as a real person (a typed name is never a face target)."""
+    p = Path(p)
     doc = ws._read(p, "images.json", {"images": []})
     by_out = {i.get("out"): i for i in doc.get("images", []) if isinstance(i, dict)}
     by_id = {i.get("id"): i for i in doc.get("images", []) if isinstance(i, dict)}
     ids, flagged = [], False
+    shas = []
     for rel in rels:
         asset = by_out.get(rel) or by_id.get(Path(rel).stem)
         ids += [Path(rel).stem] + ([asset["id"]] if asset else [])
         flagged = flagged or bool(asset and asset.get("real_person"))
+        f = p / rel
+        if f.is_file():
+            shas.append(_sha(f))
+    marked = consent_mod.real_person_shas(p)
+    if any(s in marked for s in shas):
+        flagged = True
     consent_mod.require_assets(p, doc, ids)
+    if shas:
+        consent_mod.require_shas(p, shas)
     if policy == "required" and not flagged:
         raise RecipeError("this recipe involves a real person: add the photo as an asset marked real_person with the subject's name, and have a human "
                           "record their consent first. Nothing was planned.")
@@ -372,6 +382,23 @@ def plan(ws, name, recipe_id, inputs, actor="local"):
     run = secrets.token_hex(4)
     shots_doc = ws._read(p, "shots.json", {"aspect_ratio": "9:16", "final_resolution": "720p", "shots": []})
     images_doc = ws._read(p, "images.json", {"style": "", "images": []})
+    # Clean up previous unexecuted/abandoned rcp* steps from shots.json and images.json
+    active_runs = set()
+    bdir = p / "batches"
+    if bdir.is_dir():
+        for bf in bdir.glob("*.json"):
+            try:
+                bdata = json.loads(bf.read_text(encoding="utf-8"))
+                if bdata.get("status") in ("approved", "running", "completed"):
+                    if bdata.get("extra", {}).get("recipe", {}).get("run"):
+                        active_runs.add(bdata["extra"]["recipe"]["run"])
+                    for it in bdata.get("items", []):
+                        if isinstance(it.get("recipe"), dict) and "run" in it["recipe"]:
+                            active_runs.add(it["recipe"]["run"])
+            except Exception:
+                pass
+    shots_doc["shots"] = [s for s in shots_doc.get("shots", []) if not (str(s.get("id", "")).startswith("rcp") and s.get("recipe") not in active_runs and not s.get("final_clip"))]
+    images_doc["images"] = [i for i in images_doc.get("images", []) if not (str(i.get("id", "")).startswith("rcp") and i.get("recipe") not in active_runs and not (p / str(i.get("out", ""))).is_file())]
     old = (json.loads(json.dumps(shots_doc)), json.loads(json.dumps(images_doc)))
     aspect = _aspect(recipe, shots_doc)
     shots_doc["aspect_ratio"] = aspect

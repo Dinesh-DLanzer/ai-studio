@@ -45,7 +45,8 @@ class TestKeyStore(unittest.TestCase):
 @unittest.skipUnless(HAVE, "needs the venv with fastapi + httpx")
 class TestKeyRoutes(unittest.TestCase):
     def setUp(self):
-        self.app = create_app(tempfile.mkdtemp(), token="tok", static_dir="/nonexistent")
+        self.root = tempfile.mkdtemp()
+        self.app = create_app(self.root, token="tok", static_dir="/nonexistent")
         self.c = TestClient(self.app)
         self.S = {"x-aistudio-token": "tok"}
         self.key = self.c.post("/api/keys", json={"name": "agent"}, headers=self.S).json()["key"]
@@ -75,6 +76,13 @@ class TestKeyRoutes(unittest.TestCase):
         self.assertEqual(self.call("post", "/api/projects", json={"name": "made-by-agent"}).status_code, 200)
         self.assertEqual(self.call("post", "/api/projects/demo/estimate", json={"failure": 0.2}).status_code, 200)
         self.assertEqual(self.c.get("/api/health").status_code, 200)
+
+    def test_an_agent_key_cannot_set_or_clear_real_person(self):
+        body = {"style": "", "images": [{"id": "zed", "kind": "other", "out": "stills/zed.png", "prompt": "x", "real_person": True, "subject": "Zed", "refs": []}]}
+        self.assertEqual(self.call("put", "/api/projects/demo/images", json=body).status_code, 200)
+        files = list(Path(self.root).rglob("images.json"))
+        zed = next(i for f in files for i in json.loads(f.read_text())["images"] if i["id"] == "zed")
+        self.assertFalse(zed.get("real_person"))
 
     def test_an_agent_key_cannot_approve_spend_or_change_settings(self):
         self.call("post", "/api/projects/demo/estimate", self.S, json={"failure": 0.2})

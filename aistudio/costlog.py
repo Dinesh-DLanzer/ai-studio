@@ -32,12 +32,21 @@ _WRITE_LOCK = threading.Lock()
 LOG_COLS = ["timestamp", "shot", "stage", "model", "resolution", "seconds", "attempt", "job_id", "cost", "result", "provider", "cost_source", "actor", "override", "quoted", "tenant_id"]
 
 
-def read_log(pdir):
+def read_log(pdir, tenant_id=None, all_tenants=False):
     p = Path(pdir) / "cost_log.csv"
     if not p.exists():
         return []
+    if not all_tenants and tenant_id is None:
+        try:
+            from .context import get_context
+            tenant_id = get_context().tenant_id
+        except Exception:
+            tenant_id = None
     with p.open(newline="", encoding="utf-8") as f:
-        return list(csv.DictReader(f))
+        rows = list(csv.DictReader(f))
+    if all_tenants or tenant_id is None:
+        return rows
+    return [r for r in rows if (r.get("tenant_id") or "local") == tenant_id]
 
 
 def _validate_row(row):
@@ -129,9 +138,9 @@ def record_result(pdir, row):
         _replace_rows(p, rows)
 
 
-def spent(pdir):
+def spent(pdir, tenant_id=None):
     total = 0.0
-    for r in read_log(pdir):
+    for r in read_log(pdir, tenant_id=tenant_id):
         c = r.get("cost", "")
         if c:
             total += float(c)
@@ -151,12 +160,12 @@ def _is_discarded(r, entries):
     return False
 
 
-def split(pdir):
+def split(pdir, tenant_id=None):
     d = Path(pdir) / "discarded.json"
     entries = json.loads(d.read_text(encoding="utf-8")) if d.exists() else []
     used = 0.0
     discarded = 0.0
-    for r in read_log(pdir):
+    for r in read_log(pdir, tenant_id=tenant_id):
         c = r.get("cost", "")
         cost = float(c) if c else 0.0
         if _is_discarded(r, entries):

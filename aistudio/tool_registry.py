@@ -67,7 +67,7 @@ TOOLS = {
     "rename_shot": ("Rename a shot id everywhere (clips, cost log, discarded history). Free.", S(name=STR, old=STR, new=STR), lambda ws, a: ws.rename_shot(a["name"], a["old"], a["new"])["shots"]),
     "convert_story": ("Parse Story.md and write shots.json + images.json. Free. Overwrites both.", S(name=STR), lambda ws, a: ws.convert_story(a["name"])),
     "update_shots": ("Replace shots.json (validated). Free. Changing shots needs a new estimate and human re-approval.", S(name=STR, doc={"type": "object"}), lambda ws, a: ws.put_shots(a["name"], a["doc"]) or {"ok": True}),
-    "update_images": ("Replace images.json (validated). Free.", S(name=STR, doc={"type": "object"}), lambda ws, a: ws.put_images(a["name"], a["doc"]) or {"ok": True}),
+    "update_images": ("Replace images.json (validated). Free.", S(name=STR, doc={"type": "object"}), lambda ws, a: ws.put_images(a["name"], a["doc"], is_agent=True) or {"ok": True}),
     "estimate": ("Compute budget estimate (free). A human must approve it through MCP elicitation or the one-time fallback code before generating.", S(name=STR, failure={"type": "number", "optional": True}), lambda ws, a: _m()._estimate_mcp(ws, a)),
     "approve_budget": (
         "Request human approval for the exact estimated budget. MCP elicitation is used when the client advertises it; otherwise a one-time code challenge is returned. confirm=true is not accepted.",

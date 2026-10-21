@@ -28,6 +28,15 @@ def _ensure_fts(root):
         return False
 
 
+def wipe_fts(root, tenant_id=None):
+    """Scope FTS wipe strictly to items belonging to the tenant."""
+    if not _ensure_fts(root):
+        return
+    tid = tenant_id or store.current_tenant()
+    with store.transaction(root) as tx:
+        tx.execute("DELETE FROM items_fts WHERE id IN (SELECT id FROM items WHERE tenant_id=?)", (tid,))
+
+
 def _sha(path):
     h = hashlib.sha256()
     with path.open("rb") as f:
@@ -87,8 +96,9 @@ def _upsert_many(root, items):
         for d in ready:
             tx.execute(sql, tuple(d[k] for k in ("id", "tenant_id", "actor", "project", "kind", "category", "file", "sha", "prompt", "model", "provider", "seed", "params", "cost", "status", "favorite", "created", "meta")))
         if has_fts:
-            tx.execute("DELETE FROM items_fts")
-            for d in ready: tx.execute("INSERT INTO items_fts (id,prompt,project,model) VALUES (?,?,?,?)", (d["id"], d["prompt"], d["project"], d["model"]))
+            for d in ready:
+                tx.execute("DELETE FROM items_fts WHERE id=?", (d["id"],))
+                tx.execute("INSERT INTO items_fts (id,prompt,project,model) VALUES (?,?,?,?)", (d["id"], d["prompt"], d["project"], d["model"]))
     ids = [d["id"] for d in ready]
     found = {r["id"]: r for r in store.query(root, "SELECT * FROM items WHERE tenant_id=? AND id IN (" + ",".join("?" for _ in ids) + ")", (store.current_tenant(), *ids))}
     return [found[i] for i in ids if i in found]

@@ -49,11 +49,38 @@ class StoryboardDomain:
         project_mod.save_json(self.ws.pdir(name), "shots.json", load_doc("shots", doc))
         self.ws._changed(name, "shots")
 
-    def put_images(self, name, doc):
+    def put_images(self, name, doc, is_agent=False):
         errs = project_mod.validate_images(doc)
         if errs:
             raise ServiceError("; ".join(errs))
-        project_mod.save_json(self.ws.pdir(name), "images.json", load_doc("images", doc))
+        p = self.ws.pdir(name)
+        existing = self.ws._read(p, "images.json", {"images": []})
+        existing_by_id = {i.get("id"): i for i in existing.get("images", []) if isinstance(i, dict) and i.get("id")}
+        from aistudio import consent as consent_mod
+        marked_assets = {x.get("asset") for x in consent_mod.read(p) if x.get("kind") == "real_person_sha" and x.get("asset")}
+        marked_subjects = {x.get("asset"): x.get("subject") for x in consent_mod.read(p) if x.get("kind") == "real_person_sha" and x.get("asset")}
+
+        for img in doc.get("images", []):
+            aid = img.get("id")
+            if aid in marked_assets:
+                img["real_person"] = True
+                if marked_subjects.get(aid):
+                    img["subject"] = marked_subjects[aid]
+
+            if is_agent:
+                if aid in existing_by_id and existing_by_id[aid].get("real_person"):
+                    img["real_person"] = True
+                    if existing_by_id[aid].get("subject"):
+                        img["subject"] = existing_by_id[aid]["subject"]
+                elif aid not in marked_assets:
+                    img.pop("real_person", None)
+                    img.pop("subject", None)
+                if aid in existing_by_id and existing_by_id[aid].get("consent"):
+                    img["consent"] = existing_by_id[aid]["consent"]
+                else:
+                    img.pop("consent", None)
+
+        project_mod.save_json(p, "images.json", load_doc("images", doc))
         self.ws._changed(name, "assets", "shots")
 
     @staticmethod
