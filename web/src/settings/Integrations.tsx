@@ -35,6 +35,10 @@ export default function IntegrationsSection() {
   const [busy, setBusy] = useState(false);
   const [fresh, setFresh] = useState<string>("");
   const [showTools, setShowTools] = useState(false);
+  const [youtube, setYoutube] = useState<{ connected: boolean; channel_title?: string; expires?: number } | null>(null);
+  const [youtubeClientId, setYoutubeClientId] = useState("");
+  const [youtubeClientSecret, setYoutubeClientSecret] = useState("");
+  const [youtubeBusy, setYoutubeBusy] = useState(false);
 
   // Agent runner state
   const [selectedAgent, setSelectedAgent] = useState<string>("claude");
@@ -61,6 +65,33 @@ export default function IntegrationsSection() {
   }, [toast, selectedAgent]);
 
   useEffect(() => { void load(); }, [load]);
+
+  const refreshYouTube = async () => setYoutube(await api("GET", "/api/youtube/status"));
+  useEffect(() => { void refreshYouTube().catch(() => setYoutube({ connected: false })); }, []);
+  const saveYouTubeClient = async () => {
+    setYoutubeBusy(true);
+    try {
+      await api("PUT", "/api/youtube/client", { client_id: youtubeClientId, client_secret: youtubeClientSecret });
+      setYoutubeClientSecret("");
+      toast("ok", "YouTube OAuth client saved securely.");
+    } catch (e: any) { toast("error", e.message); }
+    finally { setYoutubeBusy(false); }
+  };
+  const connectYouTube = async () => {
+    setYoutubeBusy(true);
+    try {
+      const result = await api<{ url: string }>("POST", "/api/youtube/connect");
+      window.open(result.url, "_blank", "noopener,noreferrer");
+      toast("ok", "Complete sign-in in the YouTube window, then refresh status.");
+    } catch (e: any) { toast("error", e.message); }
+    finally { setYoutubeBusy(false); }
+  };
+  const disconnectYouTube = async () => {
+    setYoutubeBusy(true);
+    try { await api("POST", "/api/youtube/disconnect"); setYoutube({ connected: false }); toast("ok", "YouTube disconnected."); }
+    catch (e: any) { toast("error", e.message); }
+    finally { setYoutubeBusy(false); }
+  };
 
   const create = async () => {
     setBusy(true);
@@ -157,6 +188,21 @@ export default function IntegrationsSection() {
 
   return (
     <div className="space-y-5">
+      <Card title={<span className="flex items-center gap-2"><IconTile tone="pink"><Play size={15} /></IconTile> YouTube</span>}
+        sub="Connect your channel for direct uploads. OAuth credentials are write-only and uploads require a human confirmation on the Publish page.">
+        <p role="status" className="mb-3 text-sm text-slate-200">{youtube?.connected ? `Connected${youtube.channel_title ? `: ${youtube.channel_title}` : " to YouTube"}.` : "Not connected to YouTube."}</p>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div><label htmlFor="youtube-client-id" className="mb-1 block text-xs font-medium text-slate-300">OAuth client ID</label><Input id="youtube-client-id" autoComplete="off" value={youtubeClientId} onChange={(e) => setYoutubeClientId(e.target.value)} /></div>
+          <div><label htmlFor="youtube-client-secret" className="mb-1 block text-xs font-medium text-slate-300">OAuth client secret</label><Input id="youtube-client-secret" type="password" autoComplete="new-password" value={youtubeClientSecret} onChange={(e) => setYoutubeClientSecret(e.target.value)} /></div>
+        </div>
+        <div className="mt-3 flex flex-wrap gap-2">
+          <Button onClick={saveYouTubeClient} disabled={youtubeBusy || !youtubeClientId.trim() || !youtubeClientSecret.trim()}>{youtubeBusy ? "Saving…" : "Save OAuth client"}</Button>
+          <Button variant="outline" onClick={connectYouTube} disabled={youtubeBusy || !youtubeClientId.trim()}>Connect YouTube</Button>
+          <Button variant="outline" onClick={() => void refreshYouTube().catch((e) => toast("error", e.message))} disabled={youtubeBusy}>Refresh status</Button>
+          {youtube?.connected && <Button variant="outline" onClick={disconnectYouTube} disabled={youtubeBusy}>Disconnect</Button>}
+        </div>
+        <p className="mt-2 text-xs text-slate-400">The client secret and OAuth tokens are stored in the OS keychain or private AI Studio secrets file. AI Studio never shows them again.</p>
+      </Card>
       {/* MCP Integration Card */}
       <Card title={<span className="flex items-center gap-2"><IconTile tone="violet"><Plug size={15} /></IconTile> Connect an AI Agent (MCP)</span>}
         sub="Let Claude Code, Antigravity CLI, OpenCode or any MCP client drive your projects, convert storyboards, and propose generations safely.">

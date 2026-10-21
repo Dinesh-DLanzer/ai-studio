@@ -34,6 +34,8 @@ class PublishData(SchemaModel):
     title: str
     description: str = ""
     hashtags: list[str] = Field(default_factory=list)
+    tags: list[str] = Field(default_factory=list)
+    category_id: str = "22"
     chapters: list[dict] = Field(default_factory=list)
     thumbnail: str = ""
     caption_mode: str = "none"
@@ -80,6 +82,21 @@ def validate(doc):
         if tag.casefold() not in {t.casefold() for t in tags}:
             tags.append(tag)
     data["hashtags"] = tags
+    clean_tags = []
+    source_tags = data["tags"] or [t.lstrip("#") for t in tags]
+    if len(source_tags) > 30 or any(not isinstance(tag, str) for tag in source_tags):
+        raise ValueError("tags must contain at most 30 strings")
+    for tag in source_tags:
+        tag = _CONTROL.sub("", tag).strip()
+        if not tag or len(tag) > 100:
+            raise ValueError("each YouTube tag must contain 1 to 100 characters")
+        if tag.casefold() not in {t.casefold() for t in clean_tags}:
+            clean_tags.append(tag)
+    data["tags"] = clean_tags
+    category = str(data["category_id"]).strip()
+    if not category.isdigit() or len(category) > 3:
+        raise ValueError("category_id must be a YouTube category id")
+    data["category_id"] = category
     if not isinstance(data["chapters"], list) or len(data["chapters"]) > 100:
         raise ValueError("chapters must be a list of at most 100 entries")
     for item in data["chapters"]:

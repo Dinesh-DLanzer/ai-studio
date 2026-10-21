@@ -71,3 +71,6 @@ AI Studio runs **on your own machine** and calls paid AI APIs with **your own ke
 
 ## Reporting
 Open a private security advisory on the repository, or email the maintainers. Please do not post keys or exploit details in public issues.
+# YouTube uploads
+
+The YouTube OAuth client ID and client secret, access token, refresh token, and token expiry are stored through `aistudio/secrets.py` under the `youtube` reference, using the OS keychain when available or the private 0600 `~/.aistudio/secrets.json` file otherwise. They are write-only from Settings and are never returned by the API. Upload requests can be started only from the human-session Publish page after preflight passes and the human confirms the saved title and reviews the exact export path, size, SHA-256, channel, metadata, and privacy. API keys, MCP, crew, recipes, and batches cannot upload.

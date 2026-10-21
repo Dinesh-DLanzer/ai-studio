@@ -118,6 +118,8 @@ def create_app(root=None, token=None, rates_path=None, transport=None, static_di
         "export": lambda job, progress: ws.edit_export(job["project"], progress),
         "batch": run_batch_job,
         "previs": lambda job, progress: ws.run_previs(job["project"], job["payload"] or {}, progress),
+        "publish_upload": lambda job, progress: __import__("aistudio.youtube", fromlist=["upload_job"]).upload_job(
+            ws.secrets, ws.pdir(job["project"]), job, progress),
     }
 
     def provider_concurrency(provider):
@@ -1311,6 +1313,51 @@ def create_app(root=None, token=None, rates_path=None, transport=None, static_di
         from aistudio import publish
         body = await request.json()
         return {"thumbnail": guard(publish.choose_thumbnail, ws, name, body.get("source", ""), body.get("time", 0))}
+
+    # YouTube credentials and every publishing action are strictly human-session only.
+    @app.get("/api/youtube/status", dependencies=[api])
+    def youtube_status(request: Request):
+        human_session(request)
+        from aistudio import youtube
+        return guard(youtube.status, ws.secrets)
+
+    @app.put("/api/youtube/client", dependencies=[api])
+    async def youtube_client(request: Request):
+        human_session(request)
+        from aistudio import youtube
+        body = await request.json()
+        return guard(youtube.save_client, ws.secrets, body.get("client_id", ""), body.get("client_secret", ""))
+
+    @app.post("/api/youtube/connect", dependencies=[api])
+    def youtube_connect(request: Request):
+        human_session(request)
+        from aistudio import youtube
+        return guard(youtube.start_oauth, ws.secrets)
+
+    @app.post("/api/youtube/disconnect", dependencies=[api])
+    def youtube_disconnect(request: Request):
+        human_session(request)
+        from aistudio import youtube
+        return guard(youtube.disconnect, ws.secrets)
+
+    @app.get("/api/projects/{name}/publish/youtube/preview", dependencies=[api])
+    def youtube_publish_preview(name: str, request: Request, preset: str = "", privacy: str = "private"):
+        human_session(request)
+        from aistudio import youtube
+        findings = guard(youtube.run_preflight, ws.pdir(name), preset)
+        channel_status = guard(youtube.status, ws.secrets)
+        if not channel_status.get("connected"):
+            return guard(youtube.preview, ws.pdir(name), preset, findings, privacy, "")
+        return guard(youtube.preview, ws.pdir(name), preset, findings, privacy, channel_status.get("channel_title", ""))
+
+    @app.post("/api/projects/{name}/publish/youtube", dependencies=[api])
+    async def youtube_publish(name: str, request: Request):
+        human_session(request)
+        from aistudio import youtube
+        body = await request.json()
+        findings = guard(youtube.run_preflight, ws.pdir(name), body.get("preset", ""))
+        return guard(youtube.upload_video, ws, name, body.get("preset", ""), body.get("privacy", "private"),
+                     body.get("confirm_title", ""), findings, runner)
 
     # ---- the timeline also leaves as Final Cut Pro XML, a CMX 3600 EDL, captions and a Canva / Google Vids bundle (all free)
     @app.get("/api/projects/{name}/edit/export-fcpxml", dependencies=[api])
