@@ -75,6 +75,10 @@ R = [
     ("POST", "/api/projects/{name}/assets/{aid}/rename", True, "Assets and shots", "Rename an asset id everywhere (files, references, shots, cost log).", '{"new": "..."}', "overview object"),
     ("POST", "/api/projects/{name}/shots/{sid}/rename", True, "Assets and shots", "Rename a shot id everywhere (clips, cost log, discarded history).", '{"new": "..."}', "overview object"),
     ("POST", "/api/projects/{name}/shots/{shot}/approve", False, "Assets and shots", "Approve the newest completed clip of a shot (a human decision).", "-", "shot"),
+    ("POST", "/api/projects/{name}/shots/{shot}/camera-move", False, "Assets and shots", "Classify a camera move from sampled camera world matrices (the Blender add-on sends them) and PROPOSE a direction. Nothing is saved, nothing is spent; the direction route applies it. Human session or paired device token only.", '{"samples": [{"frame": 1, "matrix": [[1,0,0,0],[0,1,0,0],[0,0,1,0],[0,0,0,1]]}], "fps": 24.0, "lens_samples"?: [{"focal_length": 50.0}], "target"?: [0, 0, 0]}', '{"shot", "classification": {"movement", "speed", "confidence", "evidence"}, "direction": {...}, "saved": false}'),
+    ("POST", "/api/projects/{name}/shots/{shot}/direction", False, "Assets and shots", "Apply a camera direction to a shot. The direction is validated against the direction schema (movement, framing, angle, lens_mm...) and saved with the document history. Human session only.", '{"direction": {"movement": "dolly-in", "speed": "normal"}, "replace"?: false}', '{"shot", "direction"}'),
+    ("POST", "/api/projects/{name}/previs/render", False, "Generation jobs", "Render the blocking frames of some shots from a .blend inside the project with headless Blender. A free local ledger job (no provider, no cost); the frames land in the project's previs/ folder and are NOT registered as stills. Human session only.", '{"blend": "scenes/main.blend", "shots": ["s01", "s02"]}', '{"job": "<id>"}'),
+    ("GET", "/api/projects/{name}/previs", False, "Generation jobs", "The frames rendered into the project's previs/ folder, with their size and whether an asset already uses them. Human session only.", "-", '{"out_dir": "previs", "outputs": [{"file", "name", "shot", "bytes", "image", "registered"}]}'),
     ("POST", "/api/projects/{name}/discard", True, "Assets and shots", "Move a clip or still to _discarded with a reason (never deletes).", '{"rel": "clips/s01_final_a1.mp4", "reason": "..."}', "discard record"),
     ("POST", "/api/projects/{name}/restore", True, "Assets and shots", "Restore a discarded file.", '{"rel": "clips/_discarded/..."}', '{"file"}'),
     ("POST", "/api/projects/{name}/stills/{shot_id}/edit", True, "Assets and shots", "Create a proposal for an inpaint, outpaint or background-swap edit; nothing is spent until a human approves it.", '{"prompt": "...", "edit_mode": "inpaint_insertion", "mask_mode": "MASK_MODE_BACKGROUND"}', 'proposal object'),
@@ -224,6 +228,7 @@ DEVICE_ALLOWED_ROUTES = {
     ("POST", "/api/projects/{name}/proposals"),
     ("POST", "/api/projects/{name}/clips/{shot_id}/tool"),
     ("POST", "/api/projects/{name}/clips/{shot_id}/extend"),
+    ("POST", "/api/projects/{name}/shots/{shot}/camera-move"),
 }
 
 DOCS = {f"{m} {p}": {"method": m, "path": p, "agent": a, "device": (m, p) in DEVICE_ALLOWED_ROUTES, "group": g, "summary": s, "body": b, "returns": r} for m, p, a, g, s, b, r in R}

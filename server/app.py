@@ -23,7 +23,7 @@ from aistudio.service import REPO, ServiceError, Workspace
 from server import api_docs
 
 ALLOWED_SUFFIX = {".png", ".jpg", ".jpeg", ".webp", ".svg", ".mp4", ".json", ".md", ".csv", ".txt", ".mp3", ".wav", ".m4a", ".aac", ".ogg"}
-SERVE_DIRS = {"stills", "clips", "checks", "audio", "exports", "elements"}
+SERVE_DIRS = {"stills", "clips", "checks", "audio", "exports", "elements", "previs"}
 
 
 def _stop_chatgpt_listener(app_state):
@@ -116,6 +116,7 @@ def create_app(root=None, token=None, rates_path=None, transport=None, static_di
         "execute": lambda job, progress: ws.execute(job["project"], job["proposal_id"], bool(job["payload"].get("override"))),
         "export": lambda job, progress: ws.edit_export(job["project"], progress),
         "batch": run_batch_job,
+        "previs": lambda job, progress: ws.run_previs(job["project"], job["payload"] or {}, progress),
     }
 
     def provider_concurrency(provider):
@@ -203,6 +204,11 @@ def create_app(root=None, token=None, rates_path=None, transport=None, static_di
     def human_session(request):
         if getattr(request.state, "scope", "") != "session":
             raise HTTPException(403, "human session required")
+
+    def session_or_device(request):
+        """A human session or a paired device token (a panel or the Blender add-on).  Never an API key."""
+        if getattr(request.state, "scope", "") not in ("session", "device"):
+            raise HTTPException(403, "human session or paired device token required")
 
     def guard(fn, *a, **kw):
         try:
@@ -757,6 +763,34 @@ def create_app(root=None, token=None, rates_path=None, transport=None, static_di
     @app.post("/api/projects/{name}/shots/{shot}/approve", dependencies=[api])
     def approve_shot(name: str, shot: str):
         return guard(ws.approve_shot, name, shot)
+
+    @app.post("/api/projects/{name}/shots/{shot}/camera-move", dependencies=[api])
+    async def camera_move(name: str, shot: str, request: Request):
+        """Classify a camera move from sampled camera matrices and PROPOSE a direction.  Nothing is saved."""
+        session_or_device(request)
+        b = await request.json() if (await request.body()) else {}
+        return guard(ws.camera_move, name, shot, b)
+
+    @app.post("/api/projects/{name}/shots/{shot}/direction", dependencies=[api])
+    async def shot_direction(name: str, shot: str, request: Request):
+        """Apply a validated direction to a shot (human session only: a device may look, not write)."""
+        human_session(request)
+        b = await request.json() if (await request.body()) else {}
+        direction = b.get("direction") if isinstance(b.get("direction"), dict) else {k: v for k, v in b.items() if k != "replace"}
+        return guard(ws.apply_direction, name, shot, direction, bool(b.get("replace")))
+
+    @app.post("/api/projects/{name}/previs/render", dependencies=[api])
+    async def previs_render(name: str, request: Request):
+        """Render blocking frames from a .blend in the project with headless Blender (a free local job)."""
+        human_session(request)
+        b = await request.json() if (await request.body()) else {}
+        payload = guard(ws.plan_previs, name, b.get("blend"), b.get("shots"))
+        return start_job(request, name, "previs", target=payload.get("blend", ""), payload=payload)
+
+    @app.get("/api/projects/{name}/previs", dependencies=[api])
+    def previs_list(name: str, request: Request):
+        human_session(request)
+        return guard(ws.list_previs, name)
 
     @app.post("/api/projects/{name}/discard", dependencies=[api])
     async def discard(name: str, request: Request):
