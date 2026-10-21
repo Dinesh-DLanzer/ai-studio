@@ -200,8 +200,15 @@ class TestEntryPoints(Base):
         self.assertEqual(tool_registry.cost_class("clip_tool"), "paid")
         from aistudio.crew import runtime
         self.assertIn("clip_tool", tool_registry.crew_tools())                  # offered like edit_still, but the runtime only lets paid tools propose image|clip|review
-        import inspect
-        self.assertIn('tool != "propose"', inspect.getsource(runtime))
+        from tests.test_crew_runtime import DONE, Script, act
+        from aistudio.crew import agents
+        from pathlib import Path
+        agent = agents.load("echo-writer", dirs=(Path(__file__).parent / "fixtures" / "agents",))
+        agent["tools"].append("clip_tool")
+        rec = runtime.run(self.ws, "demo", agent, "try the paid clip tool", llm=Script([
+            json.dumps({"tool": "clip_tool", "args": {"name": "demo", "tool": "upscale_ai", "clip_id": "s01_final_a1", "scale": 2}}), DONE]))
+        self.assertEqual(rec["steps"][0]["status"], "refused")
+        self.assertIn("not supported for agents", rec["steps"][0]["result"])
 
     def test_mcp_tool_only_creates_a_proposal(self):
         from aistudio import mcp_server as M

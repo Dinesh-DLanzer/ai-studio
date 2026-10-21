@@ -19,12 +19,13 @@ import secrets
 import time
 from pathlib import Path
 
-from aistudio import approvals, history, jobs, tool_registry
+from aistudio import approvals, history, jobs, project_lock, tool_registry
 from aistudio.domain.common import ServiceError, _ident
 
 AUTONOMY = ("assist", "copilot")
 RESULT_CHARS = 1500
 DIFF_CHARS = 20000
+MAX_PENDING_PROPOSALS_PER_RUN = 12
 
 RULES = """You are an agent inside AI Studio working on ONE project. Every reply must be exactly one JSON object and nothing else:
   {"tool": "<tool name>", "args": {...}, "why": "<one line>"}   to use a tool, or
@@ -248,18 +249,38 @@ def _act(ws, project, rec, allowed, step, action, autonomy):
         return fail("invalid_args", f"Invalid arguments for {tool}: {bad}")
     cls = tool_registry.cost_class(tool)
     if cls == "paid":
-        if tool != "propose":
-            return fail("refused", f"'{tool}' is not supported for agents yet; use propose.")
+        if tool not in ("propose", "build_identity_sheet", "audio_tool"):
+            return fail("refused", f"'{tool}' is not supported for agents yet; use a proposal-only tool.")
         if autonomy == "assist":
             rec["suggested_changes"].append({"tool": tool, "args": args, "why": step["why"], "applied": False, "diff": ""})
             step.update(status="suggested", result="not applied (assist mode)")
             return "Assist mode: this proposal was recorded as a suggestion for the human and NOT created."
-        prop = _open_proposal(ws.pdir(project), args["kind"], args["target"])      # running a stage twice must not pile up duplicates
-        if prop is None:
-            try:
-                prop = ws.propose(project, args["kind"], args["target"])      # reveal_code stays False: a human gets the code, never the agent
-            except ServiceError as e:
-                return fail("error", f"Could not propose: {e}")
+        if len(rec["proposals"]) >= MAX_PENDING_PROPOSALS_PER_RUN:
+            return fail("refused", f"This run has reached the limit of {MAX_PENDING_PROPOSALS_PER_RUN} pending proposals.")
+        p = ws.pdir(project)
+        try:
+            if tool == "build_identity_sheet":
+                pending_views = _identity_sheet_missing(ws, project, args["character"], args.get("views"))
+                if len(pending_views) + len(rec["proposals"]) > MAX_PENDING_PROPOSALS_PER_RUN:
+                    return fail("refused", f"This run has reached the limit of {MAX_PENDING_PROPOSALS_PER_RUN} pending proposals.")
+                with project_lock.lock(p):
+                    batch = ws.identity_sheet(project, args["character"], args.get("views"), actor="crew")
+                items = [{"id": None, "kind": x["kind"], "shot": x["target"], "model": x.get("model"), "price": x.get("price"),
+                          "status": "pending", "hash": x.get("request_hash"), "label": x.get("label")} for x in batch.get("items", [])]
+                rec["proposals"].extend(items)
+                rec["identity_batch"] = {k: batch.get(k) for k in ("id", "total", "status", "note")}
+                step.update(status="proposed", result=_summary(rec["identity_batch"]))
+                return f"Identity-sheet batch proposed for ${float(batch.get('total') or 0):.3f}. NOTHING was spent or run. A human must review and approve it."
+            kind, target = (args["kind"], args["target"]) if tool == "propose" else (args["task"], args["target"])
+            if kind in ("image", "clip") and _target_generated(ws, project, kind, target):
+                return fail("refused", f"The {kind} target {target} already generated a file; no proposal was created.")
+            with project_lock.lock(p):
+                prop = _open_proposal(p, kind, target)
+                if prop is None:
+                    options = args.get("options") if tool == "audio_tool" else None
+                    prop = ws.propose(project, kind, target, options=options)      # reveal_code stays False: a human gets the code, never the agent
+        except ServiceError as e:
+            return fail("error", f"Could not propose: {e}")
         item = {k: prop.get(k) for k in ("id", "kind", "shot", "model", "price", "status", "hash")}
         rec["proposals"].append(item)
         step.update(status="proposed", result=_summary(item))
@@ -284,6 +305,27 @@ def _open_proposal(p, kind, target):
     """A still-pending, unexpired proposal for the same kind and target (reused instead of creating another)."""
     now = time.time()
     return next((x for x in approvals._load(p) if x["status"] == "pending" and x["kind"] == kind and x["shot"] == target and x["expires"] > now), None)
+
+
+def _target_generated(ws, project, kind, target):
+    state = ws._production(ws.pdir(project))
+    if kind == "image":
+        return any(x["id"] == target and x["made"] for x in state["assets"] + state["uploads"])
+    if kind == "clip":
+        return any(x["id"] == target and x["clip"] for x in state["shots"])
+    return False
+
+
+def _identity_sheet_missing(ws, project, character, requested):
+    """Read-only preflight for the number of proposals the identity-sheet batch would add."""
+    p = ws.pdir(project)
+    doc = ws._read(p, "images.json", {"images": []})
+    char = next((i for i in doc.get("images", []) if i.get("id") == character and i.get("kind") == "character"), None)
+    if not char:
+        return []                 # identity_sheet will return its normal validation error
+    views = list(requested or ("front", "three-quarter", "profile", "full-body", "expression"))
+    have = {v.get("view") for v in char.get("views") or [] if (p / v.get("file", "")).is_file()}
+    return [v for v in dict.fromkeys(views) if v not in have]
 
 
 def _open_batch(ws, project, pairs):
@@ -313,7 +355,8 @@ def _finish(ws, project, rec, pre, p):
     if rec["autonomy"] == "copilot" and rec["proposals"]:
         try:
             pairs = {(x["kind"], x["shot"]) for x in rec["proposals"]}
-            b = _open_batch(ws, project, pairs) or ws.batches.create(project, actor="crew", only=pairs)
+            with project_lock.lock(ws.pdir(project)):
+                b = _open_batch(ws, project, pairs) or ws.batches.create(project, actor="crew", only=pairs)
             rec["batch"] = {"id": b["id"], "total": b["total"], "status": b["status"], "note": "awaiting human approval; the crew cannot approve or run it"}
         except ServiceError as e:
             rec["batch"] = {"error": str(e)}

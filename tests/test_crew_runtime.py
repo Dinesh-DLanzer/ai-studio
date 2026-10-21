@@ -121,6 +121,30 @@ class CrewRuntimeTests(unittest.TestCase):
         self.assertNotIn("code", json.dumps(rec["proposals"]).lower().replace("hash", ""))
         self.assertFalse((self.p / "clips").exists() and any((self.p / "clips").iterdir()))
 
+    def test_already_generated_image_target_is_refused_in_code(self):
+        (self.p / "stills" / "meena.png").parent.mkdir(parents=True, exist_ok=True)
+        (self.p / "stills" / "meena.png").write_bytes(b"fake generated image")
+        rec, _ = self.run_([act("propose", name="demo", kind="image", target="meena"), DONE])
+        self.assertEqual(rec["steps"][0]["status"], "refused")
+        self.assertIn("already generated", rec["steps"][0]["result"])
+        self.assertEqual(rec["proposals"], [])
+
+    def test_already_generated_clip_target_is_refused_in_code(self):
+        clip = self.p / "clips" / "s01_final_a1.mp4"
+        clip.parent.mkdir(parents=True, exist_ok=True)
+        clip.write_bytes(b"fake generated clip")
+        rec, _ = self.run_([act("propose", name="demo", kind="clip", target="s01"), DONE])
+        self.assertEqual(rec["steps"][0]["status"], "refused")
+        self.assertIn("already generated", rec["steps"][0]["result"])
+        self.assertEqual(rec["proposals"], [])
+
+    def test_pending_proposals_are_capped_at_twelve_per_run(self):
+        replies = [act("propose", name="demo", kind="image", target="meena") for _ in range(13)] + [DONE]
+        rec, _ = self.run_(replies, agent=echo(max_steps=20))
+        self.assertEqual([s["status"] for s in rec["steps"][:13]].count("proposed"), 12)
+        self.assertEqual(rec["steps"][12]["status"], "refused")
+        self.assertIn("limit of 12", rec["steps"][12]["result"])
+
     def test_unsupported_paid_tools_are_refused(self):
         rec, _ = self.run_([act("edit_still", name="demo", still_id="s01", prompt="x"), act("generate_all_plan", name="demo"), DONE])
         self.assertEqual([s["status"] for s in rec["steps"][:2]], ["refused", "refused"])
