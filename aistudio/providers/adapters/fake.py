@@ -19,9 +19,9 @@ def _maybe_fail(model):
 
 class FakeAdapter(Adapter):
     type = "fake"
-    capabilities = frozenset({"chat", "vision", "image", "video"})
+    capabilities = frozenset({"chat", "vision", "image", "video", "tts", "music", "sfx", "lipsync", "transcribe"})
     request_features = frozenset({"end_frame"})
-    task_methods = frozenset({"upscale", "reframe", "video_to_video", "motion_transfer"})
+    task_methods = frozenset({"upscale", "reframe", "video_to_video", "motion_transfer", "tts", "music", "sfx", "lipsync", "transcribe"})
 
     def __init__(self, conn=None, transport=None):
         super().__init__(conn or {"id": "fake", "type": "fake"}, transport=lambda *a, **k: {})
@@ -85,3 +85,24 @@ class FakeAdapter(Adapter):
     def video_download(self, job):
         _, _, secs, a = job["job_id"].split("-")
         return b"FAKEMP4" + struct.pack(">B", int(secs)) + (b"A" if a == "A" else b"S")
+
+    # Audio methods are deterministic and remain entirely offline.
+    def tts(self, model, text, voice_id, opts=None):
+        _maybe_fail(model)
+        return {"bytes": b"FAKEAUDIO:TTS:" + text.encode("utf-8"), "cost": None, "model": model, "mime": "audio/mpeg"}
+
+    def music(self, model, prompt, seconds, opts=None):
+        _maybe_fail(model)
+        return {"bytes": b"FAKEAUDIO:MUSIC:" + str(seconds).encode() + b":" + prompt.encode("utf-8"), "cost": None, "model": model, "mime": "audio/mpeg"}
+
+    def sfx(self, model, prompt, seconds, opts=None):
+        _maybe_fail(model)
+        return {"bytes": b"FAKEAUDIO:SFX:" + str(seconds).encode() + b":" + prompt.encode("utf-8"), "cost": None, "model": model, "mime": "audio/mpeg"}
+
+    def transcribe(self, model, audio_path, opts=None):
+        _maybe_fail(model)
+        return {"text": "FAKE TRANSCRIPT", "segments": [], "cost": None, "model": model}
+
+    def lipsync(self, model, video_path, audio_path, opts=None):
+        _maybe_fail(model)
+        return {"bytes": b"FAKEMP4-LIPSYNC", "cost": None, "model": model, "mime": "video/mp4"}

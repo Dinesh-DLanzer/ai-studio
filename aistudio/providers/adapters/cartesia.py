@@ -75,6 +75,7 @@ def multipart(fields, files=None):
 class CartesiaAdapter(Adapter):
     type = "cartesia"
     capabilities = frozenset({"tts", "voice_clone"})
+    task_methods = frozenset({"tts"})
     default_base_url = "https://api.cartesia.ai"
 
     # ---------------------------------------------------------------- helpers

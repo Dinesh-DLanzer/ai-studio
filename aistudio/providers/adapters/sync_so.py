@@ -62,6 +62,7 @@ def multipart(fields, files):
 class SyncAdapter(Adapter):
     type = "sync"
     capabilities = frozenset({"lipsync"})
+    task_methods = frozenset({"lipsync"})
     default_base_url = "https://api.sync.so"
 
     # ---------------------------------------------------------------- helpers

@@ -27,6 +27,7 @@ from aistudio.providers.base import Adapter, Retryable, AuthError, NotFound, Rej
 class GoogleCloudTTSAdapter(Adapter):
     type = "google_cloud_tts"
     capabilities = frozenset({"tts"})
+    task_methods = frozenset({"tts"})
     default_base_url = "https://texttospeech.googleapis.com"
 
     def _headers(self):

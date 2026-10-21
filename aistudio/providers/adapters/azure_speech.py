@@ -31,6 +31,7 @@ from aistudio.providers.base import Adapter, Retryable, AuthError, NotFound, Rej
 class AzureSpeechAdapter(Adapter):
     type = "azure_speech"
     capabilities = frozenset({"tts", "transcribe"})
+    task_methods = frozenset({"tts", "transcribe"})
     # Base URLs are built from region; default_base_url not used directly
 
     def __init__(self, conn, transport=None):

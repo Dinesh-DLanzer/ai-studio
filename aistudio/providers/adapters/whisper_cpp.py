@@ -103,6 +103,7 @@ def parse_transcript(doc):
 class WhisperCppAdapter(Adapter):
     type = "whisper_cpp"
     capabilities = frozenset({"transcribe"})
+    task_methods = frozenset({"transcribe"})
 
     def __init__(self, conn, transport=None, run=None):
         super().__init__(conn, transport)

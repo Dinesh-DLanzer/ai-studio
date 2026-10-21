@@ -65,6 +65,7 @@ def multipart(fields):
 class StabilityAdapter(Adapter):
     type = "stability"
     capabilities = frozenset({"music", "sfx"})
+    task_methods = frozenset({"music", "sfx"})
     default_base_url = "https://api.stability.ai"
 
     def __init__(self, conn, transport=None, sleep=time.sleep):

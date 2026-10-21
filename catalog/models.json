@@ -532,6 +532,19 @@
     "negative_prompt": false,
     "tools": "json"
    }
-  }
+  },
+  {"provider_type":"fake","pattern":"fake/audio","note":"Deterministic offline test adapter.","profile":{"tasks":["tts","music","sfx","lipsync","transcribe"],"durations":[]}},
+  {"provider_type":"elevenlabs","pattern":"*","note":"Adapter shapes UNVERIFIED.","profile":{"tasks":["tts","music","sfx","transcribe"],"durations":[]}},
+  {"provider_type":"google_cloud_tts","pattern":"*","note":"Adapter shapes UNVERIFIED.","profile":{"tasks":["tts"],"durations":[]}},
+  {"provider_type":"azure_speech","pattern":"*","note":"Adapter shapes UNVERIFIED.","profile":{"tasks":["tts","transcribe"],"durations":[]}},
+  {"provider_type":"sarvam","pattern":"*","note":"Adapter shapes UNVERIFIED.","profile":{"tasks":["tts","transcribe"],"durations":[]}},
+  {"provider_type":"stability","pattern":"*","note":"Adapter shapes UNVERIFIED.","profile":{"tasks":["music","sfx"],"durations":[]}},
+  {"provider_type":"cartesia","pattern":"*","note":"Adapter shapes UNVERIFIED.","profile":{"tasks":["tts"],"durations":[]}},
+  {"provider_type":"whisper_cpp","pattern":"*","note":"Adapter shapes UNVERIFIED.","profile":{"tasks":["transcribe"],"durations":[]}},
+  {"provider_type":"sync","pattern":"*","note":"Adapter shapes UNVERIFIED.","profile":{"tasks":["lipsync"],"durations":[]}},
+  {"provider_type":"hedra","pattern":"*","note":"Adapter shapes UNVERIFIED.","profile":{"tasks":["lipsync"],"durations":[]}},
+  {"provider_type":"heygen","pattern":"*","note":"Adapter shapes UNVERIFIED.","profile":{"tasks":["lipsync"],"durations":[]}},
+  {"provider_type":"tavus","pattern":"*","note":"Adapter shapes UNVERIFIED.","profile":{"tasks":["lipsync"],"durations":[]}},
+  {"provider_type":"fal","pattern":"*","note":"Adapter shapes UNVERIFIED.","profile":{"tasks":["tts","music","sfx","lipsync"],"durations":[]}}
  ]
 }

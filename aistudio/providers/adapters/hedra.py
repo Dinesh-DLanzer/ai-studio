@@ -52,6 +52,7 @@ def _multipart(fields, files):
 class HedraAdapter(Adapter):
     type = "hedra"
     capabilities = frozenset({"lipsync", "video"})
+    task_methods = frozenset({"lipsync"})
     default_base_url = "https://api.hedra.com"
 
     def __init__(self, conn, transport=None):

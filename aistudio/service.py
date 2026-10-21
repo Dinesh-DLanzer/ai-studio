@@ -380,6 +380,9 @@ class Workspace(SettingsMixin):
     def clip_tool(self, name, tool, clip_id, **kw):
         return self._storyboard.clip_tool(name, tool, clip_id, **kw)
 
+    def voiceover_plan(self, name, voice=None, actor="local"):
+        return self._pipeline.voiceover_plan(name, voice=voice, actor=actor)
+
     def extend_clip(self, name, clip_id, prompt, seconds=5):
         return self._storyboard.extend_clip(name, clip_id, prompt, seconds=seconds)
 

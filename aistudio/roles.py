@@ -116,7 +116,8 @@ class RoleRunner:
         """Entries for the chain: {"provider","ptype","model","problem","card","index"}; problem is None when the entry can be called."""
         if not configured and self._fake(role, project_dir):      # test mode runs everything on the built-in test provider; `configured` shows the real chain anyway
             fp = {"id": "fake", "type": "fake", "label": "Built-in test", "enabled": True}
-            model = "fake/" + {"chat": "llm", "verify": "llm", "vision": "vision", "image": "image", "video": "video"}[role]
+            model = "fake/" + {"chat": "llm", "verify": "llm", "vision": "vision", "image": "image", "video": "video",
+                                "tts": "audio", "music": "audio", "sfx": "audio", "lipsync": "audio", "transcribe": "audio"}[role]
             return [{"provider": fp, "ptype": "fake", "model": model, "problem": None, "card": self.pricing.card("fake", "fake", model), "index": 0}]
         provs = self.providers()
         chain = (self.chain_override(role) if self.chain_override else None) or cfg.effective_roles(self.dir, project_dir)["roles"][role]["chain"]
@@ -361,6 +362,54 @@ class RoleRunner:
         reported = out.get("reported")
         cost, src = self.pricing.actual_cost(reported, self.pricing.task_price(r["card"], seconds, resolution))
         return {**base, "status": "done", "bytes": out["bytes"], "cost": cost, "cost_source": src}
+
+    def audio_task(self, task, *, project_dir=None, grant=None, text="", prompt="", voice_id="", source_path="", video_path="", audio_path="", seconds=0, language="", options=None, chars=0):
+        """Run one catalog-declared audio task. Paid roles always redeem a human-issued Grant."""
+        if task not in ("tts", "music", "sfx", "lipsync", "transcribe"):
+            raise ChainError(f"unsupported audio task: {task}")
+        if self.catalog is None:
+            raise ChainError("no model catalog is loaded, so no model can be shown to support this task", code="unconfigured")
+        grant = self._grant(task, project_dir, grant)
+        seconds = int(seconds or 0)
+        options = dict(options or {})
+        price_of = lambda e: self.pricing.audio_task_price(e["card"], task, chars=chars, seconds=seconds)
+        approved_price = grant.price if grant else None
+        state = {}
+
+        def call(adapter, model):
+            if task == "tts":
+                return adapter.tts(model, text, voice_id, {**options, "language_code": language})
+            if task == "music":
+                return adapter.music(model, prompt, seconds, options)
+            if task == "sfx":
+                return adapter.sfx(model, prompt, seconds, options)
+            if task == "transcribe":
+                return adapter.transcribe(model, source_path or audio_path, {**options, "language_code": language})
+            if hasattr(adapter, "lipsync_submit"):
+                job = adapter.lipsync_submit(model, video_path, audio_path, options)
+            else:
+                return adapter.lipsync(model, video_path, audio_path, options)
+            state["job"] = {**job, "provider": adapter.conn["id"]}
+            while True:
+                result = adapter.lipsync_poll(job)
+                if result["status"] == "failed":
+                    raise _Stop(result.get("error") or "lip sync failed")
+                if result["status"] == "done":
+                    return {"bytes": adapter.lipsync_download(job), "cost": result.get("cost"), "job": job, "mime": "video/mp4"}
+                if self.clock() - state.setdefault("started", self.clock()) > options.get("timeout", 1500):
+                    return {"pending": True, "job": job}
+                self.sleep(self.poll_seconds)
+
+        r = self.run(task, call, project_dir, approved_price=approved_price, price_of=price_of, required={"task": task})
+        out = r["result"]
+        if out.get("pending"):
+            return {"status": "pending", "job": out.get("job"), "provider": r["provider"], "model": r["model"]}
+        if task == "transcribe":
+            cost, source = self.pricing.actual_cost(out.get("cost"), price_of({"card": r["card"]}))
+            return {"status": "done", "transcript": out, "provider": r["provider"], "model": r["model"], "cost": cost, "cost_source": source}
+        cost, source = self.pricing.actual_cost(out.get("cost"), price_of({"card": r["card"]}))
+        return {"status": "done", "bytes": out.get("bytes", b""), "mime": out.get("mime", "application/octet-stream"),
+                "provider": r["provider"], "model": r["model"], "cost": cost, "cost_source": source}
 
     def video(self, req, project_dir=None, *, grant=None, timeout=None, first=None, required=None, ref_count=0):
         """-> {"status":"done","bytes",...} | {"status":"pending","job"} | {"status":"failed","error",...}. Raises ChainError/NeedsNewApproval."""

@@ -6,6 +6,8 @@ from datetime import datetime
 from pathlib import Path
 import shutil
 import tempfile
+import unicodedata
+from math import ceil
 
 from aistudio import activity, approvals, chat as chat_mod, costlog, editor as editor_mod, frames as frames_mod, gates, palette as palette_mod, project as project_mod, project_lock, roles as roles_mod
 from aistudio.domain.costs import BudgetStale
@@ -245,11 +247,82 @@ class PipelineDomain:
             payload["subject"] = str(options["subject"]).strip()
         return payload, sp.model, sp.price
 
+    def _audio_payload(self, p, kind, target, options):
+        """Resolve and hash every audio input and parameter before approval."""
+        task = kind
+        role = {"tts": "tts", "music": "music", "sfx": "sfx", "lipsync": "lipsync", "transcribe": "transcribe"}[kind]
+        options = dict(options or {})
+        text = unicodedata.normalize("NFC", str(options.get("text", "")))
+        prompt = str(options.get("prompt", ""))
+        if kind == "tts" and not text.strip():
+            raise ServiceError("tts needs non-empty text")
+        if kind in ("music", "sfx") and not prompt.strip():
+            raise ServiceError(f"{kind} needs a prompt")
+        voice = self.ws._read(p, "brief.json", {}).get("voice") or {}
+        voice_id = str(options.get("voice_id", ""))
+        if kind == "tts" and not voice_id:
+            voice_id = str(voice.get("voice_id", ""))
+        if kind == "tts" and not voice_id:
+            raise ServiceError("tts needs a voice_id")
+        cloned = bool(options.get("cloned") or (kind == "tts" and voice.get("cloned")))
+        subject = str(options.get("voice_subject") or voice_id).strip()
+        if kind == "tts" and cloned:
+            consent_mod.require(p, subject, "voice")
+        files, duration = [], 0
+        for key in (("source",) if kind == "transcribe" else ("video", "audio") if kind == "lipsync" else ()):
+            f = self._source_file(p, options.get(key), key)
+            rel = f.relative_to(p.resolve()).as_posix()
+            digest = _sha(f)
+            if key == "video":
+                consent_mod.require_shas(p, [digest])
+                imgdoc = self.ws._read(p, "images.json", {"images": []})
+                ids = [Path(rel).stem, Path(rel).stem.split(".v")[0]]
+                consent_mod.require_assets(p, imgdoc, ids)
+                by = {i.get("id"): i for i in imgdoc.get("images", [])}
+                for aid in ids:
+                    asset = by.get(aid, {})
+                    if asset.get("real_person"):
+                        consent_mod.require(p, asset.get("subject") or aid, "voice")
+            files.append((key, rel, digest, f))
+            if key in ("source", "video"):
+                from aistudio import editor as editor_mod
+                info = editor_mod.probe(f)
+                if not info or not info.get("duration"):
+                    raise ServiceError("cannot read the media duration (ffprobe missing or unreadable file), so the price cannot be quoted")
+                duration = max(duration, ceil(float(info["duration"])))
+        profile_req = {"task": task}
+        entry, _ = spec_mod.select_entry(self.ws, p, role, options.get("model"), profile_req, task)
+        profile = self.ws.catalog().profile(entry["provider"]["id"], entry["ptype"], entry["model"], entry["card"])
+        requested_seconds = options.get("seconds", 0)
+        seconds = int(requested_seconds or 0)
+        if kind in ("music", "sfx"):
+            if isinstance(requested_seconds, bool) or not isinstance(requested_seconds, int) or not 1 <= requested_seconds <= 3600:
+                raise ServiceError(f"{kind} seconds must be a whole number from 1 to 3600")
+            if profile.get("durations"):
+                offered = sorted(int(d) for d in profile["durations"])
+                seconds = max((d for d in offered if d <= seconds), default=offered[0])
+        if kind == "transcribe":
+            seconds = duration
+        elif kind == "lipsync":
+            seconds = duration
+            consent_mod.require_shas(p, [digest for _key, _rel, digest, _f in files])
+        chars = len(text)
+        price = self.ws.pricing().audio_task_price(entry["card"], task, chars=chars, seconds=seconds)
+        if price is None:
+            raise ServiceError(f"No price set for {entry['model']} ({task}). Set a price in Settings > Model Configuration before continuing.")
+        payload = {"task": task, "provider": entry["provider"]["id"], "model": entry["model"], "role": role, "text": text, "prompt": prompt,
+                   "voice_id": voice_id, "voice_subject": subject, "cloned": cloned, "language": str(options.get("language", "")),
+                   "params": options.get("params") or {}, "requested_seconds": requested_seconds, "seconds": seconds, "duration_seconds": duration,
+                   "chars": chars, "files": [{"role": k, "path": rel, "sha": digest} for k, rel, digest, _f in files]}
+        return payload, entry["model"], price
+
     def _payload_and_price(self, name, kind, target, options=None):
         p = self.ws.pdir(name)
         options = options or {}
         _ident(target, "target")
         variant = self._variant(options)
+        if kind in ("tts", "music", "sfx", "lipsync", "transcribe"):
+            return self._audio_payload(p, kind, target, options)
         if kind in ("image", "clip"):
             self._require_consent(p, kind, target)
         elif kind in ("image_edit", "clip_extend", *AI_TOOLS) and options.get("source"):
@@ -351,11 +424,45 @@ class PipelineDomain:
         summary = {"prompt": payload.get("prompt", "")[:400], "seconds": payload.get("seconds"), "audio": payload.get("audio"),
                    "first_frame": payload.get("first_frame"), "refs": [r["path"] for r in payload.get("refs", [])], "file": payload.get("file") or payload.get("source"),
                    "review_type": payload.get("review_type"), "provider": payload.get("provider")}
+        if kind in ("tts", "music", "sfx", "lipsync", "transcribe"):
+            summary.update(text=payload.get("text", "")[:400], chars=payload.get("chars", 0), voice_id=payload.get("voice_id", ""),
+                           language=payload.get("language", ""), requested_seconds=payload.get("requested_seconds"),
+                           duration_seconds=payload.get("duration_seconds"), files=[x["path"] for x in payload.get("files", [])])
         if kind in ("image", "clip"):      # what the model can do, and what was adjusted, shown to the approver
             sp = spec_mod.resolve(self.ws, p, kind, target)
             summary.update(profile=sp.profile, warnings=sp.warnings, end_frame=sp.end_frame or None,
                            price_breakdown=self.ws.pricing().breakdown(sp.entry["card"], sp.seconds, sp.resolution, sp.audio, len(sp.refs)))
         return approvals.propose(p, kind, target, model, price, payload, reveal_code=reveal_code, summary=summary, options=options)
+
+    def voiceover_plan(self, name, voice=None, actor="local"):
+        """Freeze one TTS request for each voiced shot into an awaiting-approval batch."""
+        p = self.ws.pdir(name)
+        brief = self.ws._read(p, "brief.json", {})
+        voice = voice or brief.get("voice") or {}
+        voice = {"voice_id": voice} if isinstance(voice, str) else dict(voice)
+        voice_id = str(voice.get("voice_id") or "")
+        if not voice_id:
+            raise ServiceError("voiceover plan needs a voice_id")
+        language = str(brief.get("language") or "")
+        doc = self.ws._read(p, "shots.json", {"shots": []})
+        items, warnings = [], []
+        for shot in doc.get("shots", []):
+            line = str(shot.get("voice_line") or "").strip()
+            if line and shot.get("voice_mode") in ("on-camera", "off-camera"):
+                options = {"text": line, "voice_id": voice_id, "language": language, "cloned": bool(voice.get("cloned")),
+                           "voice_subject": str(voice.get("subject") or voice_id)}
+                payload, model, price = self._payload_and_price(name, "tts", shot["id"], options)
+                items.append({"kind": "tts", "target": shot["id"], "label": f"Voiceover: {shot['id']}", "model": model, "price": price,
+                              "options": options, "request_hash": approvals.request_hash("tts", shot["id"], model, price, payload)})
+                from aistudio.verify import _voice_checks
+                warnings.extend(_voice_checks(shot["id"], line, language, int(shot.get("seconds", 0) or 0)))
+        if not items:
+            raise ServiceError("no on-camera or off-camera shots have a voice_line")
+        budget = self.ws._read(p, "budget.json", {})
+        plan = {"items": items, "total": round(sum(i["price"] for i in items), 6),
+                "budget": {"estimate": budget.get("estimate"), "stop_loss": budget.get("stop_loss"), "spent": round(costlog.spent(p), 6)},
+                "extra": {"language": language, "kind": "voiceover", "warnings": warnings}}
+        return self.ws.batches.create(name, actor=actor, plan=plan)
 
     def approve_human(self, name, pid):
         """HUMAN channel only (web UI / terminal). Never expose through MCP."""
@@ -396,7 +503,7 @@ class PipelineDomain:
             if stale:
                 raise BudgetStale(stale)
             rows = costlog.read_log(p)
-            stage = {"clip": "final", "image": "image", "image_edit": "image_edit", "clip_extend": "clip_extend", "review": "vision", **{k: k for k in AI_TOOLS}}[kind]
+            stage = {"clip": "final", "image": "image", "image_edit": "image_edit", "clip_extend": "clip_extend", "review": "vision", **{k: k for k in AI_TOOLS}}.get(kind, kind)
             variant = payload.get("variant")
             ledger = f"{target}.v{variant}" if variant else target      # a variant is its own ledger shot: own attempts, own cost rows, own discard match
             pending = [r for r in project_lock.read_reservations(p) if r.get("shot") == ledger and r.get("stage") == stage]
@@ -451,6 +558,7 @@ class PipelineDomain:
         for path_key, hash_key in (("source", "source_sha"), ("file", "file_sha"), ("first_frame", "first_frame_sha"), ("end_frame", "end_frame_sha")):
             if payload.get(path_key):
                 files.append((payload[path_key], payload[hash_key]))
+        files.extend((r["path"], r["sha"]) for r in payload.get("files", []))
         shot = payload.get("shot_spec") or {}
         if shot.get("first_frame"):
             files.append((shot["first_frame"], payload["first_frame_sha"]))
@@ -478,6 +586,8 @@ class PipelineDomain:
 
     def _execute_kind(self, p, kind, target, payload, model, price, attempt, log, grant, inputs=None):
         inputs = inputs or p
+        if kind in ("tts", "music", "sfx", "lipsync", "transcribe"):
+            return self._execute_audio(p, kind, target, payload, model, price, attempt, log, grant, inputs)
         if kind == "image_edit":
             source = inputs / payload["source"]
             res = self.ws.runner().image_edit(source.as_posix(), payload["prompt"], edit_mode=payload["edit_mode"], mask_mode=payload["mask_mode"], project_dir=p, grant=grant)
@@ -581,6 +691,50 @@ class PipelineDomain:
             out.write_bytes(res["bytes"])
         self._write_meta(p, out, payload, row, grant, res["cost"], kind, target, refs=[(payload["source"], payload["source_sha"]), *[(r["path"], r["sha"]) for r in ref]])
         return {"kind": kind, "file": out.relative_to(p).as_posix(), "cost": res["cost"]}
+
+    def _execute_audio(self, p, kind, target, payload, model, price, attempt, log, grant, inputs):
+        files = {r["role"]: inputs / r["path"] for r in payload.get("files", [])}
+        res = self.ws.runner().audio_task(payload["task"], project_dir=p, grant=grant, text=payload.get("text", ""), prompt=payload.get("prompt", ""),
+                                          voice_id=payload.get("voice_id", ""), source_path=str(files.get("source", "")),
+                                          video_path=str(files.get("video", "")), audio_path=str(files.get("audio", "")),
+                                          seconds=payload.get("seconds", 0), language=payload.get("language", ""),
+                                          options=payload.get("params", {}), chars=payload.get("chars", 0))
+        row = {**log, "model": res.get("model", model), "provider": res.get("provider", payload.get("provider", "")),
+               "cost_source": res.get("cost_source", ""), "timestamp": datetime.now().isoformat(timespec="seconds"),
+               "seconds": str(payload.get("seconds", "")), "cost": res.get("cost", 0)}
+        if res.get("status") == "pending":
+            costlog.append_log(p, {**row, "result": "pending", "cost_source": "estimated"})
+            return {"kind": kind, "pending": True, "job_id": (res.get("job") or {}).get("job_id", "")}
+        if kind == "transcribe":
+            out_dir = p / "checks" / "transcripts"
+            out_dir.mkdir(parents=True, exist_ok=True)
+            out = self._next_audio_version(out_dir, target, ".json")
+            with self._logged_output(p, {**row, "result": "completed"}):
+                out.write_text(json.dumps(res["transcript"], ensure_ascii=False, indent=2), encoding="utf-8")
+        else:
+            if kind == "lipsync":
+                out_dir, suffix = p / "clips", ".mp4"
+            else:
+                out_dir = p / "audio" / ({"tts": "vo", "music": "music", "sfx": "sfx"}[kind])
+                suffix = ".mp3" if "mpeg" in res.get("mime", "") else ".wav"
+            out_dir.mkdir(parents=True, exist_ok=True)
+            out = self._next_audio_version(out_dir, target, suffix)
+            with self._logged_output(p, row):
+                out.write_bytes(res["bytes"])
+        refs = [(r["path"], r["sha"]) for r in payload.get("files", [])]
+        self._write_meta(p, out, {**payload, "prompt": payload.get("prompt") or payload.get("text", "")}, row, grant, res.get("cost", 0), kind, target, refs=refs)
+        result = {"kind": kind, "file": out.relative_to(p).as_posix(), "cost": res.get("cost", 0)}
+        if kind == "transcribe":
+            result["transcript"] = res["transcript"]
+        return result
+
+    @staticmethod
+    def _next_audio_version(directory, target, suffix):
+        base = re.sub(r"\.v\d+$", "", str(target))
+        n = 1
+        while (directory / f"{base}.v{n}{suffix}").exists():
+            n += 1
+        return directory / f"{base}.v{n}{suffix}"
 
     @staticmethod
     def _write_meta(p, out, payload, row, grant, cost, kind, target, refs=()):

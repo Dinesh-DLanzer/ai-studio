@@ -31,6 +31,7 @@ from aistudio.providers.base import Adapter, Rejected, Retryable, AuthError, Not
 class ElevenLabsAdapter(Adapter):
     type = "elevenlabs"
     capabilities = frozenset({"tts", "sfx", "music", "voice_clone", "transcribe"})
+    task_methods = frozenset({"tts", "sfx", "music", "transcribe"})
     default_base_url = "https://api.elevenlabs.io"
 
     def _headers(self):

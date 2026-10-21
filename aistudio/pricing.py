@@ -30,6 +30,7 @@ FAKE_CARDS = {
     "fake/video": {"kind": "video", "per_second": {"720p": {"audio": 0.05, "no_audio": 0.03}, "480p": {"audio": 0.05, "no_audio": 0.03}}},
     "fake/image": {"kind": "image", "per_image": 0.036},
     "fake/llm": {"kind": "text", "free": True}, "fake/vision": {"kind": "text", "per_call": 0.001},
+    "fake/audio": {"kind": "audio", "per_1k_chars": 0, "per_minute": 0, "per_run": 0, "per_second": 0},
 }
 
 
@@ -55,7 +56,10 @@ def validate_card(card):
     if k == "image":
         errs += [] if num(card.get("per_image")) else ["per_image must be a number >= 0"]
     elif k == "audio":
-        errs += [] if num(card.get("per_1k_chars")) or num(card.get("per_minute")) else ["audio needs per_1k_chars or per_minute (a number >= 0)"]
+        audio_rates = [card.get(f) for f in ("per_1k_chars", "per_minute", "per_run")]
+        audio_rates.append(card.get("per_second"))
+        valid_rate = lambda x: num(x) or (isinstance(x, dict) and bool(x) and all(num(v) for v in x.values()))
+        errs += [] if any(valid_rate(x) for x in audio_rates) else ["audio needs per_1k_chars, per_minute, per_run or per_second pricing"]
     elif k == "utility":
         errs += [] if num(card.get("per_run")) else ["per_run must be a number >= 0"]
     elif k == "video":
@@ -147,6 +151,26 @@ class Pricing:
             return round(float(card["per_run"]), 6)
         return self.video_price(card, seconds, resolution)
 
+    @staticmethod
+    def audio_task_price(card, task, *, chars=0, seconds=0):
+        """Price an audio request from an explicit card. Unknown or incompatible prices stay unknown."""
+        if not card or card.get("kind") != "audio":
+            return None
+        try:
+            if task == "tts" and "per_1k_chars" in card:
+                return round((int(chars) / 1000) * float(card["per_1k_chars"]), 6)
+            if task in ("transcribe", "lipsync") and "per_minute" in card:
+                from math import ceil
+                return round((ceil(float(seconds)) / 60) * float(card["per_minute"]), 6)
+            if task in ("music", "sfx"):
+                if "per_second" in card:
+                    return round(float(seconds) * float(card["per_second"]), 6)
+                if "per_run" in card:
+                    return round(float(card["per_run"]), 6)
+        except (TypeError, ValueError):
+            return None
+        return None
+
     def image_price(self, card, refs=0):
         if not card or card.get("kind") != "image":
             return None
@@ -188,6 +212,8 @@ class Pricing:
             def zero(v):
                 return v == 0 if isinstance(v, (int, float)) else all(zero(x) for x in (v.values() if isinstance(v, dict) else [t.get("rate") for t in v]))
             return bool(card.get("per_second")) and zero(card["per_second"])
+        if card and card.get("kind") == "audio":
+            return all(v == 0 for v in card.values() if isinstance(v, (int, float)) and not isinstance(v, bool))
         return bool(card and card.get("kind") == "text" and card.get("free"))
 
     def text_cost(self, card, usage):

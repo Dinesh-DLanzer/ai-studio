@@ -255,6 +255,9 @@ def to_shots_doc(story, model="google/veo-3.1-lite", seconds=4, resolution="720p
             "seconds": seconds,
             "resolution": resolution,
             "audio": shot.get("voice_mode", "silent") != "silent",
+            "voice_mode": shot.get("voice_mode", "silent"),
+            "voice_line": shot.get("voice_line", ""),
+            "english": shot.get("english", ""),
         }
         if shot.get("image"):
             entry["first_frame"] = "stills/%s.png" % shot["image"]

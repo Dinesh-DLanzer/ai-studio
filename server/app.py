@@ -763,6 +763,18 @@ def create_app(root=None, token=None, rates_path=None, transport=None, static_di
         b = await request.json()
         return guard(ws.clip_tool, name, b.get("tool"), shot_id, **{k: v for k, v in b.items() if k in ("prompt", "reference", "subject", "seconds", "scale", "aspect_ratio", "target")})
 
+    @app.post("/api/projects/{name}/audio/tool", dependencies=[api])
+    async def audio_tool(name: str, request: Request):
+        b = await request.json()
+        # This route only creates a paid proposal; approval and execution use the existing human-session routes.
+        return guard(ws.propose, name, b.get("task"), b.get("target"), getattr(request.state, "scope", "session") == "session", options=b.get("options") or {})
+
+    @app.post("/api/projects/{name}/voiceover/plan", dependencies=[api])
+    async def voiceover_plan(name: str, request: Request):
+        human_session(request)
+        b = await request.json() if (await request.body()) else {}
+        return guard(ws.voiceover_plan, name, b.get("voice"), actor="local")
+
     @app.get("/api/projects/{name}/spec/{kind}/{target}", dependencies=[api])
     def spec(name: str, kind: str, target: str):
         return guard(ws.spec, name, kind, target)

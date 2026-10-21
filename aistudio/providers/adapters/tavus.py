@@ -31,6 +31,7 @@ from aistudio.providers.base import Adapter, AuthError, Rejected, Retryable, scr
 class TavusAdapter(Adapter):
     type = "tavus"
     capabilities = frozenset({"lipsync", "video"})
+    task_methods = frozenset({"lipsync"})
     default_base_url = "https://tavusapi.com"
 
     def __init__(self, conn, transport=None):
