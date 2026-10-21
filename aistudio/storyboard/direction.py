@@ -76,7 +76,7 @@ def split(direction, profile):
     movement = d.get("movement")
     token = _NATIVE_ALIASES.get(movement)
     param = camera.get("param")
-    native = {param: token} if movement and token in native_moves and param else {}
+    native = {param: token} if movement and token in native_moves and param and camera.get("mode") == "native" else {}
     prompt_direction = dict(d)
     if native:
         prompt_direction.pop("movement", None)

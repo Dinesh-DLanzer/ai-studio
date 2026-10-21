@@ -23,7 +23,7 @@ class TestDirection(unittest.TestCase):
 
     def test_native_and_prompt_splits_for_two_profiles(self):
         direction = {"movement": "zoom-in", "framing": "close-up", "lens_mm": 50}
-        native, prompt = split(direction, {"camera": {"native": ["zoom_in"], "param": "camera_motion"}})
+        native, prompt = split(direction, {"camera": {"mode": "native", "native": ["zoom_in"], "param": "camera_motion"}})
         self.assertEqual(native, {"camera_motion": "zoom_in"})
         self.assertIn("close-up framing", prompt)
         self.assertNotIn("zoom in", prompt)
@@ -39,7 +39,7 @@ class TestDirection(unittest.TestCase):
             _, prompt = split({"movement": movement}, {"camera": {"native": [], "param": None}})
             self.assertIn("Camera:", prompt)
             token = native_aliases.get(movement)
-            native, prompt = split({"movement": movement}, {"camera": {"native": [token] if token else [], "param": "camera_motion"}})
+            native, prompt = split({"movement": movement}, {"camera": {"mode": "native", "native": [token] if token else [], "param": "camera_motion"}})
             self.assertEqual(bool(native), token is not None)
             if token:
                 self.assertNotIn("Camera: a ", prompt)
@@ -149,3 +149,26 @@ class TestDirectionIsBoundToApproval(unittest.TestCase):
         ws, _ = make(self)
         shots(ws, ("s1", 4, {"camera": "Legacy free-text move", "direction": {"movement": "dolly-in"}}))
         self.assertEqual(self.payload(ws)["prompt"], "p")           # free-text camera already lives in the prompt text; direction is ignored when it is set
+
+
+class TestDirectionFailsClosed(unittest.TestCase):
+    def test_keyframes_are_refused_when_the_model_or_adapter_cannot_send_them(self):
+        ws, p = make(self)
+        (p / "stills").mkdir(exist_ok=True)
+        (p / "stills" / "mid.png").write_bytes(b"png")
+        shots(ws, ("s1", 4, {"keyframes": [{"at": 1, "image": "stills/mid.png"}]}))
+        with self.assertRaisesRegex(ServiceError, "keyframe"):
+            resolve(ws, p, "clip", "s1")                      # never approved, paid for and silently dropped
+
+    def test_native_camera_needs_native_mode(self):
+        profile = {"camera": {"mode": "prompt", "param": "camera_motion", "native": ["zoom_in"]}}
+        native, text = split({"movement": "zoom-in"}, profile)
+        self.assertEqual(native, {})
+        self.assertIn("zoom", text.lower())                   # the movement stays in the prompt, nothing is lost
+
+    def test_batch_digest_covers_direction(self):
+        ws, p = make(self)
+        shots(ws, ("s1", 4, {"direction": {"movement": "dolly-in"}}))
+        a = ws.batches.digest(p, "clip", "s1", "vid-a", 0.4)
+        shots(ws, ("s1", 4, {"direction": {"movement": "orbit-left"}}))
+        self.assertNotEqual(a, ws.batches.digest(p, "clip", "s1", "vid-a", 0.4))

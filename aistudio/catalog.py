@@ -96,6 +96,11 @@ def missing(profile, ptype, req):
             return "no end-frame support"
         if ptype in cfg.PROVIDER_TYPES and "end_frame" not in cfg.adapter_class(ptype).request_features:
             return "its adapter cannot send an end frame yet"
+    if req.get("keyframes"):
+        if profile["frames"].get("keyframes", 0) < req["keyframes"]:
+            return f"accepts {profile['frames'].get('keyframes', 0)} keyframe(s), {req['keyframes']} given"
+        if ptype in cfg.PROVIDER_TYPES and "keyframes" not in cfg.adapter_class(ptype).request_features:
+            return "its adapter cannot send keyframes yet"
     if req.get("refs", 0) > profile["references"]["max"]:
         return f"accepts at most {profile['references']['max']} reference image(s), {req['refs']} given"
     return None

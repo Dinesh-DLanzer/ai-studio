@@ -43,7 +43,7 @@ class GenerationSpec:
         return self.entry["model"]
 
     def required_features(self):
-        return {"task": self.task, "end_frame": bool(self.end_frame), "refs": len(self.refs)}
+        return {"task": self.task, "end_frame": bool(self.end_frame), "keyframes": len(self.keyframes), "refs": len(self.refs)}
 
     def to_dict(self):
         result = {"kind": self.kind, "target": self.target, "provider": self.provider, "model": self.model, "task": self.task, "profile": self.profile,
@@ -184,7 +184,7 @@ def resolve(ws, p, kind, target, options=None, loose=False):
         path = asset.get("out") or (ref.get("path") if isinstance(ref, dict) else rid)
         shot_refs.append({"id": rid, "role": reference_role, "path": path})
     shot_refs.sort(key=lambda r: priority[r["role"]])
-    req = {"task": "image_to_video" if ff else "text_to_video", "end_frame": bool(end), "refs": 0}
+    req = {"task": "image_to_video" if ff else "text_to_video", "end_frame": bool(end), "keyframes": len(keyframes), "refs": 0}
     entry, explicit = select_entry(ws, p, role, shot.get("model"), req, f"shot {target}")
     profile = _profile(ws, entry)
     ref_limit = profile["references"]["max"]

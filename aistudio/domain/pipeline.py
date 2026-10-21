@@ -410,7 +410,7 @@ class PipelineDomain:
             end = payload.get("end_frame")
             if end:
                 req["last_frame"] = str(inputs / end)
-            res = self.ws.runner().video(req, project_dir=p, grant=grant, first=self._pin("video", p, payload, model), ref_count=len(self._clip_spec(p, target)[0].get("refs") or []),
+            res = self.ws.runner().video(req, project_dir=p, grant=grant, first=self._pin("video", p, payload, model), ref_count=len(spec_mod.resolve(self.ws, p, "clip", target).refs),
                                          required={"task": "image_to_video" if ff else "text_to_video", "end_frame": bool(end), "refs": 0})
             job = res.get("job") or {}
             row = {**log, "model": res.get("model") or model, "provider": res.get("provider") or log["provider"], "cost_source": res.get("cost_source", ""),

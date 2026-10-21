@@ -84,6 +84,9 @@ class BatchDomain:
                     "aspect_ratio": doc.get("aspect_ratio", "9:16")}
             if shot.get("end_frame"):
                 body["end_frame"] = shot["end_frame"]
+            for k in ("direction", "camera", "keyframes"):      # content the human approved with the batch total: an edit before run is a change
+                if shot.get(k):
+                    body[k] = shot[k]
         return approvals.request_hash(kind, target, model, price, body)
 
     # ---- lifecycle
