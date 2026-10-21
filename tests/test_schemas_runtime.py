@@ -31,7 +31,7 @@ class TestRuntimeSchemas(unittest.TestCase):
         self.assertEqual(project.load_json(self.ws.pdir("demo"), "shots.json"),
                          {**shots, "schema_version": 2})
         self.assertEqual(project.load_json(self.ws.pdir("demo"), "images.json"),
-                         {**images, "schema_version": 1})
+                         {**images, "schema_version": 2})
 
     def test_unknown_fields_survive_edit_brief_and_todos(self):
         edit = {"aspect": "9:16", "tracks": {}, "future": {"nested": True}}
@@ -80,7 +80,7 @@ class TestRuntimeSchemas(unittest.TestCase):
         self.assertEqual(load_doc("shots", project.load_json(self.ws.pdir("demo"), "shots.json")), loaded)
 
     def test_all_document_kinds_have_current_versions(self):
-        self.assertEqual(CURRENT, {"shots": 2, "images": 1, "edit": 1, "brief": 1, "todos": 1})
+        self.assertEqual(CURRENT, {"shots": 2, "images": 2, "edit": 1, "brief": 1, "todos": 1})
 
     def test_put_error_strings_remain_unchanged(self):
         cases = (
@@ -102,7 +102,7 @@ class TestRuntimeSchemas(unittest.TestCase):
         shots = project.load_json(path, "shots.json")
         images = project.load_json(path, "images.json")
         self.assertEqual(shots["schema_version"], 2)
-        self.assertEqual(images["schema_version"], 1)
+        self.assertEqual(images["schema_version"], 2)
         self.assertEqual(project.validate_shots(shots), [])
         self.assertEqual(project.validate_images(images), [])
         self.assertEqual(load_doc("shots", shots), shots)
@@ -113,7 +113,23 @@ class TestRuntimeSchemas(unittest.TestCase):
         before = json.loads(json.dumps(data))
         result = load_doc("images", data)
         self.assertEqual(data, before)
-        self.assertEqual(result, {**data, "schema_version": 1})
+        self.assertEqual(result, {**data, "schema_version": 2})
+
+    def test_images_v1_migrates_to_v2_and_keeps_cast_fields(self):
+        old = {"schema_version": 1, "images": [{"id": "a", "kind": "character", "out": "a.png", "future": 1,
+               "views": [{"id": "a_front", "view": "front", "file": "stills/a_front.png", "x": 1}], "consent": {"k": 1}}]}
+        new = load_doc("images", old)
+        self.assertEqual(new["schema_version"], 2)
+        self.assertEqual(new["images"], old["images"])
+        shots = load_doc("shots", {"shots": [{"id": "s1", "selected_version": 2, "future": 1}]})
+        self.assertEqual(shots["shots"][0], {"id": "s1", "selected_version": 2, "future": 1})
+
+    def test_validate_images_checks_views_and_role(self):
+        img = {"id": "a", "kind": "character", "out": "a.png", "prompt": "p", "refs": []}
+        ok = {"images": [{**img, "views": [{"id": "a_front", "view": "front", "file": "stills/a_front.png"}], "role": "style"}]}
+        self.assertEqual(project.validate_images(ok), [])
+        bad = {"images": [{**img, "views": [{"id": "x", "view": "back", "file": "f"}], "role": "weird"}]}
+        self.assertEqual(len(project.validate_images(bad)), 2)
 
     def test_validate_images_custom_refs_limit(self):
         images = [{"id": str(i), "kind": "character", "out": f"{i}.png", "prompt": "p", "refs": []}

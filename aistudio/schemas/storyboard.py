@@ -32,6 +32,7 @@ class Shot(SchemaModel):
     image: Optional[str] = None
     number: Optional[int] = None
     time: Optional[str] = None
+    selected_version: Optional[int] = None
 
 
 class ShotsDoc(SchemaModel):
@@ -50,6 +51,9 @@ class ImageAsset(SchemaModel):
     aspect_ratio: str = "3:2"
     uses: Optional[List[str]] = None
     purpose: Optional[str] = None
+    views: Optional[List[Dict[str, Any]]] = None      # [{id, view: front|three-quarter|profile|full-body|expression, file}]
+    role: Optional[str] = None                        # style | product, for kind "other"
+    consent: Optional[Dict[str, Any]] = None
 
 
 class ImagesDoc(SchemaModel):
