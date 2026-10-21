@@ -42,7 +42,7 @@ This repository is optimized for high-speed, token-efficient AI agent collaborat
 ---
 
 ## 4. Plans Workflow
-* Respect the `plans/` lifecycle defined in [plans/readme.md](file:///Users/dinesh/DLanzer/AI%20Studio/plans/readme.md):
+* Respect the `plans/` lifecycle defined in [plans/readme.md](plans/readme.md):
   - `plans/not-started/`: Pending implementation
   - `plans/on-processing/`: Currently active tasks
   - `plans/completed/`: Finished and verified tasks
