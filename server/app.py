@@ -1352,18 +1352,21 @@ def create_app(root=None, token=None, rates_path=None, transport=None, static_di
             raise HTTPException(400, "file must be project relative")
         p = guard(ws.pdir, name)
         try:
-            session = ExternalEdit(p, apps=external_apps())
+            opener = (lambda *a, **k: None) if os.environ.get("AISTUDIO_ALL_TEST") == "1" else None
+            kw = {"opener": opener} if opener else {}
+            session = ExternalEdit(p, apps=external_apps(), **kw)
             result = session.start(rel, app_name)
         except (ValueError, OSError) as e:
             raise HTTPException(400, str(e)) from None
         app.state.external_edits[name] = session
-        return {"file": str(Path(result["path"]).relative_to(p)), "app": result["app"], "status": "editing"}
+        return {"file": str(Path(result["path"]).resolve().relative_to(p.resolve())), "app": result["app"], "status": "editing"}
 
     @app.get("/api/projects/{name}/external-edit", dependencies=[api])
     def external_edit_status(name: str, request: Request):
         human_session(request)
         session = app.state.external_edits.get(name)
-        return {"sessions": ([{"file": str(session.session["original"].relative_to(ws.pdir(name))), "app": session.session["app"], "status": "editing"}]
+        pdir = ws.pdir(name).resolve()
+        return {"sessions": ([{"file": str(session.session["original"].resolve().relative_to(pdir)), "app": session.session["app"], "status": "editing"}]
                             if session and session.session and not session.session["reported"] else [])}
 
     @app.post("/api/projects/{name}/external-edit/stop", dependencies=[api])

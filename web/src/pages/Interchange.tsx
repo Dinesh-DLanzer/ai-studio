@@ -299,10 +299,10 @@ export function InterchangeTab({ o, name, load }: TabProps) {
     }
   };
 
-  // Media items list
-  const stills: string[] = o.files.stills || [];
-  const clips: string[] = o.files.clips || [];
-  const audioFiles: string[] = o.files.audio || [];
+  // Media items list formatted as project-relative paths
+  const stills: string[] = (o.files.stills || []).map((f) => (f.startsWith("stills/") ? f : `stills/${f}`));
+  const clips: string[] = (o.files.clips || []).map((f) => (f.startsWith("clips/") ? f : `clips/${f}`));
+  const audioFiles: string[] = (o.files.audio || []).map((f) => (f.startsWith("audio/") ? f : `audio/${f}`));
   const currentList: string[] = activeCategory === "stills" ? stills : activeCategory === "clips" ? clips : audioFiles;
 
   const appSelectId = useId();
