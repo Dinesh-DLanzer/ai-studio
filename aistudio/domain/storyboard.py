@@ -6,6 +6,7 @@ import shutil
 import time
 
 from aistudio import editor as editor_mod, languages as lang_mod, project as project_mod
+from aistudio.schemas import load_doc
 from aistudio.domain.common import ID_RE, ServiceError, _ident
 from aistudio.storyboard import convert as story_mod
 
@@ -44,14 +45,14 @@ class StoryboardDomain:
         errs = project_mod.validate_shots(doc)
         if errs:
             raise ServiceError("; ".join(errs))
-        project_mod.save_json(self.ws.pdir(name), "shots.json", doc)
+        project_mod.save_json(self.ws.pdir(name), "shots.json", load_doc("shots", doc))
         self.ws._changed(name, "shots")
 
     def put_images(self, name, doc):
         errs = project_mod.validate_images(doc)
         if errs:
             raise ServiceError("; ".join(errs))
-        project_mod.save_json(self.ws.pdir(name), "images.json", doc)
+        project_mod.save_json(self.ws.pdir(name), "images.json", load_doc("images", doc))
         self.ws._changed(name, "assets", "shots")
 
     @staticmethod
@@ -386,4 +387,3 @@ class StoryboardDomain:
         return self.ws.propose(name, "clip_extend", clip_id, options={
             "source": src_file.resolve().relative_to(p.resolve()).as_posix(), "prompt": str(prompt), "seconds": int(seconds),
         })
-
