@@ -38,6 +38,16 @@ class FakeAdapter(Adapter):
         last = next((m["content"] for m in reversed(messages) if m.get("role") == "user" and isinstance(m.get("content"), str)), "")
         return {"text": "FAKE: " + last[:40], "usage": {"input": len(last), "output": 8}, "cost": 0.0, "model": model}
 
+    def chat_tools(self, model, messages, tools, opts=None):
+        _maybe_fail(model)
+        opts = opts or {}
+        if "tool_calls" in opts:
+            return {"text": opts.get("text", ""), "tool_calls": opts["tool_calls"], "usage": {"input": 10, "output": 10}, "cost": 0.0, "model": model}
+        if "text" in opts:
+            return {"text": opts["text"], "tool_calls": [], "usage": {"input": 10, "output": 10}, "cost": 0.0, "model": model}
+        first_tool = tools[0]["name"] if tools else "done"
+        return {"text": "", "tool_calls": [{"id": "fake_call_1", "name": first_tool, "args": {}}], "usage": {"input": 10, "output": 10}, "cost": 0.0, "model": model}
+
     def vision(self, model, prompt, images, opts=None):
         _maybe_fail(model)
         bad = (opts or {}).get("inject") == "extra_person"

@@ -180,6 +180,9 @@ class Adapter:
     def chat(self, model, messages, opts=None):
         self._unsupported("chat")
 
+    def chat_tools(self, model, messages, tools, opts=None):
+        self._unsupported("chat_tools")
+
     def vision(self, model, prompt, images, opts=None):
         self._unsupported("vision")
 

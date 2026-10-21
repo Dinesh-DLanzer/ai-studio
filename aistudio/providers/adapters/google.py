@@ -128,6 +128,33 @@ class GoogleAdapter(Adapter):
             body["generationConfig"] = config
         return self._answer(model, body)
 
+    def chat_tools(self, model, messages, tools, opts=None):
+        system = "\n\n".join(m.get("content") or "" for m in messages if m.get("role") == "system")
+        body = {"contents": [{"role": "model" if m.get("role") == "assistant" else "user",
+                              "parts": [{"text": m.get("content") or ""}]}
+                             for m in messages if m.get("role") != "system"]}
+        if system:
+            body["systemInstruction"] = {"parts": [{"text": system}]}
+        config = self._config(opts)
+        if config:
+            body["generationConfig"] = config
+        body["tools"] = [{"functionDeclarations": [{
+            "name": t["name"],
+            "description": t.get("description", ""),
+            "parameters": t.get("parameters") or t.get("input_schema") or {"type": "object"}
+        } for t in tools]}]
+        data = self._generate(model, body)
+        parts = self._parts(data)
+        text = "".join(p.get("text") or "" for p in parts if p.get("text"))
+        tool_calls = []
+        for i, p in enumerate(parts):
+            fc = p.get("functionCall")
+            if fc:
+                tool_calls.append({"id": f"call_{i}", "name": fc.get("name"), "args": fc.get("args") or {}})
+        if not text.strip() and not tool_calls:
+            raise Retryable("empty answer")
+        return {"text": text, "tool_calls": tool_calls, "usage": self._usage(data), "cost": None, "model": model}
+
     def vision(self, model, prompt, images, opts=None):
         body = {"contents": [{"role": "user", "parts": [{"text": prompt}] + self._inline(images)}]}
         config = self._config(opts)
