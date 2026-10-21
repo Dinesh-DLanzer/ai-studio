@@ -179,8 +179,13 @@ class PipelineDomain:
             sp = spec_mod.resolve(self.ws, p, "clip", target)
             shot = self._clip_spec(p, target)[0]
             ff, end = sp.start_frame or None, sp.end_frame or None
-            payload = {"prompt": shot["prompt"], "seconds": sp.seconds, "audio": sp.audio, "resolution": sp.resolution, "provider": sp.provider,
+            prompt = shot["prompt"]
+            if shot.get("direction") and not shot.get("camera") and sp.camera.get("prompt_text"):
+                prompt = f"{prompt.rstrip()} {sp.camera['prompt_text']}".strip()      # structured direction becomes part of the approved prompt
+            payload = {"prompt": prompt, "seconds": sp.seconds, "audio": sp.audio, "resolution": sp.resolution, "provider": sp.provider,
                        "aspect_ratio": sp.aspect_ratio, "first_frame": ff, "first_frame_sha": _sha(p / ff) if ff else ""}
+            if sp.camera.get("native"):      # native camera parameters are bound into the approved request too
+                payload["camera_native"] = sp.camera["native"]
             if end:      # only present when asked for, so the request digest of ordinary clips is unchanged
                 payload.update(end_frame=end, end_frame_sha=_sha(p / end))
             return payload, sp.model, sp.price
@@ -400,6 +405,8 @@ class PipelineDomain:
             ff = str(inputs / payload["first_frame"]) if payload["first_frame"] else None
             req = {"prompt": payload["prompt"], "seconds": payload["seconds"], "resolution": payload["resolution"], "aspect_ratio": payload["aspect_ratio"],
                    "audio": payload["audio"], "first_frame": ff}
+            if payload.get("camera_native"):
+                req["camera_native"] = payload["camera_native"]
             end = payload.get("end_frame")
             if end:
                 req["last_frame"] = str(inputs / end)

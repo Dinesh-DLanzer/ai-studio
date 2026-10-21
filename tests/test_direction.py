@@ -119,3 +119,33 @@ class TestDirection(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestDirectionIsBoundToApproval(unittest.TestCase):
+    def payload(self, ws, target="s1"):
+        return ws._pipeline._payload_and_price("demo", "clip", target)[0]
+
+    def test_composed_camera_text_and_native_params_are_in_the_approved_payload(self):
+        ws, _ = make(self, {"fk|vid-a": {"camera": {"mode": "native", "param": "camera_motion", "native": ["zoom_in"]}}})
+        shots(ws, ("s1", 4, {"direction": {"movement": "zoom-in", "framing": "close-up"}}), ("s2", 4, {}))
+        payload = self.payload(ws)
+        self.assertTrue(payload["prompt"].startswith("p "))
+        self.assertIn("close-up framing", payload["prompt"])
+        self.assertEqual(payload["camera_native"], {"camera_motion": "zoom_in"})
+        plain = self.payload(ws, "s2")
+        self.assertEqual(plain["prompt"], "p")                       # shots without direction are unchanged...
+        self.assertNotIn("camera_native", plain)                     # ...down to the payload keys, so their request digest is unchanged
+
+    def test_changing_direction_changes_the_request_hash(self):
+        from aistudio import approvals
+        ws, _ = make(self)
+        shots(ws, ("s1", 4, {"direction": {"movement": "dolly-in"}}))
+        a = approvals.request_hash("clip", "s1", "vid-a", 0.4, self.payload(ws))
+        shots(ws, ("s1", 4, {"direction": {"movement": "orbit-left"}}))
+        b = approvals.request_hash("clip", "s1", "vid-a", 0.4, self.payload(ws))
+        self.assertNotEqual(a, b)                                    # an approval for one camera move cannot run another
+
+    def test_legacy_free_text_camera_is_not_duplicated(self):
+        ws, _ = make(self)
+        shots(ws, ("s1", 4, {"camera": "Legacy free-text move", "direction": {"movement": "dolly-in"}}))
+        self.assertEqual(self.payload(ws)["prompt"], "p")           # free-text camera already lives in the prompt text; direction is ignored when it is set
