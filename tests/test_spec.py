@@ -67,7 +67,7 @@ class TestLookupOrder(unittest.TestCase):
             self.assertTrue(catalog_mod.missing(cat.profile("x", ptype, model), ptype, need), ptype)
         # an adapter that cannot send refs is refused even when the profile allows them
         permissive = {**veo, "frames": {**veo["frames"], "end": True}, "references": {"max": 3, "roles": []}}
-        self.assertIn("reference", catalog_mod.missing(permissive, "kling", {"refs": 1}))
+        self.assertIn("reference", catalog_mod.missing(permissive, "kling", {"task": "image_to_video", "refs": 1}))
 
     def test_validate_profile_rejects_bad_values(self):
         self.assertTrue(validate_profile({"camera": {"mode": "native"}}))       # native needs a param

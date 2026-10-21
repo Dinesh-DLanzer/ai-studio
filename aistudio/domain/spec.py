@@ -201,8 +201,9 @@ def resolve(ws, p, kind, target, options=None, loose=False):
         warnings.append(f"{aspect} is not in this model's known aspect ratios ({', '.join(profile['aspect_ratios'])})")
     if audio and profile["audio"] == "none":
         warnings.append("this model does not generate audio")
-    if shot_refs:
-        warnings.append("reference images are checked against the model limit but no video adapter sends them yet")
+    why = shot_refs and catalog_mod.missing(profile, entry["ptype"], {"refs": len(shot_refs)})
+    if why:
+        warnings.append(f"reference images cannot be sent: {why}")
     from aistudio.storyboard.direction import split
     direction = shot.get("direction") or {}
     native, prompt_text = split(direction, profile) if direction and not shot.get("camera") else ({}, "")

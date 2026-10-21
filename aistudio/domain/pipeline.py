@@ -188,6 +188,9 @@ class PipelineDomain:
                 payload["camera_native"] = sp.camera["native"]
             if end:      # only present when asked for, so the request digest of ordinary clips is unchanged
                 payload.update(end_frame=end, end_frame_sha=_sha(p / end))
+            found = [r for r in sp.refs if (p / r["path"]).is_file()]      # ids without a still on disk have nothing to send (the quote still counts them)
+            if found:      # reference images are bound by path and bytes like the frames
+                payload["refs"] = [{"path": r["path"], "sha": _sha(p / r["path"])} for r in found]
             return payload, sp.model, sp.price
         if kind == "image_edit":
             source = self._source_file(p, options.get("source"), "still")
@@ -410,8 +413,10 @@ class PipelineDomain:
             end = payload.get("end_frame")
             if end:
                 req["last_frame"] = str(inputs / end)
+            if payload.get("refs"):
+                req["refs"] = [str(inputs / r["path"]) for r in payload["refs"]]
             res = self.ws.runner().video(req, project_dir=p, grant=grant, first=self._pin("video", p, payload, model), ref_count=len(spec_mod.resolve(self.ws, p, "clip", target).refs),
-                                         required={"task": "image_to_video" if ff else "text_to_video", "end_frame": bool(end), "refs": 0})
+                                         required={"task": "image_to_video" if ff else "text_to_video", "end_frame": bool(end), "refs": len(payload.get("refs", []))})
             job = res.get("job") or {}
             row = {**log, "model": res.get("model") or model, "provider": res.get("provider") or log["provider"], "cost_source": res.get("cost_source", ""),
                    "timestamp": datetime.now().isoformat(timespec="seconds"), "resolution": payload["resolution"], "seconds": str(payload["seconds"]),
