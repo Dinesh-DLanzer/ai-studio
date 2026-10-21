@@ -26,6 +26,7 @@ from aistudio.domain.common import (
     _ident,
     _sha,
 )
+from aistudio.domain.batches import BatchDomain
 from aistudio.domain.costs import CostDomain
 from aistudio.domain.pipeline import PipelineDomain
 from aistudio.domain.projects import ProjectDomain
@@ -61,6 +62,7 @@ class Workspace(SettingsMixin):
         self._costs = CostDomain(self)
         self._verify = VerifyDomain(self)
         self._agents = AgentDomain(self)
+        self.batches = BatchDomain(self)
 
         # Public domain accessors
         self.projects = self._projects

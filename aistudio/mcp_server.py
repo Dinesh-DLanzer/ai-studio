@@ -145,6 +145,32 @@ def _approve_proposal_mcp(ws, a, session=None):
             "message": f"Proposal {pid} approved (${prop['price']:.3f}). Run it via run_proposal(name='{name}', id='{pid}')."}
 
 
+def _approve_batch_mcp(ws, a, session=None):
+    name, bid = a["name"], a["id"]
+    batch = ws.batches.get(name, bid)
+    if a.get("confirm") is not None:
+        raise ServiceError("confirm=true is not human approval; use MCP elicitation or the one-time fallback code")
+    message = f"Approve batch of {len(batch['items'])} items totalling ${batch['total']:.3f}? Each item runs at its listed price only."
+    if a.get("code"):
+        if not a.get("code_id"):
+            raise ServiceError("code_id is required with an approval code")
+        try:
+            approvals.redeem_code(ws.pdir(name), a["code_id"], a["code"], bid, "batch", batch["batch_hash"], _approval_secret(ws))
+            notifications.mark_used(a["code_id"])
+        except approvals.ApprovalError as e:
+            raise ServiceError(str(e)) from None
+    elif not _elicit_approval(session, message, batch["total"]):
+        return _fallback_approval(ws, name, bid, "batch", batch["batch_hash"], message)
+    ws.batches.approve(name, bid, batch["batch_hash"])
+    return {"ok": True, "approved": True, "batch_id": bid, "message": f"Batch {bid} approved (${batch['total']:.3f}). Run it with run_batch(name='{name}', id='{bid}')."}
+
+
+def _run_batch_mcp(ws, a):
+    if a.get("override") or a.get("confirm") is not None:
+        raise ServiceError("override and confirm are not accepted; a batch runs only after a human approved it")
+    return ws.batches.run(a["name"], a["id"])
+
+
 def _estimate_mcp(ws, a):
     b = ws.estimate(a["name"], float(a.get("failure", 0.2)))
     est, stop = b.get("estimate", 0), b.get("stop_loss", 0)
@@ -250,7 +276,14 @@ TOOLS = {
     "restore": ("Restore a discarded file.", S(name=STR, rel=STR), lambda ws, a: {"file": ws.restore(a["name"], a["rel"])}),
     "list_providers": ("Connected AI providers (id, label, type, status). There is no app-wide mode: each project is a test project or a real one.", S(), lambda ws, a: {"providers": [{k: v for k, v in p.items() if k in ("id", "label", "type", "enabled", "status")} for p in ws.providers_list()["providers"] if p["type"] != "fake"]}),
     "production_progress": ("Get production checklist groups, queue items, and next action.", S(name=STR), lambda ws, a: ws.production_progress(a["name"])),
-    "generate_all_plan": ("Plan batch generation for all pending items (free proposal generation).", S(name=STR), lambda ws, a: ws.generate_all_plan(a["name"])),
+    "generate_all_plan": ("Freeze the plan for everything left to generate as a batch (exact prices; nothing is spent or approved). Returns a batch id; a human must approve it with approve_batch.", S(name=STR), lambda ws, a: ws.batches.create(a["name"], actor="mcp")),
+    "get_batch": ("Status of a batch and each of its items.", S(name=STR, id=STR), lambda ws, a: ws.batches.get(a["name"], a["id"])),
+    "approve_batch": (
+        "Request human approval for the exact batch total. Uses MCP elicitation when available; otherwise returns a one-time code challenge. confirm=true is not accepted.",
+        S(name=STR, id=STR, code={"type": "string", "optional": True}, code_id={"type": "string", "optional": True}),
+        lambda ws, a: _approve_batch_mcp(ws, a),
+    ),
+    "run_batch": ("Run a batch a human already approved, item by item; stops at the first problem or changed item (needs_reapproval).", S(name=STR, id=STR), _run_batch_mcp),
     "get_edit": ("Get timeline video edit structure (edit.json) and tool status.", S(name=STR), lambda ws, a: ws.edit_get(a["name"])),
     "update_edit": ("Update timeline video edit structure (edit.json). Free.", S(name=STR, doc={"type": "object"}), lambda ws, a: ws.edit_put(a["name"], a["doc"]) or {"ok": True}),
     "export_edit": (
@@ -351,6 +384,8 @@ def handle(msg, ws, session=None):
                 result = _approve_proposal_mcp(ws, args, session=session)
             elif name == "run_proposal":
                 result = _run_proposal_mcp(ws, args, session=session)
+            elif name == "approve_batch":
+                result = _approve_batch_mcp(ws, args, session=session)
             else:
                 result = TOOLS[name][2](ws, args)
             is_err = False
