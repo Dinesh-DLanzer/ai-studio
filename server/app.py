@@ -948,6 +948,26 @@ def create_app(root=None, token=None, rates_path=None, transport=None, static_di
                            "consent": "Named subject consent required" if tool_id in ("motion_transfer", "character_swap") else "Source consent is checked when required"})
         return {"tools": result}
 
+    @app.post("/api/projects/{name}/clips/{shot_id}/local-tool", dependencies=[api])
+    async def local_clip_tool(name: str, shot_id: str, request: Request):
+        b = await request.json()
+        from aistudio import tools as local_tools
+        tool = b.get("tool", "")
+        params = b.get("params") or {}
+        root = ws.pdir(name).resolve()
+        if Path(shot_id).name != shot_id or shot_id in ("", ".", ".."):
+            raise HTTPException(400, "invalid clip name")
+        source = root / "clips" / shot_id
+        if not source.is_file():
+            raise HTTPException(404, "clip not found")
+        try:
+            from aistudio import project_lock
+            with project_lock.lock(root):          # two requests must not pick the same .v<k> file
+                result = local_tools.run_local(tool, source, source, params, root)
+        except (ValueError, OSError) as exc:
+            raise HTTPException(400, str(exc)) from exc
+        return {"file": str(result.relative_to(root)), "tool": tool, "cost": 0}
+
     @app.post("/api/projects/{name}/audio/tool", dependencies=[api])
     async def audio_tool(name: str, request: Request):
         b = await request.json()

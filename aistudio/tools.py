@@ -1,10 +1,15 @@
 """Free, local FFmpeg clip tools. Commands are always passed as argv lists."""
 from functools import lru_cache
 import json
+import os
 import shutil
 import subprocess
 import tempfile
 from pathlib import Path
+
+
+def _in_test_mode() -> bool:
+    return os.environ.get("AISTUDIO_ALL_TEST", "").strip() == "1"
 
 
 _ASPECTS = {"9:16": (720, 1280), "16:9": (1280, 720), "1:1": (720, 720)}
@@ -122,8 +127,6 @@ def run_local(tool, src, dst, params, project_dir, runner=subprocess.run):
     destination = _contained(root, dst, "destination")
     if not source.is_file():
         raise ValueError("source file does not exist")
-    if source == destination or source == _version_path(destination):
-        raise ValueError("output cannot overwrite the source")
     output = _version_path(destination)
     if output == source:
         raise ValueError("output cannot overwrite the source")
@@ -143,6 +146,12 @@ def run_local(tool, src, dst, params, project_dir, runner=subprocess.run):
             consent.write_lineage(root, out_path, meta, source_sha=meta["source_sha"], kind=tool)
         except Exception:
             pass
+    # In test mode, copy source to versioned destination without running ffmpeg
+    if runner is subprocess.run and _in_test_mode():     # an injected runner (tests) is always honoured
+        output.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(source, output)
+        _write_meta(output)
+        return output
 
     common = ["ffmpeg", "-y", "-nostdin", "-hide_banner", "-loglevel", "error"]
     still_output = destination.suffix.lower() in {".png", ".jpg", ".jpeg", ".webp", ".tif", ".tiff"}

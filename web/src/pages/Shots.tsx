@@ -18,21 +18,26 @@ import type { Shot } from "../types";
 import DirectionSection from "../components/Direction";
 import ShotModelPicker from "../components/ShotModelPicker";
 import ClipToolsPanel from "../components/ClipToolsPanel";
+import BatchPlanModal from "../components/BatchPlanModal";
+import { useBatchPipeline } from "../hooks/useBatchPipeline";
 
 const mmss = (s: number) => `0:${String(Math.round(s)).padStart(2, "0")}`;
 const money = (n?: number) => (n === undefined || n === null ? "-" : `$${n.toFixed(3)}`);
 type Filter = "all" | "videos" | "audio"; type Tab = "prompt" | "reference" | "history";
 
 /** Shots: pick a shot on the left, watch and check its clip in the middle, set the video options on the right. Shots only make video; images are made on the Assets page. */
-export function ShotsTab({ o, name, load, start, running }: TabProps) {
+export function ShotsTab({ o, name, load, start, running, openProposal }: TabProps) {
   const toast = useToast();
   const [shots, setShots] = useState<Shot[]>(o.shots.shots); const [dirty, setDirty] = useState(false);
   const [sel, setSel] = useState<string>(o.shots.shots[0]?.id || ""); const [tab, setTab] = useState<Tab>("prompt");
   const [filter, setFilter] = useState<Filter>("all"); const [q, setQ] = useState(""); const [sort, setSort] = useState<"order" | "cost" | "approved">("order");
   const [rows, setRows] = useState<any[]>([]); const [adv, setAdv] = useState(false);
+  const [variantCount, setVariantCount] = useState("2"); const [drifts, setDrifts] = useState<Record<string, number | undefined>>({});
+  const pipe = useBatchPipeline({ project: name, running, reloadAll: load, load: async () => { await load(); } });
   const promptRef = useRef<HTMLTextAreaElement>(null);
   useEffect(() => { if (!dirty) setShots(o.shots.shots); }, [o.shots, dirty]);
   useEffect(() => { api<any>("GET", `/api/projects/${name}/costs`).then((r) => setRows(r.rows)).catch(() => {}); }, [name, o.costs.total]);
+  useEffect(() => { let live = true; Promise.all(o.shots.shots.map(async (s) => { try { const r = await fetch(fileUrl(name, `checks/${s.id}.json`)); if (!r.ok) return [s.id, undefined] as const; const d = await r.json(); const vals = Object.values(d.scores || {}).filter((x): x is number => typeof x === "number"); return [s.id, vals.length ? Math.min(...vals) : undefined] as const; } catch { return [s.id, undefined] as const; } })).then((xs) => { if (live) setDrifts(Object.fromEntries(xs)); }); return () => { live = false; }; }, [name, o.shots.shots, o.files.clips.length]);
 
   const changed = (id: string) => { const a = shots.find((x) => x.id === id); const b = o.shots.shots.find((x) => x.id === id); return !!a && JSON.stringify(a) !== JSON.stringify(b); };
   const clipsOf = (id: string) => o.files.clips.filter((c) => c.startsWith(`${id}_final_a`));
@@ -52,6 +57,8 @@ export function ShotsTab({ o, name, load, start, running }: TabProps) {
   const approve = async (id: string) => { try { await api("POST", `/api/projects/${name}/shots/${id}/approve`); load(); } catch (e: any) { toast("error", e.message); } };
   const discard = async (rel: string) => { const reason = await promptDialog("Why discard this clip?", { title: "Discard clip", ok: "Discard" }); if (reason === null) return; await api("POST", `/api/projects/${name}/discard`, { rel, reason }); load(); };
   const generate = async (id: string) => { if (dirty) await save(); start("clip", id); };
+  const proposeVariants = async (id: string) => { try { pipe.setPlan(await api<any>("POST", `/api/projects/${encodeURIComponent(name)}/variants`, { kind: "clip", target: id, count: Number(variantCount) })); } catch (e) { toast("error", (e as Error).message); } };
+  const selectVersion = async (id: string, version: number) => { try { await api("POST", `/api/projects/${encodeURIComponent(name)}/variants/select`, { kind: "clip", target: id, version }); toast("ok", `Selected version ${version}; other versions are in Discarded and can be restored.`); load(); } catch (e) { toast("error", (e as Error).message); } };
 
   const handleEditStill = async (s: Shot) => {
     const target = s.first_frame || s.id;
@@ -103,6 +110,7 @@ export function ShotsTab({ o, name, load, start, running }: TabProps) {
     <div className="mt-1.5 flex flex-wrap gap-1 [&>.tag]:whitespace-nowrap [&>.tag]:!px-1.5 [&>.tag]:!py-0.5 [&>.tag]:!text-[0.65rem]">
       <span className={`tag ${s.final_ok ? "tag-emerald" : clipsOf(s.id).length ? "tag-lime" : ""}`}>{s.final_ok ? "Approved" : clipsOf(s.id).length ? "Clip ready" : "Needs clip"}</span>
       {s.audio && <span className="tag tag-sky">Audio</span>}
+      {drifts[s.id] !== undefined && <span className={`tag ${drifts[s.id]! < 0.6 ? "tag-amber" : "tag-emerald"}`} aria-label={drifts[s.id]! < 0.6 ? "Identity drift below threshold" : "Identity score meets threshold"}>{drifts[s.id]! < 0.6 ? `Identity drift ${drifts[s.id]!.toFixed(2)}` : `Identity match ${drifts[s.id]!.toFixed(2)}`}</span>}
     </div>
   );
 
@@ -250,6 +258,13 @@ export function ShotsTab({ o, name, load, start, running }: TabProps) {
                 </div>
               )}
               {latest && <ReviewBadge r={o.reviews[stem(latest)]} />}
+              {latest && <div className="mt-3"><ClipToolsPanel project={name} clip={latest} reload={load} openProposal={openProposal} /></div>}
+              {clips.length > 0 && <section className="mt-3 space-y-2" aria-label={`Clip versions for ${cur.id}`}>
+                <h3 className="text-sm font-bold">Versions</h3>
+                <div className="flex flex-wrap gap-2">{clips.filter((f) => /\.v\d+_final_a\d+\.mp4$/.test(f)).map((f) => { const version = Number(f.match(/\.v(\d+)_final_a\d+\.mp4$/)?.[1]); const active = cur.final_clip === `clips/${f}`; return <button type="button" key={f} onClick={() => !active && void selectVersion(cur.id, version)} className={`rounded-lg border px-2 py-1 text-xs ${active ? "border-pink text-pink" : "border-slate-700 text-slate-300"}`} aria-label={`${active ? "Selected" : "Select"} version ${version}`}>{active ? "Selected" : "Select version"} {version}</button>; })}</div>
+                <div className="flex flex-wrap items-center gap-2"><label htmlFor="clip-variant-count" className="text-xs">Candidates</label><Select id="clip-variant-count" aria-label="Clip variant count" value={variantCount} onChange={(e) => setVariantCount(e.target.value)}>{[2,3,4].map((n) => <option key={n} value={n}>{n}</option>)}</Select><Button size="sm" variant="outline" onClick={() => void proposeVariants(cur.id)}>Propose {variantCount} variants · approx {money((priceOf(cur) || 0) * Number(variantCount))}</Button></div>
+                <p className="text-xs text-slate-400">Estimated total uses the current shot estimate; the frozen batch shows the exact N × unit price before approval.</p>
+              </section>}
 
               <div role="tablist" aria-label="Shot details" className="mt-4 flex border-b border-slate-800">
                 {([["prompt", "Prompt & Settings"], ["reference", "Reference"], ["history", "History"]] as const).map(([id, l]) => (
@@ -345,13 +360,14 @@ export function ShotsTab({ o, name, load, start, running }: TabProps) {
                   savedKey={JSON.stringify([o.shots.shots.find((x) => x.id === cur.id)?.model, o.shots.shots.find((x) => x.id === cur.id)?.direction, o.shots.shots.find((x) => x.id === cur.id)?.end_frame, o.shots.shots.find((x) => x.id === cur.id)?.keyframes, o.shots.shots.find((x) => x.id === cur.id)?.first_frame])} />
               </RailCard>
 
-              <ClipToolsPanel project={name} />
-
-              <RailCard title="Verification"><VerifyBar scope="shots" label="Shots" /></RailCard>
+          <RailCard title="Verification"><VerifyBar scope="shots" label="Shots" />
+            <div className="mt-3 border-t border-slate-800 pt-3"><h3 className="text-sm font-bold">Shots below identity threshold</h3><ul className="mt-2 space-y-1 text-xs">{shots.filter((s) => drifts[s.id] !== undefined && drifts[s.id]! < 0.6).map((s) => <li key={s.id}><button type="button" className="text-left underline" onClick={() => setSel(s.id)}>{s.id}: {drifts[s.id]!.toFixed(2)}</button></li>)}{!shots.some((s) => drifts[s.id] !== undefined && drifts[s.id]! < 0.6) && <li className="text-slate-400">No checked shots are below 0.60.</li>}</ul></div>
+          </RailCard>
             </aside>
           )}
         </div>
       )}
+      <BatchPlanModal plan={pipe.plan} mode={o.mode} title="Approve clip variants?" onClose={() => pipe.setPlan(null)} onApprove={pipe.runAll} />
     </div>
   );
 }
