@@ -210,6 +210,17 @@ def create_app(root=None, token=None, rates_path=None, transport=None, static_di
         if getattr(request.state, "scope", "") not in ("session", "device"):
             raise HTTPException(403, "human session or paired device token required")
 
+    async def json_body(request):
+        """The JSON body of a request (an empty body is an empty object, a broken one is a 400)."""
+        raw = await request.body()
+        if not raw:
+            return {}
+        try:
+            body = json.loads(raw)
+        except ValueError:
+            raise HTTPException(400, "the body must be JSON") from None
+        return body if isinstance(body, dict) else {}
+
     def guard(fn, *a, **kw):
         try:
             return fn(*a, **kw)
@@ -768,14 +779,13 @@ def create_app(root=None, token=None, rates_path=None, transport=None, static_di
     async def camera_move(name: str, shot: str, request: Request):
         """Classify a camera move from sampled camera matrices and PROPOSE a direction.  Nothing is saved."""
         session_or_device(request)
-        b = await request.json() if (await request.body()) else {}
-        return guard(ws.camera_move, name, shot, b)
+        return guard(ws.camera_move, name, shot, await json_body(request))
 
     @app.post("/api/projects/{name}/shots/{shot}/direction", dependencies=[api])
     async def shot_direction(name: str, shot: str, request: Request):
         """Apply a validated direction to a shot (human session only: a device may look, not write)."""
         human_session(request)
-        b = await request.json() if (await request.body()) else {}
+        b = await json_body(request)
         direction = b.get("direction") if isinstance(b.get("direction"), dict) else {k: v for k, v in b.items() if k != "replace"}
         return guard(ws.apply_direction, name, shot, direction, bool(b.get("replace")))
 
@@ -783,7 +793,7 @@ def create_app(root=None, token=None, rates_path=None, transport=None, static_di
     async def previs_render(name: str, request: Request):
         """Render blocking frames from a .blend in the project with headless Blender (a free local job)."""
         human_session(request)
-        b = await request.json() if (await request.body()) else {}
+        b = await json_body(request)
         payload = guard(ws.plan_previs, name, b.get("blend"), b.get("shots"))
         return start_job(request, name, "previs", target=payload.get("blend", ""), payload=payload)
 

@@ -132,6 +132,16 @@ class TestBlenderRoutes(unittest.TestCase):
                           json={"samples": dolly_in(), "fps": 24.0})
         self.assertEqual(res.status_code, 400)
 
+    def test_a_broken_body_is_a_400(self):
+        res = self.c.post(CAMERA_MOVE.format(shot="s01"),
+                          headers={**self.human_headers, "content-type": "application/json"},
+                          content=b"{not json")
+        self.assertEqual(res.status_code, 400)
+        res = self.c.post(DIRECTION.format(shot="s01"),
+                          headers={**self.human_headers, "content-type": "application/json"},
+                          content=b"{not json")
+        self.assertEqual(res.status_code, 400)
+
     # ---------------------------------------------------------------- direction
     def test_direction_applies_validates_and_keeps_unknown_keys(self):
         res = self.c.post(DIRECTION.format(shot="s01"), headers=self.human_headers,
