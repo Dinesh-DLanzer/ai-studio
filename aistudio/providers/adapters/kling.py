@@ -1,14 +1,18 @@
-"""Kling AI video.  Standard library only.
+"""Kling AI video and lip sync.  Standard library only.
 
 NOTE: shapes are from Kling's public API and must be re-checked against the live docs before release.
 Subclass of aistudio.providers.base.Adapter (read its docstring first).
-  type = "kling" ; capabilities = {"video"} ; default_base_url = "https://api.klingai.com"
+  type = "kling" ; capabilities = {"video", "lipsync"} ; default_base_url = "https://api.klingai.com"
   Secret has TWO fields: self.secret["access_key"] and self.secret["secret_key"].
   Auth header on every request: {"Authorization": "Bearer " + token} where token is a JWT (HS256) made with the standard library:
     header {"alg":"HS256","typ":"JWT"}, payload {"iss": access_key, "exp": int(now)+1800, "nbf": int(now)-5}, signature = HMAC-SHA256(secret_key)
     over "b64url(header).b64url(payload)"; all three parts base64url WITHOUT padding. `now` = self.clock() (default time.time; the constructor
     accepts an optional `clock` keyword so tests can fix the time: __init__(self, conn, transport=None, clock=time.time)).
   Provide a method make_token() -> str that returns the JWT.
+
+UNVERIFIED (not in published docs as of 2026-10-21):
+  - Lip sync endpoints, request/response shapes, and status values.
+  - The exact endpoint paths for lip sync (assumed /v1/lipsyncs based on common patterns).
 
 list_models(): fixed list: [{"id":"kling-v1-6","name":"Kling 1.6","capability":"video"},{"id":"kling-v2-master","name":"Kling 2 Master","capability":"video"}].
 test(): GET /v1/videos/text2video?pageNum=1&pageSize=1 ; ok True "Connected successfully" when the response has "code" == 0, else
@@ -23,6 +27,13 @@ video_poll(job): kind, task_id = job["job_id"].split(":",1); GET /v1/videos/{kin
   Return the same dict keys as the other adapters: {"status","error","cost":None}.
 video_download(job): GET the same status URL; if task_status != "succeed" raise Retryable("not finished"); url = data["task_result"]["videos"][0]["url"];
   return self.transport("GET", url, raw=True) (no auth header).
+
+lipsync_submit(model, video_path, audio_path, opts): POST /v1/lipsyncs with {"model_name": model, "video": b64_of(video_path), "audio": b64_of(audio_path)}.
+  Response {"code":0,"data":{"task_id":...}} -> {"job_id": f"lipsync:{task_id}", "model": model}.
+lipsync_poll(job): task_id = job["job_id"].split(":",1)[1]; GET /v1/lipsyncs/{task_id}; data.task_status: "submitted"/"processing" =>
+  pending; "succeed" => done; "failed" => {"status":"failed","error": data.get("task_status_msg") or "lipsync failed","cost":None}.
+lipsync_download(job): GET /v1/lipsyncs/{task_id}; if task_status != "succeed" raise Retryable("not finished");
+  url = data["task_result"]["video_url"]; return self.transport("GET", url, raw=True) (no auth header).
 """
 import base64
 import hashlib
@@ -35,7 +46,7 @@ from aistudio.providers.base import Adapter, Rejected, Retryable, b64_of, scrub
 
 class KlingAdapter(Adapter):
     type = "kling"
-    capabilities = frozenset({"video"})
+    capabilities = frozenset({"video", "lipsync"})
     default_base_url = "https://api.klingai.com"
 
     def __init__(self, conn, transport=None, clock=time.time):
@@ -142,4 +153,60 @@ class KlingAdapter(Adapter):
         if data.get("task_status") != "succeed":
             raise Retryable("not finished")
         url = data["task_result"]["videos"][0]["url"]
+        return self.transport("GET", url, raw=True)
+
+    # --------------------------- lip sync ----------------------------------
+
+    def lipsync_submit(self, model, video_path, audio_path, opts=None):
+        """UNVERIFIED: Kling lip sync endpoint and shapes not confirmed in public docs."""
+        token = self.make_token()
+        body = {
+            "model_name": model,
+            "video": b64_of(video_path),
+            "audio": b64_of(audio_path),
+        }
+        resp = self.transport(
+            "POST",
+            f"{self.base_url}/v1/lipsyncs",
+            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+            body=body
+        )
+        data = resp if isinstance(resp, dict) else json.loads(resp)
+        if data.get("code") != 0:
+            raise Rejected(data.get("message") or "rejected")
+        task_id = data["data"]["task_id"]
+        return {"job_id": f"lipsync:{task_id}", "model": model}
+
+    def lipsync_poll(self, job):
+        """UNVERIFIED: Kling lip sync endpoint and shapes not confirmed in public docs."""
+        token = self.make_token()
+        task_id = job["job_id"].split(":", 1)[1]
+        resp = self.transport(
+            "GET",
+            f"{self.base_url}/v1/lipsyncs/{task_id}",
+            headers={"Authorization": f"Bearer {token}"}
+        )
+        data = (resp if isinstance(resp, dict) else json.loads(resp)).get("data", {})
+        status = data.get("task_status")
+        if status in ("submitted", "processing"):
+            return {"status": "pending", "error": None, "cost": None}
+        if status == "succeed":
+            return {"status": "done", "error": None, "cost": None}
+        if status == "failed":
+            return {"status": "failed", "error": data.get("task_status_msg") or "lipsync failed", "cost": None}
+        return {"status": "pending", "error": None, "cost": None}
+
+    def lipsync_download(self, job):
+        """UNVERIFIED: Kling lip sync endpoint and shapes not confirmed in public docs."""
+        token = self.make_token()
+        task_id = job["job_id"].split(":", 1)[1]
+        resp = self.transport(
+            "GET",
+            f"{self.base_url}/v1/lipsyncs/{task_id}",
+            headers={"Authorization": f"Bearer {token}"}
+        )
+        data = (resp if isinstance(resp, dict) else json.loads(resp)).get("data", {})
+        if data.get("task_status") != "succeed":
+            raise Retryable("not finished")
+        url = data["task_result"]["video_url"]
         return self.transport("GET", url, raw=True)
