@@ -28,7 +28,7 @@ import json
 from aistudio.formats import get_format
 
 
-def create_project(root, name, format=None):
+def create_project(root, name, format=None, brand_kit=None, kit_root=None):
     if not name or '/' in name or '\\' in name or '..' in name:
         raise ValueError("invalid project name")
     project_path = Path(root) / name
@@ -118,6 +118,10 @@ def create_project(root, name, format=None):
             encoding="utf-8"
         )
     
+    if brand_kit is not None:
+        from aistudio.brand_kits import attach_kit
+        source_root = Path(kit_root) if kit_root is not None else Path(root).parent / "brand_kits"
+        attach_kit(project_path, source_root, brand_kit)
     return project_path
 
 
