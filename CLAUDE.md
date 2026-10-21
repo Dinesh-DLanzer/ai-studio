@@ -16,22 +16,88 @@ This repository is **AI Studio**, a local-first video and commercial production 
 ---
 
 ## 2. MCP Tools Available (`ai-studio`)
-When running in Claude Code, the following tools are available via MCP (`.mcp.json`):
-* `list_projects`: List all video projects with spend and budget status.
-* `get_project`: Get project overview (shots, images, budget, files, proposals).
-* `create_project`: Create a new project folder from templates.
-* `delete_project`: Move project to `_trash` (restorable) with `confirm="yes"`.
-* `list_trash` / `restore_trash`: Manage and restore trashed projects.
-* `convert_story`: Parse `Story.md` and generate `shots.json` and `images.json`.
-* `estimate` / `approve_budget`: Estimate and request human approval of the project budget ceiling through elicitation or the one-time fallback code.
-* `propose` / `approve_proposal` / `run_proposal`: Propose, request human approval through elicitation or the fallback code, and execute only an approved proposal.
-* `approve_shot` / `discard` / `restore`: Inspect clip decisions and discard/restore files; clip approval is human-only and the MCP approve_shot tool refuses agent calls.
-* `get_verification`: Check rule violations and model reviews.
-* `production_progress`: Get production checklist groups and queue items.
-* `generate_all_plan`: Compute exact prices and generate batch proposals for pending assets.
-* `get_edit` / `update_edit` / `export_edit`: Inspect, update, and render timeline video editor.
-* `add_todo` / `toggle_todo` / `remove_todo`: Manage tasks on the project TODO checklist.
-* `export_project`: Downloadable zip backup of the project.
+When running in Claude Code, the following tools are available via MCP (`.mcp.json`), derived from `aistudio/tool_registry.py`:
+
+**cost_class = free | paid | approval | human_only** (approval/human_only tools are NEVER available to crew agents)
+
+### Free read tools
+| Tool | Purpose | Cost Class |
+|------|---------|------------|
+| `get_project` | Overview: shots, images, budget, costs (used vs discarded), proposals, files, reviews | free |
+| `read_doc` | Read Story.md, brief.md or TODO.md | free |
+| `get_brief` | The brief: every field, its value, and which required fields are still missing | free |
+| `get_model_setup` | Read-only: connected AI providers (state only, never keys) and model chains per role | free |
+| `get_todos` | Automatic progress steps plus the manual TODO list | free |
+| `get_verification` | Verification of brief, story, assets, shots and todos: rule findings plus AI review | free |
+| `get_proposal` | Status of a proposal: pending \| approved \| used \| rejected \| expired \| void | free |
+| `get_spec` | Read-only preview of one generation: model, seconds, frames, references, capability profile, price, warnings | free |
+| `get_costs` | Cost log, used vs discarded split, budget | free |
+| `list_providers` | Connected AI providers (id, label, type, status) | free |
+| `production_progress` | Get production checklist groups, queue items, and next action | free |
+| `get_batch` | Status of a batch and each of its items | free |
+| `get_edit` | Get timeline video edit structure (edit.json) and tool status | free |
+| `unregistered_stills` | Find unregistered images in the stills folder that can be added to project assets | free |
+| `list_recipes` | Read-only: one-click recipes with their inputs, and whether every step can run with configured models | free |
+
+### Free write tools
+| Tool | Purpose | Cost Class |
+|------|---------|------------|
+| `write_doc` | Write Story.md, brief.md or TODO.md (plain text) | free |
+| `update_brief` | Fill brief fields (brand, goal, story, audience, platform, length_seconds, language, characters, setting, cta, brand_assets, claims_to_avoid, budget_cap) | free |
+| `rename_asset` | Rename an image asset id everywhere (files, references, cost log) | free |
+| `rename_shot` | Rename a shot id everywhere (clips, cost log, discarded history) | free |
+| `convert_story` | Parse Story.md and write shots.json + images.json. Overwrites both | free |
+| `update_shots` | Replace shots.json (validated). Changing shots needs a new estimate and human re-approval | free |
+| `update_images` | Replace images.json (validated) | free |
+| `update_edit` | Update timeline video edit structure (edit.json) | free |
+| `import_stills` | Import unregistered stills into project assets (images.json) | free |
+| `add_todo` | Add a task to the project TODO list | free |
+| `toggle_todo` | Toggle task completion status on the project TODO list | free |
+| `remove_todo` | Remove a task from the project TODO list | free |
+| `export_edit` | Render / export the timeline edited video (edit.json) into a final video file | free |
+| `export_project` | Export the project as a downloadable zip archive | free |
+
+### Paid tools (agents may call; create proposals for human approval)
+| Tool | Purpose | Cost Class |
+|------|---------|------------|
+| `propose` | Propose a PAID action (image \| clip \| review); target = image id or shot id | paid |
+| `analyze_character` | Propose a paid multi-angle consistency review on a character asset image | paid |
+| `edit_still` | Propose an inpaint, outpaint or background-swap edit of an existing still | paid |
+| `extend_clip` | Propose extending an existing video clip forward with a continuation prompt | paid |
+| `clip_tool` | Propose a PAID AI clip tool (upscale_ai, reframe_ai, restyle, replace, motion_transfer, character_swap) | paid |
+| `generate_all_plan` | Freeze the plan for everything left to generate as a batch (exact prices; nothing spent) | paid |
+| `build_identity_sheet` | Build a character's identity sheet: batch of image proposals for missing views | paid |
+
+### Approval tools (human-only via MCP elicitation or one-time fallback code; agents NEVER call these)
+| Tool | Purpose | Cost Class |
+|------|---------|------------|
+| `estimate` | Compute budget estimate (free). Human must approve through MCP elicitation or fallback code | approval |
+| `approve_budget` | Request human approval for the exact estimated budget. Uses elicitation or fallback code | approval |
+| `approve_proposal` | Request human approval for a pending proposal. Uses elicitation or fallback code | approval |
+| `approve_batch` | Request human approval for the exact batch total. Uses elicitation or fallback code | approval |
+| `approve_shot` | Human-only clip decision. Agents may inspect but cannot approve through MCP | approval |
+| `run_proposal` | Execute a proposal only after human approval. Pending proposals use elicitation or fallback code | approval |
+| `run_batch` | Run a batch a human already approved, item by item | approval |
+| `reject_proposal` | Reject and cancel a pending proposal | approval |
+| `set_max_attempts` | Human-only attempt limit setting. Agents cannot change generation attempt limits | approval |
+| `discard` | Move a clip/still to _discarded (never deletes) with a reason | approval |
+| `restore` | Restore a discarded file | approval |
+
+### Human-only tools (never available to crew agents; MCP/HTTP only for humans)
+| Tool | Purpose | Cost Class |
+|------|---------|------------|
+| `list_projects` | List projects with spend and budget status | human_only |
+| `create_project` | Create a project folder from the guided templates | human_only |
+| `delete_project` | Move a project to _trash (restorable). Requires human confirmation matching project name | human_only |
+| `list_trash` | List deleted projects available in trash for restoration | human_only |
+| `restore_trash` | Restore a project from trash | human_only |
+| `upload_image` | Upload or import an image file into project assets (stills/ and images.json) | human_only |
+| `list_jobs` | Jobs in the durable job ledger with state (read-only) | human_only |
+| `get_job` | One job from the ledger by id (read-only) | human_only |
+| `list_crew_runs` | Read-only: the studio crew's runs in a project | human_only |
+| `get_crew_run` | Read-only: one crew run with step log, diffs, proposals and batch | human_only |
+| `search_library` | Search the workspace library of generated media (human-session only) | human_only |
+| `plan_recipe` | Plan a recipe in a project: validates inputs, prices steps, creates awaiting-approval batch | human_only |
 
 ---
 

@@ -14,6 +14,10 @@ This repository is optimized for high-speed, token-efficient AI agent collaborat
   - Pipeline / Batch generation: `aistudio/domain/pipeline.py`
   - Character consistency & vision: `aistudio/domain/characters.py`
   - Costs, rates & pricing: `aistudio/domain/costs.py`
+  - Spec & verification: `aistudio/domain/spec.py`, `aistudio/domain/verify.py`
+  - Crew agents: `aistudio/domain/agents.py`
+  - Batches: `aistudio/domain/batches.py`
+  - Common utilities: `aistudio/domain/common.py`
   - Facade API: `aistudio/service.py`
   - Server endpoints: `server/app.py`
   - Frontend components: `web/src/pages/`
@@ -33,7 +37,7 @@ This repository is optimized for high-speed, token-efficient AI agent collaborat
   ```bash
   ./.venv/bin/python -m unittest tests/test_service.py tests/test_service_more.py
   ```
-* For specific domain changes, test only the affected test module (e.g., `tests/test_character_check.py`, `tests/test_chat.py`, `tests/test_flow.py`).
+* For specific domain changes, test only the affected test module (e.g., `tests/test_character_check.py`, `tests/test_chat.py`, `tests/test_flow.py`, `tests/test_budget.py`, `tests/test_gates.py`, `tests/test_jobs.py`, `tests/test_mcp.py`).
 
 ---
 
@@ -52,6 +56,9 @@ This repository is optimized for high-speed, token-efficient AI agent collaborat
 * Paid runner calls require a one-use grant issued by consuming the exact human-approved proposal. Never hand-build or reuse a grant.
 * MCP approval uses `elicitation/create` when the client advertises form elicitation. Otherwise the one-time fallback code is shown only in the local human web notification and `aistudio serve` stderr; it is HMAC-derived from the challenge id and an external keychain secret and is never stored in a project.
 * Use only fake/test providers and test projects during agent work. Never call a paid provider or approve a real proposal.
+* Tool cost classes (from `aistudio/tool_registry.py`): free, paid, approval, human_only. Crew agents can ONLY use free and paid tools; approval and human_only tools are hard-excluded from crew at the registry level.
+
+---
 
 ## 6. Conversational Session Hygiene
 * Keep agent turn counts low (<15 turns per task).
