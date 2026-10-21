@@ -96,7 +96,7 @@ def main(argv=None, ask=input, out=print):
     p_run.add_argument("project")
     p_run.add_argument("id")
     p_run.add_argument("-y", "--yes", action="store_true", help="Bypass interactive prompt")
-    p_run.add_argument("--override", action="store_true", help="Override attempt limits or stop-loss")
+    p_run.add_argument("--override", action="store_true", help="Unsupported: gate overrides require the human web session")
 
     p_rej = sp.add_parser("reject", help="Reject a pending proposal")
     p_rej.add_argument("project")
@@ -214,12 +214,14 @@ def main(argv=None, ask=input, out=print):
             out("Approved. The agent (or the web UI) can now run it once.")
 
         elif args.cmd == "run":
+            if getattr(args, "override", False):
+                raise ServiceError("gate overrides require a human web session; CLI agents cannot override")
             p = ws.proposal_status(args.project, args.id)
             if not getattr(args, "yes", False):
                 out(f"Execute {p['kind']} {p['shot']} with {p['model']} for ${p['price']:.3f}?")
                 if ask("Type yes to execute: ").strip().lower() != "yes":
                     return out("Not confirmed.")
-            res = ws.execute(args.project, args.id, override=getattr(args, "override", False))
+            res = ws.execute(args.project, args.id)
             if is_json:
                 out(json.dumps(res, indent=2))
             else:

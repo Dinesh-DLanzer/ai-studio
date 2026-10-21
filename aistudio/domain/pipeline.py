@@ -1,6 +1,9 @@
 """Pipeline domain: proposals, approvals, execution, batch generation and review logic."""
+from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
+import shutil
+import tempfile
 
 from aistudio import activity, approvals, chat as chat_mod, costlog, editor as editor_mod, frames as frames_mod, gates, palette as palette_mod, project as project_mod, project_lock, roles as roles_mod
 from aistudio.domain.common import REVIEW_PRICE, ServiceError, _ident, _sha
@@ -222,8 +225,8 @@ class PipelineDomain:
             if f.suffix == ".mp4":
                 shots = self.ws._read(p, "shots.json", {"shots": []})
                 shot = next((s for s in shots["shots"] if s["id"] == target), {"id": target})
-                payload["review_prompt"] = clip_checklist.build_prompt(shot, 0)
-                payload["shot_spec"] = {k: shot.get(k) for k in ("id", "seconds", "prompt", "resolution", "audio", "first_frame")}
+                payload["review_prompt"] = clip_checklist.build_prompt(shot, 8)
+                payload["shot_spec"] = shot
                 payload["first_frame_sha"] = _sha(p / shot["first_frame"]) if shot.get("first_frame") else ""
             else:
                 imgs = self.ws._read(p, "images.json", {"images": []})
@@ -232,7 +235,7 @@ class PipelineDomain:
                 refs = [(p / by[r]["out"]) for r in spec.get("refs", []) if r in by and (p / by[r]["out"]).exists()]
                 payload["review_prompt"] = image_checklist.build_prompt(spec, [r.name for r in refs])
                 payload["image_spec"] = {k: spec.get(k) for k in ("id", "kind", "out", "prompt", "refs", "aspect_ratio")}
-                payload["refs"] = [{"path": r.relative_to(p.resolve()).as_posix(), "sha": _sha(r)} for r in refs]
+                payload["refs"] = [{"path": r.resolve().relative_to(p.resolve()).as_posix(), "sha": _sha(r)} for r in refs]
             return payload, e["model"], REVIEW_PRICE
         raise ServiceError("kind must be image, clip, image_edit, clip_extend or review")
 
@@ -294,19 +297,28 @@ class PipelineDomain:
                 raise ServiceError("budget approval is stale after a plan or price change; estimate again and ask the human to approve it")
             rows = costlog.read_log(p)
             stage = {"clip": "final", "image": "image", "image_edit": "image_edit", "clip_extend": "clip_extend", "review": "vision"}[kind]
-            attempts = len([r for r in rows if r["shot"] == target and r["stage"] == stage])
+            pending = [r for r in project_lock.read_reservations(p) if r.get("shot") == target and r.get("stage") == stage]
+            attempted = {r["attempt"] for r in rows if r["shot"] == target and r["stage"] == stage}
+            attempted.update(str(r["attempt"]) for r in pending)
+            attempts = len(attempted)
             try:
                 gates.check_run(b, costlog.spent(p) + project_lock.reserved(p), price, attempts if kind in ("clip", "image_edit", "clip_extend") else 0, override=override)
                 request_digest = approvals.request_hash(kind, target, model, price, payload)
                 grant = approvals.consume(p, pid, request_digest)
-                project_lock.reserve(p, pid, price, actor=grant.actor)
+                project_lock.reserve(p, pid, price, actor=grant.actor, shot=target, stage=stage, attempt=attempts + 1,
+                                     model=model, provider=payload.get("provider", ""))
             except (gates.GateError, approvals.ApprovalError) as e:
                 raise ServiceError(str(e)) from None
             attempt = attempts + 1
             log = {"shot": target, "stage": stage, "model": model, "attempt": str(attempt), "job_id": "", "seconds": "", "provider": payload.get("provider", ""), "actor": grant.actor, "override": "yes" if override else "no"}
         activity.record_start(p, pid, kind, target, model, price, source="mcp")
         try:
-            res = self._execute_kind(p, kind, target, payload, model, price, attempt, log, grant)
+            # Copy and verify every approved media input before handing it to an
+            # adapter: neither file changes nor document rereads can change this call.
+            with tempfile.TemporaryDirectory(prefix="aistudio-approved-") as tmp:
+                inputs = Path(tmp)
+                self._snapshot_inputs(p, inputs, payload)
+                res = self._execute_kind(p, kind, target, payload, model, price, attempt, log, grant, inputs)
             activity.record_finish(p, pid, status="done", result=res)
             return res
         except roles_mod.NeedsNewApproval as e:
@@ -320,20 +332,56 @@ class PipelineDomain:
             raise
         finally:
             with project_lock.lock(p):
-                project_lock.release(p, pid)
+                logged = any(r.get("shot") == target and r.get("stage") == stage and r.get("attempt") == str(attempt)
+                             for r in costlog.read_log(p))
+                # Never erase evidence of possibly billed work if settlement failed.
+                if logged or not approvals.get(p, pid).get("redeemed"):
+                    project_lock.release(p, pid)
 
-    def _execute_kind(self, p, kind, target, payload, model, price, attempt, log, grant):
-        if kind == "image_edit":
-            source = p / payload["source"]
-            res = self.ws.runner().image_edit(source.as_posix(), payload["prompt"], edit_mode=payload["edit_mode"], mask_mode=payload["mask_mode"], project_dir=p, grant=grant)
-            out = p / "stills" / f"{source.stem}_edit_{int(datetime.now().timestamp())}.png"
+    @staticmethod
+    def _snapshot_inputs(p, dest, payload):
+        files = [(r["path"], r["sha"]) for r in payload.get("refs", [])]
+        for path_key, hash_key in (("source", "source_sha"), ("file", "file_sha"), ("first_frame", "first_frame_sha")):
+            if payload.get(path_key):
+                files.append((payload[path_key], payload[hash_key]))
+        shot = payload.get("shot_spec") or {}
+        if shot.get("first_frame"):
+            files.append((shot["first_frame"], payload["first_frame_sha"]))
+        for rel, digest in files:
+            source = PipelineDomain._source_file(p, rel)
+            out = dest / rel
+            if not out.resolve().is_relative_to(dest.resolve()):
+                raise ServiceError("input must stay inside the project")
             out.parent.mkdir(parents=True, exist_ok=True)
-            out.write_bytes(res["bytes"])
-            row = {**log, "model": res["model"], "provider": res["provider"], "cost_source": res["cost_source"], "timestamp": datetime.now().isoformat(timespec="seconds"), "resolution": "", "cost": res["cost"], "result": "completed"}
-            costlog.append_log(p, row)
+            shutil.copyfile(source, out)
+            if _sha(out) != digest:
+                raise ServiceError("input changed after approval; propose again")
+
+    @staticmethod
+    @contextmanager
+    def _logged_output(p, row):
+        """A paid result remains accounted for even when writing its output fails."""
+        try:
+            yield
+        except BaseException:
+            costlog.append_log(p, {**row, "result": "output_failed"})
+            raise
+        else:
+            costlog.append_log(p, {**row, "result": "completed"})
+
+    def _execute_kind(self, p, kind, target, payload, model, price, attempt, log, grant, inputs=None):
+        inputs = inputs or p
+        if kind == "image_edit":
+            source = inputs / payload["source"]
+            res = self.ws.runner().image_edit(source.as_posix(), payload["prompt"], edit_mode=payload["edit_mode"], mask_mode=payload["mask_mode"], project_dir=p, grant=grant)
+            out = p / "stills" / f"{source.stem}_edit_a{attempt}.png"
+            row = {**log, "model": res["model"], "provider": res["provider"], "cost_source": res["cost_source"], "timestamp": datetime.now().isoformat(timespec="seconds"), "resolution": "", "cost": res["cost"]}
+            with self._logged_output(p, row):
+                out.parent.mkdir(parents=True, exist_ok=True)
+                out.write_bytes(res["bytes"])
             return {"kind": kind, "file": out.relative_to(p).as_posix(), "cost": res["cost"]}
         if kind == "clip_extend":
-            source = p / payload["source"]
+            source = inputs / payload["source"]
             res = self.ws.runner().video_extend(source.as_posix(), payload["prompt"], seconds=payload["seconds"], aspect_ratio=payload["aspect_ratio"], resolution=payload["resolution"], project_dir=p, grant=grant)
             job = res.get("job") or {}
             row = {**log, "model": res.get("model") or model, "provider": res.get("provider") or log["provider"], "cost_source": res.get("cost_source", ""),
@@ -344,13 +392,13 @@ class PipelineDomain:
             if res.get("status") == "failed":
                 costlog.append_log(p, {**row, "cost": res.get("cost", 0), "result": "failed"})
                 return {"kind": kind, "error": res.get("error", "extension failed"), "cost": res.get("cost", 0)}
-            out = p / "clips" / f"{source.stem}_extended_{int(datetime.now().timestamp())}.mp4"
-            out.parent.mkdir(parents=True, exist_ok=True)
-            out.write_bytes(res["bytes"])
-            costlog.append_log(p, {**row, "cost": res["cost"], "result": "completed"})
+            out = p / "clips" / f"{target}_clip_extend_a{attempt}.mp4"
+            with self._logged_output(p, {**row, "cost": res["cost"]}):
+                out.parent.mkdir(parents=True, exist_ok=True)
+                out.write_bytes(res["bytes"])
             return {"kind": kind, "file": out.relative_to(p).as_posix(), "cost": res["cost"]}
         if kind == "image":
-            _, refs, _ = self.ws._image_spec(p, target)
+            refs = [inputs / r["path"] for r in payload.get("refs", [])]
             out = p / payload["out"]
             if out.exists():
                 raise ServiceError(f"{payload['out']} exists; discard it first")
@@ -358,12 +406,12 @@ class PipelineDomain:
             log = {**log, "model": res["model"], "provider": res["provider"], "cost_source": res["cost_source"]}
             data = res["bytes"]
             out = out.with_suffix(".jpg" if data[:3] == b"\xff\xd8\xff" else ".png")
-            out.parent.mkdir(parents=True, exist_ok=True)
-            out.write_bytes(data)
-            costlog.append_log(p, {**log, "timestamp": datetime.now().isoformat(timespec="seconds"), "resolution": "2K", "cost": res["cost"], "result": "completed"})
+            with self._logged_output(p, {**log, "timestamp": datetime.now().isoformat(timespec="seconds"), "resolution": "2K", "cost": res["cost"]}):
+                out.parent.mkdir(parents=True, exist_ok=True)
+                out.write_bytes(data)
             return {"kind": kind, "file": out.relative_to(p).as_posix(), "cost": res["cost"]}
         if kind == "clip":
-            ff = str(p / payload["first_frame"]) if payload["first_frame"] else None
+            ff = str(inputs / payload["first_frame"]) if payload["first_frame"] else None
             req = {"prompt": payload["prompt"], "seconds": payload["seconds"], "resolution": payload["resolution"], "aspect_ratio": payload["aspect_ratio"],
                    "audio": payload["audio"], "first_frame": ff}
             res = self.ws.runner().video(req, project_dir=p, grant=grant)
@@ -378,48 +426,43 @@ class PipelineDomain:
                 costlog.append_log(p, {**row, "cost": res.get("cost", 0), "result": "failed"})
                 return {"kind": kind, "error": res["error"], "cost": res.get("cost", 0)}
             out = p / "clips" / f"{target}_final_a{attempt}.mp4"
-            out.parent.mkdir(parents=True, exist_ok=True)
-            out.write_bytes(res["bytes"])
-            costlog.append_log(p, {**row, "cost": res["cost"], "result": "completed"})
+            with self._logged_output(p, {**row, "cost": res["cost"]}):
+                out.parent.mkdir(parents=True, exist_ok=True)
+                out.write_bytes(res["bytes"])
             return {"kind": kind, "file": out.relative_to(p).as_posix(), "cost": res["cost"]}
-        return self._do_review(p, target, payload, model, log, grant)
+        return self._do_review(p, target, payload, model, log, grant, inputs)
 
-    def _do_review(self, p, target, payload, model, log, grant):
-        f = p / payload["file"]
+    def _do_review(self, p, target, payload, model, log, grant, inputs):
+        f = inputs / payload["file"]
         outdir = p / "checks" / f.stem
         outdir.mkdir(parents=True, exist_ok=True)
         if payload.get("review_type") == "character":
             raw = self.ws.runner().review(character_check.build_character_check_prompt(), [str(f)], {"max_tokens": 1500, "temperature": 0.2}, project_dir=p, grant=grant, allow_paid=self.ws.ai_settings()["settings"].get("allow_paid", False))
             review = {**character_check.parse_character_analysis(raw["text"]), "file": payload["file"], "model": raw["model"], "cost": raw["cost"], "when": datetime.now().isoformat(timespec="seconds")}
             log = {**log, "model": raw["model"], "provider": raw["provider"], "cost_source": raw["cost_source"]}
-            project_mod.save_json(outdir, "character_review.json", review)
-            costlog.append_log(p, {**log, "timestamp": datetime.now().isoformat(timespec="seconds"), "resolution": "", "cost": raw["cost"], "result": "completed"})
+            with self._logged_output(p, {**log, "timestamp": datetime.now().isoformat(timespec="seconds"), "resolution": "", "cost": raw["cost"]}):
+                project_mod.save_json(outdir, "character_review.json", review)
             return {"kind": "review", "review_type": "character", "review": review}
         if f.suffix == ".mp4":
-            doc = self.ws._read(p, "shots.json", {"shots": []})
-            shot = next((s for s in doc["shots"] if s["id"] == target), {"id": target})
+            shot = payload["shot_spec"]
             if f.read_bytes()[:7] == b"FAKEMP4":
                 frames = []
             else:
                 frames = frames_mod.extract(f, outdir, 8, shot.get("seconds", 4))
-            prompt = clip_checklist.build_prompt(shot, len(frames))
+            prompt = payload["review_prompt"]
             ff = shot.get("first_frame")
-            frames = ([str(p / ff)] if ff and (p / ff).exists() else []) + frames
+            frames = ([str(inputs / ff)] if ff else []) + frames
         else:
-            imgs = self.ws._read(p, "images.json", {"images": []})
-            spec = next((i for i in imgs["images"] if i["id"] == target), {"id": target})
-            by = {i["id"]: i for i in imgs["images"]}
-            refs = [(p / by[r]["out"]) for r in spec.get("refs", []) if r in by and (p / by[r]["out"]).exists()]
-            prompt = image_checklist.build_prompt(spec, [r.name for r in refs])
-            frames = [str(r) for r in refs] + [str(f)]
+            prompt = payload["review_prompt"]
+            frames = [str(inputs / r["path"]) for r in payload.get("refs", [])] + [str(f)]
         raw = self.ws.runner().review(prompt, frames, {"max_tokens": 3500, "temperature": 0.2}, project_dir=p, grant=grant, allow_paid=self.ws.ai_settings()["settings"].get("allow_paid", False))
         res = {**clip_checklist.parse_review(raw["text"]), "cost": raw["cost"]}
         log = {**log, "model": raw["model"], "provider": raw["provider"], "cost_source": raw["cost_source"]}
         review = {k: res[k] for k in ("verdict", "findings", "summary")}
         review.update({"target": target, "model": raw["model"], "cost": res.get("cost", 0), "when": datetime.now().isoformat(timespec="seconds"),
                        "advisory": "A human still approves. A vision model cannot judge the spoken language."})
-        project_mod.save_json(outdir, "review.json", review)
-        costlog.append_log(p, {**log, "timestamp": datetime.now().isoformat(timespec="seconds"), "resolution": "", "cost": res.get("cost", 0), "result": "completed"})
+        with self._logged_output(p, {**log, "timestamp": datetime.now().isoformat(timespec="seconds"), "resolution": "", "cost": res.get("cost", 0)}):
+            project_mod.save_json(outdir, "review.json", review)
         return {"kind": "review", "review": review}
 
     def approve_shot(self, name, shot_id):

@@ -2,6 +2,7 @@ import tests._hermetic as HERM  # noqa: F401  (no real key or network in tests)
 import io
 import json, os, subprocess, sys, tempfile, unittest
 from pathlib import Path
+from unittest.mock import patch
 from aistudio import mcp_server as M
 from aistudio.service import Workspace
 from tests.test_story_convert import MD
@@ -37,6 +38,8 @@ class TestMcp(unittest.TestCase):
         session = M.MCPConnection(lambda method, params: (requests.append((method, params)) or {"action": "accept", "content": {"approve": True}}), {"elicitation": {}})
         initialize = M.handle({"jsonrpc": "2.0", "id": 10, "method": "initialize", "params": {"capabilities": {"elicitation": {}}}}, self.ws, session=session)
         self.assertIn("elicitation", initialize["result"]["capabilities"])
+        self.assertTrue(session.supports("form"))
+        self.assertEqual(initialize["result"]["protocolVersion"], "2025-11-25")
 
         out, err = call(self.ws, "approve_budget", session=session, name="demo")
         self.assertFalse(err)
@@ -62,6 +65,26 @@ class TestMcp(unittest.TestCase):
         self.assertFalse(err)
         self.assertIn("trash", out)
 
+    def test_budget_elicitation_rechecks_changed_estimate(self):
+        call(self.ws, "create_project", name="demo")
+        call(self.ws, "write_doc", name="demo", doc="Story.md", text=MD)
+        call(self.ws, "convert_story", name="demo")
+        call(self.ws, "estimate", name="demo")
+
+        def approve_after_change(method, params):
+            budget_path = self.ws.pdir("demo") / "budget.json"
+            budget = json.loads(budget_path.read_text())
+            budget["stop_loss"] += 1
+            budget_path.write_text(json.dumps(budget))
+            return {"action": "accept", "content": {"approve": True}}
+
+        session = M.MCPConnection(approve_after_change, {"elicitation": {}})
+        M.handle({"id": 1, "method": "initialize", "params": {"capabilities": {"elicitation": {}}}}, self.ws, session=session)
+        out, err = call(self.ws, "approve_budget", session=session, name="demo")
+        self.assertTrue(err)
+        self.assertIn("changed", out["error"])
+        self.assertFalse(self.ws.overview("demo")["budget"]["approved"])
+
     def test_decline_and_cancel_leave_budget_unapproved(self):
         call(self.ws, "create_project", name="decline")
         call(self.ws, "write_doc", name="decline", doc="Story.md", text=MD)
@@ -73,6 +96,12 @@ class TestMcp(unittest.TestCase):
             self.assertTrue(err)
             self.assertIn(action, out["error"])
             self.assertFalse(self.ws.overview("decline")["budget"]["approved"])
+
+    def test_legacy_protocol_does_not_send_elicitation(self):
+        session = M.MCPConnection(client_capabilities={"elicitation": {}})
+        result = M.handle({"id": 1, "method": "initialize", "params": {"protocolVersion": "2024-11-05", "capabilities": {"elicitation": {}}}}, self.ws, session)
+        self.assertEqual(result["result"]["protocolVersion"], "2024-11-05")
+        self.assertFalse(session.supports("form"))
 
     def test_stdio_nested_elicitation(self):
         home = tempfile.mkdtemp()
@@ -131,6 +160,38 @@ class TestMcp(unittest.TestCase):
         self.assertFalse(err)
         self.assertTrue(out["file"].endswith("s01.png"))
         self.assertEqual(call(self.ws, "get_proposal", name="demo", id=prop["id"])[0]["status"], "used")
+
+    def test_agents_cannot_change_max_attempts(self):
+        call(self.ws, "create_project", name="demo")
+        before = self.ws.overview("demo")["budget"]
+        with patch.object(self.ws, "set_max_attempts", return_value={"ok": True}) as setter:
+            for limit in (1, 10, 1000):
+                with self.subTest(limit=limit):
+                    out, err = call(self.ws, "set_max_attempts", name="demo", max_attempts=limit)
+                    self.assertTrue(err)
+                    self.assertIn("human", out["error"])
+            setter.assert_not_called()
+        self.assertEqual(self.ws.overview("demo")["budget"], before)
+
+    def test_run_proposal_schema_and_dispatch_never_allow_override(self):
+        schema = next(t["inputSchema"] for t in M.tool_list() if t["name"] == "run_proposal")
+        self.assertNotIn("override", schema["properties"])
+        with patch.object(self.ws, "proposal_status", return_value={"status": "approved"}), \
+             patch.object(self.ws, "overview", return_value={"budget": {"approved": True}}), \
+             patch.object(self.ws, "execute", return_value={"ok": True}) as execute:
+            for extra in ({}, {"override": False}, {"override": None}):
+                with self.subTest(extra=extra):
+                    execute.reset_mock()
+                    out, err = call(self.ws, "run_proposal", name="demo", id="proposal", **extra)
+                    self.assertFalse(err)
+                    execute.assert_called_once_with("demo", "proposal")
+            execute.reset_mock()
+            for override in (True, 1, "false"):
+                with self.subTest(override=override):
+                    out, err = call(self.ws, "run_proposal", name="demo", id="proposal", override=override)
+                    self.assertTrue(err)
+                    self.assertIn("human", out["error"])
+            execute.assert_not_called()
 
     def test_agents_can_read_model_setup_but_not_secrets_or_change_it(self):
         names = {t["name"] for t in M.tool_list()}

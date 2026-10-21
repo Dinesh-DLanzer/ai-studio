@@ -1,6 +1,7 @@
 """Cross-process project spend lock and short-lived spend reservations."""
 import json
 import os
+import time
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -15,8 +16,8 @@ def lock(pdir):
         try:
             import fcntl
             fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
-        except (ImportError, OSError):
-            pass
+        except (ImportError, OSError) as error:
+            raise RuntimeError("Project spend lock unavailable; refusing unsafe execution") from error
         yield
     finally:
         try:
@@ -43,9 +44,10 @@ def write_reservations(pdir, rows):
     os.replace(tmp, path)
 
 
-def reserve(pdir, proposal_id, price, actor="local"):
+def reserve(pdir, proposal_id, price, actor="local", *, shot="", stage="", attempt=0, model="", provider=""):
     rows = [x for x in read_reservations(pdir) if x.get("proposal_id") != proposal_id]
-    rows.append({"proposal_id": proposal_id, "price": float(price), "actor": actor})
+    rows.append({"proposal_id": proposal_id, "price": float(price), "actor": actor, "created": time.time(),
+                 "shot": shot, "stage": stage, "attempt": attempt, "model": model, "provider": provider, "cost_source": "estimated"})
     write_reservations(pdir, rows)
 
 

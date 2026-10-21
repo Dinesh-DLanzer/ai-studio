@@ -131,7 +131,9 @@ class Pricing:
             return 0.0
         if "per_call" in card:
             return float(card["per_call"])
-        if not usage:
+        # Adapters commonly normalize missing usage to zero counts. A paid
+        # completion with no positive counts is not evidence of a free call.
+        if not usage or not any(usage.get(k) for k in ("input", "output")):
             return None
         u = usage
         return round((u.get("input", 0) * card["input_per_1m"] + u.get("output", 0) * card["output_per_1m"]) / 1_000_000, 6)

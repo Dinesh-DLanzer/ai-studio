@@ -1,3 +1,4 @@
+import tests._hermetic as HERM  # noqa: F401  (no real key or network in tests)
 import tempfile
 import unittest
 from pathlib import Path
@@ -159,8 +160,9 @@ class TestPaid(unittest.TestCase):
     REQ = {"prompt": "p", "seconds": 4, "resolution": "720p", "aspect_ratio": "9:16", "audio": False}
 
     @staticmethod
-    def grant(p, kind, price):
-        prop = approvals.propose(p, kind, "target", "model", price, {"prompt": "p"}, reveal_code=True)
+    def grant(p, kind, price, model="model", provider="g"):
+        prop = approvals.propose(p, kind, "target", model, price, {"prompt": "p", "provider": provider},
+                                 reveal_code=True, summary={"provider": provider})
         approvals.approve(p, prop["id"], prop["code"])
         return approvals.consume(p, prop["id"], prop["hash"])
 
@@ -177,12 +179,72 @@ class TestPaid(unittest.TestCase):
     def test_token_priced_vision_requires_allow_paid_and_logs_unknown_cost(self):
         r, p = setup(chains={"vision": ch(("g", "token-vision"))})
         r.pricing.overrides[key("g", "token-vision")] = {"kind": "text", "input_per_1m": 1.0, "output_per_1m": 2.0}
-        grant = self.grant(p, "review", 0.003)
+        grant = self.grant(p, "review", 0.003, model="token-vision")
         with self.assertRaises(R.ChainError):
             r.vision("review", [], project_dir=p, grant=grant)
-        grant = self.grant(p, "review", 0.003)
+        self.assertEqual(Script.log, [])
+        grant = self.grant(p, "review", 0.003, model="token-vision")
         out = r.vision("review", [], project_dir=p, grant=grant, allow_paid=True)
         self.assertEqual(out["cost_source"], "unknown")
+
+    def test_unknown_vision_primary_can_run_with_its_approval(self):
+        r, p = setup(chains={"vision": ch(("g", "unknown"))})
+        out = r.vision("review", [], project_dir=p,
+                       grant=self.grant(p, "review", 0.003, model="unknown"), allow_paid=True)
+        self.assertEqual(out["cost_source"], "unknown")
+        self.assertEqual(Script.log, [("g", "unknown", "vision")])
+
+    def test_vision_fallback_needs_approval_for_unknown_or_dearer_price(self):
+        for card, price in ((None, None),
+                            ({"kind": "text", "input_per_1m": 1.0, "output_per_1m": 2.0}, None),
+                            ({"kind": "text", "per_call": 0.004}, 0.004)):
+            with self.subTest(card=card):
+                r, p = setup({"g": {"primary": [Rejected("blocked")]}},
+                             {"vision": ch(("g", "primary"), ("o", "fallback"))})
+                r.pricing.overrides[key("g", "primary")] = {"kind": "text", "per_call": 0.003}
+                if card:
+                    r.pricing.overrides[key("o", "fallback")] = card
+                with self.assertRaises(R.NeedsNewApproval) as c:
+                    r.vision("review", [], project_dir=p,
+                             grant=self.grant(p, "review", 0.003, model="primary"), allow_paid=True)
+                self.assertEqual(c.exception.entry["model"], "fallback")
+                self.assertEqual(c.exception.price, price)
+                self.assertEqual(c.exception.code, "needs_approval")
+                self.assertEqual(Script.log, [("g", "primary", "vision")])
+
+    def test_unknown_vision_exception_does_not_cover_another_fallback(self):
+        r, p = setup({"g": {"primary": [Rejected("blocked")]}},
+                     {"vision": ch(("g", "primary"), ("g", "fallback"))})
+        with self.assertRaises(R.NeedsNewApproval):
+            r.vision("review", [], project_dir=p,
+                     grant=self.grant(p, "review", 0.003, model="primary"), allow_paid=True)
+        self.assertEqual(Script.log, [("g", "primary", "vision")])
+
+    def test_unknown_vision_requires_approved_provider_and_model_not_chain_position(self):
+        for provider, model in (("o", "primary"), ("g", "other")):
+            with self.subTest(provider=provider, model=model):
+                r, p = setup(chains={"vision": ch((provider, model))})
+                with self.assertRaises(R.NeedsNewApproval):
+                    r.vision("review", [], project_dir=p,
+                             grant=self.grant(p, "review", 0.003, model="primary"), allow_paid=True)
+                self.assertEqual(Script.log, [])
+
+    def test_unknown_vision_without_approved_provider_fails_closed(self):
+        r, p = setup(chains={"vision": ch(("g", "primary"))})
+        with self.assertRaises(R.NeedsNewApproval):
+            r.vision("review", [], project_dir=p,
+                     grant=self.grant(p, "review", 0.003, model="primary", provider=None), allow_paid=True)
+        self.assertEqual(Script.log, [])
+
+    def test_unknown_vision_fallback_is_skipped_for_free_model(self):
+        r, p = setup({"g": {"primary": [Rejected("blocked")]}},
+                     {"vision": ch(("g", "primary"), ("g", "unknown"), ("o", "gpt"))})
+        r.pricing.overrides[key("g", "primary")] = {"kind": "text", "per_call": 0.003}
+        out = r.vision("review", [], project_dir=p,
+                       grant=self.grant(p, "review", 0.003, model="primary"), allow_paid=True)
+        self.assertEqual((out["model"], out["cost"]), ("gpt", 0.0))
+        self.assertEqual(Script.log, [("g", "primary", "vision"), ("o", "gpt", "vision")])
+
     def test_image_price_rule(self):
         r, p = setup(chains={"image": ch(("g", "img"))})
         grant = self.grant(p, "image", 0.04)
@@ -191,9 +253,24 @@ class TestPaid(unittest.TestCase):
 
     def test_unknown_price_blocks_when_approved_price_given(self):
         r, p = setup(chains={"image": ch(("g", "mystery"))})
-        with self.assertRaises(R.ChainError) as c:
+        with self.assertRaises(R.NeedsNewApproval) as c:
             r.image("p", project_dir=p, grant=self.grant(p, "image", 1.0))
         self.assertIn("price unknown", str(c.exception))
+        self.assertIsNone(c.exception.price)
+        self.assertEqual(Script.log, [])
+
+    def test_unknown_image_and_video_fallback_need_new_approval(self):
+        for role, kind, primary, price, operation in (("image", "image", "img", 0.04, "image"),
+                                                    ("video", "clip", "veo", 0.2, "submit")):
+            with self.subTest(role=role):
+                r, p = setup({"g": {primary: [Rejected("blocked")]}},
+                             {role: ch(("g", primary), ("g", "unknown"))})
+                with self.assertRaises(R.NeedsNewApproval) as c:
+                    getattr(r, role)(self.REQ if role == "video" else "p", project_dir=p,
+                                     grant=self.grant(p, kind, price, model=primary))
+                self.assertEqual(c.exception.entry["model"], "unknown")
+                self.assertIsNone(c.exception.price)
+                self.assertEqual(Script.log, [("g", primary, operation)])
 
     def test_video_fallback_only_if_not_dearer(self):
         # primary submit fails; chain: veo ($0.05/s), veo2 ($0.5/s, too dear), kling ($0.02/s)

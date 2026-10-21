@@ -62,6 +62,14 @@ class TestCliJson(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertFalse(self.ws.overview("demo")["budget"]["approved"])
 
+    def test_cli_override_requires_human_web_session(self):
+        self.ws.approve_budget("demo")
+        proposal = self.ws.propose("demo", "image", "s01")
+        self.ws.approve_human("demo", proposal["id"])
+        self.assertEqual(self.run_cli(["run", "demo", proposal["id"], "--override", "--yes"]), 1)
+        self.assertIn("human web", " ".join(self.lines))
+        self.assertEqual(self.ws.costs("demo")["rows"], [])
+
     def test_agent_setup(self):
         code = self.run_cli(["agent-setup", "all"])
         self.assertEqual(code, 0)

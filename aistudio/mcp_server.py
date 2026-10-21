@@ -15,7 +15,8 @@ import sys
 from aistudio import approvals, notifications
 from aistudio.service import REPO, ServiceError, Workspace
 
-PROTOCOL = "2024-11-05"
+PROTOCOL = "2025-11-25"
+SUPPORTED_PROTOCOLS = ("2025-11-25", "2025-06-18", "2024-11-05")
 S = lambda **props: {"type": "object", "properties": props, "required": [k for k, v in props.items() if not v.get("optional")]}
 STR = {"type": "string"}
 
@@ -23,11 +24,14 @@ STR = {"type": "string"}
 class MCPConnection:
     """Small transport seam for nested server-to-client MCP requests and tests."""
 
-    def __init__(self, request=None, client_capabilities=None):
+    def __init__(self, request=None, client_capabilities=None, protocol_version=None):
         self.request_callback = request
         self.client_capabilities = client_capabilities or {}
+        self.protocol_version = protocol_version or PROTOCOL
 
     def supports(self, mode="form"):
+        if self.protocol_version not in ("2025-06-18", "2025-11-25"):
+            return False
         caps = self.client_capabilities or {}
         if not isinstance(caps, dict) or "elicitation" not in caps:
             return False
@@ -111,6 +115,9 @@ def _approve_budget_mcp(ws, a, session=None):
             raise ServiceError(str(e)) from None
     elif not _elicit_approval(session, f"Approve project budget estimate of ${est:.2f} (stop-loss: ${stop:.2f})?", est):
         return _fallback_approval(ws, name, name, "budget", request_digest, f"Approve project budget estimate of ${est:.2f} (stop-loss: ${stop:.2f})?")
+    current, current_digest = _budget_request(ws, name)
+    if current_digest != request_digest:
+        raise ServiceError("budget changed while awaiting human approval; estimate again and ask the human to approve it")
     ws.approve_budget(name)
     return {"ok": True, "approved": True, "project": name, "budget": ws.overview(name).get("budget"),
             "message": f"Budget approved (${est:.2f}). Generation proposals can now be created and executed."}
@@ -155,6 +162,10 @@ def _human_only_shot_approval(ws, a):
     raise ServiceError("clip approval is human-only; use the web page or a human session")
 
 
+def _human_only_attempt_limit(ws, a):
+    raise ServiceError("attempt limits are human-only; use the web page or a human session")
+
+
 def _run_proposal_mcp(ws, a, session=None):
     if a.get("override"):
         raise ServiceError("override is human-web-only; MCP agents cannot bypass stop-loss or attempt gates")
@@ -174,7 +185,7 @@ def _run_proposal_mcp(ws, a, session=None):
         approval = _approve_proposal_mcp(ws, approval_args, session=session)
         if approval.get("approval_needed"):
             return approval
-    return ws.execute(name, pid, override=bool(a.get("override", False)))
+    return ws.execute(name, pid)
 
 
 TOOLS = {
@@ -225,9 +236,9 @@ TOOLS = {
         lambda ws, a: _run_proposal_mcp(ws, a),
     ),
     "set_max_attempts": (
-        "Set maximum generation attempts allowed per shot for a project (e.g. 5, 10, 20).",
+        "Human-only attempt limit setting. Agents cannot change generation attempt limits; use the web page or a human session.",
         S(name=STR, max_attempts={"type": "integer", "description": "Maximum attempts allowed per shot"}),
-        lambda ws, a: ws.set_max_attempts(a["name"], a["max_attempts"]),
+        _human_only_attempt_limit,
     ),
     "approve_shot": (
         "Human-only clip decision. Agents may inspect clips but cannot approve them through MCP; use the web page or a human session.",
@@ -310,13 +321,17 @@ def handle(msg, ws, session=None):
     ok = lambda result: {"jsonrpc": "2.0", "id": mid, "result": result}
     err = lambda code, m: {"jsonrpc": "2.0", "id": mid, "error": {"code": code, "message": m}}
     if method == "initialize":
-        caps = _client_capabilities(msg.get("params"))
-        if session is not None:
-            session.client_capabilities = caps
+        params = msg.get("params") or {}
+        requested = params.get("protocolVersion")
+        selected = requested if requested in SUPPORTED_PROTOCOLS else PROTOCOL
+        caps = _client_capabilities(params)
+        probe = session or MCPConnection(client_capabilities=caps, protocol_version=selected)
+        probe.client_capabilities = caps
+        probe.protocol_version = selected
         server_caps = {"tools": {}}
-        if (session and session.supports("form")) or (not session and MCPConnection(client_capabilities=caps).supports("form")):
+        if probe.supports("form"):
             server_caps["elicitation"] = {"form": {}}
-        return ok({"protocolVersion": PROTOCOL, "capabilities": server_caps, "serverInfo": {"name": "ai-studio", "version": "0.1.0"}})
+        return ok({"protocolVersion": selected, "capabilities": server_caps, "serverInfo": {"name": "ai-studio", "version": "0.1.0"}})
     if method == "ping":
         return ok({})
     if method == "tools/list":

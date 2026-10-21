@@ -6,8 +6,8 @@ Outcome handling for one model:
   AuthError                                   -> the provider is marked UNHEALTHY for a while (skipped later), try the next model.
   Rejected / NotFound / Unsupported           -> try the next model.
 All attempts are kept; if every model fails ONE ChainError lists them all.
-Cost rule: when `approved_price` is given (an image/video action a human approved at an exact price), a model whose price is unknown or higher
-is never used silently; if nothing cheaper works the runner raises NeedsNewApproval so a human sees the new price.
+Cost rule: when `approved_price` is given, a model whose price is unknown or higher is never used silently; if nothing cheaper works the
+runner raises NeedsNewApproval. Vision may use an unknown price only for the exact approved provider/model, never an unknown fallback.
 Video: submit -> poll -> download.  A job that was ACCEPTED and then fails is NOT retried on another model (money may be spent); a timeout
 returns {"status":"pending", "job": ...} so `sync` can finish it later.
 """
@@ -134,13 +134,15 @@ class RoleRunner:
         return cfg.effective_roles(self.dir, project_dir)["roles"][role]["policy"]
 
     # -------------------------------------------------------------- the generic runner
-    def run(self, role, call, project_dir=None, allow=None, approved_price=None, price_of=None, retry_after_submit=False, allow_unknown_price=False):
-        """call(adapter, model) -> result.  Returns {"result", "provider", "model", "card", "attempts"}."""
+    def run(self, role, call, project_dir=None, allow=None, approved_price=None, price_of=None, retry_after_submit=False, approved_unknown_entry=None):
+        """call(adapter, model) -> result. Returns {"result", "provider", "model", "card", "attempts"}.
+        approved_unknown_entry is an approved (provider id, model) pair.
+        """
         entries = self.resolve(role, project_dir)
         if not entries:
             raise ChainError(f"No model is set for '{role}'. Add a provider and pick a model in Settings.", code="unconfigured")
         pol = self.policy(role, project_dir) if not self._fake(role, project_dir) else cfg.default_policy(role)
-        attempts, too_dear = [], None
+        attempts, needs_approval = [], None
         sick = [e for e in entries if e["problem"] is None and self.health.unhealthy(e["provider"]["id"])]
         for e in entries:
             who = f"{e['provider'].get('label') or e['provider']['id']}:{e['model']}"
@@ -154,12 +156,13 @@ class RoleRunner:
                     continue
             if approved_price is not None:
                 price = price_of(e) if price_of else None
-                if price is None and not allow_unknown_price:
+                if price is None and (e["provider"]["id"], e["model"]) != approved_unknown_entry:
                     attempts.append({"who": who, "error": "price unknown (set a price in Settings)", "skipped": True})
+                    needs_approval = needs_approval or (e, price)
                     continue
                 if price is not None and price > approved_price + 1e-9:
                     attempts.append({"who": who, "error": f"costs ${price:.3f} (more than the approved ${approved_price:.3f})", "skipped": True})
-                    too_dear = too_dear or (e, price)
+                    needs_approval = needs_approval or (e, price)
                     continue
             bad = self.health.unhealthy(e["provider"]["id"])
             if bad and len(sick) < len([x for x in entries if x["problem"] is None]):
@@ -185,9 +188,10 @@ class RoleRunner:
                 except ProviderError as ex:                  # Rejected, NotFound, Unsupported and anything else a provider raises
                     attempts.append({"who": who, "error": scrub(ex, adapter.secret)[:200]})
                     break
-        if too_dear:
-            e, price = too_dear
-            raise NeedsNewApproval(f"Every usable '{role}' model costs more than the approved price. Next choice: {e['model']} at ${price:.3f}.", e, price, attempts)
+        if needs_approval:
+            e, price = needs_approval
+            price_text = "price unknown (set a price in Settings)" if price is None else f"${price:.3f}"
+            raise NeedsNewApproval(f"No '{role}' model succeeded within the approved price. Next choice: {e['model']} at {price_text}; new approval required.", e, price, attempts)
         raise ChainError(f"All '{role}' models failed: " + " | ".join(f"{a['who']} -> {a['error']}" for a in attempts), attempts)
 
     # -------------------------------------------------------------- conveniences
@@ -214,8 +218,13 @@ class RoleRunner:
         role_allow = allow or (lambda e: (self.pricing.is_free(e.get("card")) or paid_allowed, "paid or unknown vision model; enable Allow paid models"))
         approved_price = grant.price if grant else None
         price_of = (lambda e: self.pricing.text_cost(e.get("card"), None)) if grant else None
+        approved_unknown_entry = None
+        if grant and paid_allowed:
+            # Redemption validates the consumed proposal; chain position is not approval.
+            prop = approvals.get(project_dir, grant.proposal_id)
+            approved_unknown_entry = ((prop.get("summary") or {}).get("provider"), prop["model"])
         r = self.run("vision", lambda a, m: a.vision(m, prompt, images, opts), project_dir, role_allow, approved_price, price_of,
-                     allow_unknown_price=bool(grant and paid_allowed))
+                     approved_unknown_entry=approved_unknown_entry)
         out = r["result"]
         cost, src = self._cost("vision", out, r["card"])
         return {**out, "cost": cost, "cost_source": src, "provider": r["provider"], "attempts": r["attempts"]}

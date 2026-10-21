@@ -70,6 +70,12 @@ class TestProposalOnlyPaidTools(unittest.TestCase):
         self.assertEqual(result["kind"], "clip_extend")
         self.assertTrue(costlog.read_log(self.p))
 
+    def test_character_analysis_accepts_project_relative_image_path(self):
+        prop = self.ws.analyze_character_image("demo", "stills/character.png")
+        self.assertEqual(prop["kind"], "review")
+        self.assertEqual(prop["options"]["file"], "stills/character.png")
+        self.assertEqual(costlog.read_log(self.p), [])
+
     def test_analyze_character_is_a_review_proposal(self):
         before = costlog.read_log(self.p)
         prop = self.ws.analyze_character_image("demo", "character")
@@ -151,6 +157,7 @@ class TestChatCannotApprove(unittest.TestCase):
         images = self.ws._read(self.p, "images.json", {"images": []})
         images["images"].append({"id": "character_01", "kind": "character", "out": "stills/character_01.png", "prompt": "a character", "refs": []})
         self.ws.put_images("demo", images)
+        self.ws.brief_put("demo", {"brand": "Test", "goal": "test", "story": "One scene.", "length_seconds": "12", "language": "English", "characters": "Character", "setting": "Studio", "budget_cap": "1"})
         (self.p / "budget.json").write_text(json.dumps({"estimate": 1.0, "stop_loss": 1.3, "approved": False}), encoding="utf-8")
 
     def send(self, text, action=None):
@@ -177,9 +184,28 @@ class TestChatCannotApprove(unittest.TestCase):
             self.assertIsNone(result["executed"], text)
 
     def test_llm_action_only_returns_suggestion(self):
-        result = self.send("please proceed", {"type": "approve_budget"})
-        self.assertEqual(result["action"], {"type": "approve_budget", "kind": "image", "target": ""})
-        self.assertIsNone(result["executed"])
+        from unittest.mock import patch
+        for action in ({"type": "approve_budget"}, {"type": "generate_all"},
+                       {"type": "generate", "kind": "image", "target": "character_01"},
+                       {"type": "generate", "kind": "clip", "target": "s01"}):
+            with self.subTest(action=action), \
+                 patch.object(self.ws, "approve_budget", side_effect=AssertionError("chat approved budget")), \
+                 patch.object(self.ws, "approve", side_effect=AssertionError("chat approved proposal")), \
+                 patch.object(self.ws, "approve_human", side_effect=AssertionError("chat impersonated human")), \
+                 patch.object(self.ws, "execute", side_effect=AssertionError("chat executed")), \
+                 patch.object(self.ws, "propose", side_effect=AssertionError("chat accessed approval code")):
+                result = self.send("please proceed", action)
+                self.assertEqual(result["action"]["type"], action["type"])
+                self.assertIsNone(result["executed"])
+
+    def test_start_and_make_only_suggest_when_budget_already_approved(self):
+        b = json.loads((self.p / "budget.json").read_text())
+        b["approved"] = True
+        (self.p / "budget.json").write_text(json.dumps(b))
+        for text in ("start", "make it", "create character_01", "generate all"):
+            result = self.send(text)
+            self.assertIn(result["action"]["type"], ("generate", "generate_all"))
+            self.assertIsNone(result["executed"])
 
     def test_chat_has_no_budget_approval_call(self):
         from inspect import getsource
