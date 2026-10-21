@@ -5,6 +5,7 @@ import { Button, Card, IconTile, Input, Modal } from "../ui";
 import { useToast } from "../toast";
 import { confirmDialog } from "../dialogs";
 import CodeBlock from "../components/CodeBlock";
+import PairedDevicesSection from "./PairedDevices";
 
 interface Info { mcp: { python: string; repo: string; home: string; module: string }; tools: { name: string; description: string }[]; base_url: string }
 interface Key { id: string; name: string; prefix: string; created: string; last_used: string | null }
@@ -275,6 +276,9 @@ export default function IntegrationsSection() {
           <CodeBlock code={`curl -H "Authorization: Bearer aisk_YOUR_KEY" ${info.base_url}/api/projects`} label="curl example" lang="bash" /></div>}
         <p className="mt-3 text-xs text-slate-400">The full list of endpoints, and which ones a key may call, is in Help &amp; Docs under API &amp; Integrations.</p>
       </Card>
+
+      {/* Paired NLE Devices */}
+      <PairedDevicesSection />
 
       {/* Create Key Modal */}
       <Modal open={creating} onClose={() => { setCreating(false); setFresh(""); }} title={fresh ? "Your new API key" : "Create an API key"}>
