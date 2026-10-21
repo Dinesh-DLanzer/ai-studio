@@ -87,10 +87,14 @@ class BatchDomain:
         return approvals.request_hash(kind, target, model, price, body)
 
     # ---- lifecycle
-    def create(self, name, actor="local"):
-        """Freeze the current Generate-all plan. Free: creates a file only."""
+    def create(self, name, actor="local", only=None):
+        """Freeze the current Generate-all plan (or just the (kind, target) pairs in `only`, used by crew runs). Free: creates a file only."""
         p = self.ws.pdir(name)
         plan = self.ws.generate_all_plan(name)
+        if only is not None:
+            plan["items"] = [it for it in plan["items"] if (it["kind"], it["target"]) in only]
+            if not plan["items"]:
+                raise ServiceError("none of the proposed items can be batched right now")
         items = [{"kind": it["kind"], "target": it["target"], "label": it.get("label", ""), "model": it["model"], "price": round(float(it["price"]), 6),
                   "request_hash": self.digest(p, it["kind"], it["target"], it["model"], it["price"]), "status": "pending"} for it in plan["items"]]
         total = round(sum(it["price"] for it in items), 6)

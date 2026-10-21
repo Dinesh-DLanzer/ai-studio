@@ -20,6 +20,9 @@ Commands:
   python3 -m aistudio.cli progress <p> [--json]      Production checklist and queue
   python3 -m aistudio.cli plan <project> [--json]    Batch generation proposal plan
   python3 -m aistudio.cli export-project <p> [--json] Export project zip archive
+  python3 -m aistudio.cli crew run <p> --agent A --task T [--autonomy assist|copilot] [--json]   Run a studio-crew agent
+  python3 -m aistudio.cli crew status <p> [run] [--json]   List runs, or show one run
+  python3 -m aistudio.cli crew undo <p> <run> [--json]     Restore the documents a run changed
   python3 -m aistudio.cli agent-setup [claude|agy]   Configure agent manifests
 """
 import argparse
@@ -152,6 +155,22 @@ def main(argv=None, ask=input, out=print):
     p_jobs.add_argument("--state", default="")
     p_jobs.add_argument("--json", action="store_true")
 
+    p_crew = sp.add_parser("crew", help="Studio crew agents: run, status, undo (a human terminal; agents never approve or spend)")
+    csp = p_crew.add_subparsers(dest="crew_cmd", required=True)
+    c_run = csp.add_parser("run", help="Run an agent on a task")
+    c_run.add_argument("project")
+    c_run.add_argument("--agent", required=True)
+    c_run.add_argument("--task", required=True)
+    c_run.add_argument("--autonomy", default="copilot", choices=["assist", "copilot"])
+    c_st = csp.add_parser("status", help="List runs, or show one")
+    c_st.add_argument("project")
+    c_st.add_argument("run", nargs="?", default="")
+    c_un = csp.add_parser("undo", help="Undo a run")
+    c_un.add_argument("project")
+    c_un.add_argument("run")
+    for c in (c_run, c_st, c_un):
+        c.add_argument("--json", action="store_true")
+
     p_exp = sp.add_parser("export-project", help="Export project as zip")
     p_exp.add_argument("project")
     p_exp.add_argument("--include-discarded", action="store_true")
@@ -206,6 +225,47 @@ def main(argv=None, ask=input, out=print):
             else:
                 for j in res:
                     out(f"{j['id']}  {j['project']:<20} {j['kind']:<8} {j['state']:<16} {j['target']}  {j['error']}".rstrip())
+
+        elif args.cmd == "crew":
+            from aistudio import jobs as jobsmod
+            from aistudio.crew import agents as crew_agents, runtime as crew_runtime
+            try:
+                if args.crew_cmd == "run":
+                    agent = crew_agents.load(args.agent, ws.settings_dir)
+                    ws.pdir(args.project)
+                    job = jobsmod.enqueue(ws.root, args.project, "crew_run", actor="cli", state="running",
+                                          payload={"agent": args.agent, "task": args.task, "autonomy": args.autonomy})
+                    try:
+                        res = crew_runtime.run(ws, args.project, agent, args.task, args.autonomy, run_id=job["id"])
+                    except BaseException as e:
+                        jobsmod.finish(ws.root, job["id"], "failed", error=jobsmod.error_text(e))
+                        raise
+                    jobsmod.finish(ws.root, job["id"], "failed" if res["status"] == "error" else "completed", result={"run": res["id"], "status": res["status"]}, error=res["error"])
+                elif args.crew_cmd == "status":
+                    res = crew_runtime.get_run(ws, args.project, args.run) if args.run else {"runs": crew_runtime.list_runs(ws, args.project)}
+                else:
+                    res = crew_runtime.undo(ws, args.project, args.run)
+            except crew_agents.AgentError as e:
+                raise ServiceError(str(e)) from None
+            if is_json:
+                out(json.dumps(res, indent=2, default=str))
+            elif "runs" in res:
+                for r in res["runs"]:
+                    out(f"{r['id']}  {r['agent']['id']:<14} {r['status']:<14} {r['autonomy']:<8} {r['steps']} steps  ${r['llm_usd']:.4f}  {r['task'][:50]}")
+            elif "restored" in res:
+                out(f"Undone run {res['run']}: restored {', '.join(res['restored']) or 'nothing (already as before)'}")
+            else:
+                out(f"Run {res['id']} ({res['agent']['id']}, {res['autonomy']}): {res['status']}, {len(res['steps'])} steps, LLM ${res['llm_usd']:.4f}")
+                for st in res["steps"]:
+                    out(f"  {st['n']}. {st['tool'] or '-'} [{st['status']}] {st['result'][:100]}")
+                for c in res.get("changes", []):
+                    out(f"  changed {c['doc']}")
+                for pr in res.get("proposals", []):
+                    out(f"  proposal {pr['id']} {pr['kind']} {pr['shot']} ${float(pr['price'] or 0):.3f} (a human must approve)")
+                if res.get("batch"):
+                    out(f"  batch awaiting human approval: {res['batch']}")
+                if res.get("error"):
+                    out(f"  error: {res['error']}")
 
         elif args.cmd == "pending":
             proposals = ws.overview(args.project)["proposals"]
