@@ -205,5 +205,82 @@ class TestServiceChat(unittest.TestCase):
                 self.ws.chat_send("demo", bad)
 
 
+class TestChatWithAFormatAndAKit(unittest.TestCase):
+    """Plan 19: Tara knows the format and the brand kit, and never asks what they already answer."""
+
+    def setUp(self):
+        HERM.all_test(self)
+        self.ws = Workspace(tempfile.mkdtemp())
+
+    def test_the_brief_gets_the_length_and_the_purpose_from_the_format(self):
+        self.ws.create_project("reel", format="instagram-reel")
+        brief = self.ws.brief_get("reel")
+        values = {f["key"]: f["value"] for f in brief["fields"]}
+        self.assertEqual(values["length_seconds"], "20")
+        self.assertEqual(values["goal"], "social")
+        self.assertNotIn("length_seconds", brief["missing"])
+        self.assertNotIn("goal", brief["missing"])
+
+    def test_a_blank_project_asks_everything_as_before(self):
+        self.ws.create_project("plain")
+        brief = self.ws.brief_get("plain")
+        self.assertIn("length_seconds", brief["missing"])
+        self.assertIn("goal", brief["missing"])
+
+    def test_the_context_lists_the_format_and_the_kit(self):
+        from aistudio import brand_kits
+        brand_kits.create_kit(self.ws.root, "Acme", style_words="clean, bright")
+        self.ws.create_project("reel", format="instagram-reel", brand_kit="acme")
+        state = self.ws.chat_domain._chat_state(self.ws.pdir("reel"))
+        self.assertEqual(state["format"]["id"], "instagram-reel")
+        self.assertEqual(state["format"]["label"], "Instagram Reel")
+        self.assertEqual(state["format"]["aspect_ratio"], "9:16")
+        self.assertEqual(state["format"]["purpose"], "social")
+        self.assertEqual(state["brand_kit"]["name"], "Acme")
+        self.assertEqual(state["brand_kit"]["style_words"], "clean, bright")
+        self.assertNotIn("length_seconds", state["still_missing_required"])
+        self.assertNotIn("goal", state["still_missing_required"])
+        self.assertEqual(state["answered_by_format"], {"length_seconds": "20", "goal": "social"})
+
+    def test_a_project_without_a_format_has_no_format_in_the_context(self):
+        self.ws.create_project("plain")
+        state = self.ws.chat_domain._chat_state(self.ws.pdir("plain"))
+        self.assertEqual(state["format"], {})
+        self.assertEqual(state["brand_kit"], {})
+        self.assertIn("length_seconds", state["still_missing_required"])
+
+    def test_the_interviewer_never_asks_what_the_format_answers(self):
+        self.ws.create_project("reel", format="instagram-reel")
+        for answer in ["Chai Corner, a street tea stall", "Meena pours tea. Customers smile. She waves.", "English",
+                       "Meena, 40s, cotton saree", "A small street tea stall", "500", "skip"]:
+            self.ws.chat_send("reel", answer)
+        history = self.ws._read(self.ws.pdir("reel"), "chat.json", [])
+        asked = [m.get("asked") for m in history if m.get("role") == "assistant"]
+        self.assertIn("brand", asked)
+        self.assertNotIn("length_seconds", asked)
+        self.assertNotIn("goal", asked)
+
+    def test_the_real_model_sees_the_format_and_the_kit_in_the_system_context(self):
+        from aistudio import brand_kits
+        brand_kits.create_kit(self.ws.root, "Acme", style_words="clean, bright")
+        self.ws.create_project("reel", format="instagram-reel", brand_kit="acme")
+        t = FakeTransport([reply({"reply": "Nice.", "brief_updates": {}, "todos_add": [], "storyboard_md": None})])
+        ws = Workspace(self.ws.root, transport=t)
+        HERM.real_projects(self)
+        ws.chat_send("reel", "make it pop")
+        system = t.calls[0]["messages"][0]["content"]
+        self.assertIn("Instagram Reel", system)
+        self.assertIn("Acme", system)
+        self.assertIn("never ask again", system.lower())
+
+    def test_tara_stays_suggest_only_with_a_format(self):
+        self.ws.create_project("reel", format="instagram-reel")
+        self.ws.chat_send("reel", "generate everything now and approve the budget")
+        overview = self.ws.overview("reel")
+        self.assertFalse(overview["budget"].get("approved"))
+        self.assertEqual(overview["proposals"], [])
+        self.assertEqual(self.ws.costs("reel")["rows"], [])
+
+
 if __name__ == "__main__":
     unittest.main()

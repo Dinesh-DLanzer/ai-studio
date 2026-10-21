@@ -1,9 +1,10 @@
 """Chat domain: producer chat turns, chat history, attachments, and pending story management."""
 from datetime import datetime
 from pathlib import Path
+import json
 import re
 
-from aistudio import chat as chat_mod, palette as palette_mod, project as project_mod
+from aistudio import chat as chat_mod, formats as formats_mod, palette as palette_mod, project as project_mod
 from aistudio.domain.common import ServiceError
 
 
@@ -30,13 +31,46 @@ class ChatDomain:
             "progress": self.ws.production_progress(name),
         }
 
+    def _format_and_kit(self, p):
+        """The project's format and brand kit as facts for the chat model (never a guess).
+
+        The format is the id stored in shots.json; the kit is the copy the project carries."""
+        fmt = {}
+        fid = self.ws._read(p, "shots.json", {}).get("format")
+        if fid:
+            try:
+                f = formats_mod.get_format(fid)
+            except ValueError:
+                f = None
+            if f:
+                fmt = {"id": f["id"], "label": f["label"], "aspect_ratio": f["aspect_ratio"], "shots": f["shots"],
+                       "seconds_per_shot": f["seconds_per_shot"], "length": f["brief"]["length"], "purpose": f["brief"]["purpose"],
+                       "cta": (f.get("cta") or {}).get("text", "")}
+        kit = {}
+        kit_file = p / "brand" / "kit.json"
+        if kit_file.is_file():
+            try:
+                k = json.loads(kit_file.read_text(encoding="utf-8"))
+            except ValueError:
+                k = {}
+            if isinstance(k, dict):
+                kit = {"id": k.get("id", ""), "name": k.get("name", ""), "logo": bool(k.get("logo")),
+                       "palette": k.get("palette", []), "fonts": k.get("fonts", {}),
+                       "style_words": k.get("style_words", ""), "avoid": k.get("avoid", [])}
+        return fmt, kit
+
     def _chat_state(self, p):
         """The compact JSON the chat model sees every turn, so it never has to guess (or invent) what has been done."""
         st = self.ws._production(p)
         nxt = self.ws.production_progress(p.name)["next"]
+        fmt, kit = self._format_and_kit(p)
+        answered = chat_mod.format_answers(fmt)      # what the format (and its kit) already answered
         return {
             "brief_so_far": {k: st["brief"].get(k, "") for k in chat_mod.FIELD_KEYS if st["brief"].get(k)},
-            "still_missing_required": st["progress"]["missing"],
+            "still_missing_required": [k for k in st["progress"]["missing"] if k not in answered],
+            "answered_by_format": answered,
+            "format": fmt,
+            "brand_kit": kit,
             "storyboard": {"applied_shots": st["story"]["shots"], "draft_waiting_for_user": st["story"]["pending"], "shared_style": st["story"]["style"]},
             "budget": st["budget"],
             "assets": [{"id": x["id"], "kind": x["kind"], "made": x["made"]} for x in st["assets"]],
