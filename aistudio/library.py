@@ -137,7 +137,7 @@ def rebuild(root):
     root = Path(root).resolve()
     projects = root / "projects"
     pending = []
-    if not projects.is_dir(): return rows
+    if not projects.is_dir(): return []
     for pdir in projects.iterdir():
         if not pdir.is_dir() or pdir.name.startswith(("_", ".")) or pdir.name == ".history" or pdir.resolve().parent != projects.resolve(): continue
         logs = _log_rows(pdir)
@@ -224,6 +224,20 @@ def stats(root):
     return rows[0]
 
 
+def _require_consent(pdir, src, meta):
+    """Real-person assets travel only with a human-recorded consent entry (aistudio/consent.py) in the project that is the source or target."""
+    from aistudio import consent
+    stem = Path(src).stem.split(".v")[0]
+    flagged = bool(meta.get("real_person"))
+    try:
+        images_doc = json.loads((Path(pdir) / "images.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        images_doc = {"images": []}
+    if flagged:
+        consent.require(pdir, meta.get("subject") or stem)
+    consent.require_assets(pdir, images_doc, [stem])
+
+
 def promote(root, project, rel_file):
     pdir = _safe_project(root, project)
     src, rel = _safe_rel(pdir, rel_file)
@@ -231,18 +245,7 @@ def promote(root, project, rel_file):
     row = index_output(root, project, rel)
     meta_path = src.with_name(src.name + ".meta.json")
     meta = json.loads(meta_path.read_text(encoding="utf-8")) if meta_path.is_file() else {}
-    if meta.get("real_person"):
-        consent = pdir / "consent.json"
-        approved = False
-        if consent.is_file():
-            consent_doc = json.loads(consent.read_text(encoding="utf-8"))
-            entries = consent_doc.get("entries", consent_doc.get("assets", [])) if isinstance(consent_doc, dict) else consent_doc
-            approved = consent_doc.get("real_person", False) if isinstance(consent_doc, dict) else False
-            if isinstance(entries, list):
-                approved = approved or any((e == rel or (isinstance(e, dict) and e.get("file", e.get("path")) == rel and e.get("consent", True))) for e in entries)
-            elif isinstance(entries, dict): approved = approved or bool(entries.get(rel))
-        if not approved:
-            raise ValueError("real-person asset requires project consent")
+    _require_consent(pdir, src, meta)
     cat = re.sub(r"[^a-z0-9_-]+", "-", str(row["category"]).lower()).strip("-") or "asset"
     slug = re.sub(r"[^a-z0-9_-]+", "-", src.stem.lower()).strip("-") or "asset"
     folder = Path(root) / "library" / cat
@@ -260,10 +263,18 @@ def use_in_project(root, library_id, project, kind):
     if not row: raise ValueError("no such library item")
     src = Path(root) / "library" / row["file"]
     if not src.is_file(): raise FileNotFoundError(row["file"])
+    if row.get("project") != "_library": raise ValueError("only workspace library items can be used in a project")
     pdir = _safe_project(root, project)
     folder = {"image": "stills", "clip": "clips", "audio": "audio"}.get(kind)
     if not folder: raise ValueError("kind must be image, clip, or audio")
+    allowed = {"image": {".png", ".jpg", ".jpeg", ".webp"}, "clip": {".mp4", ".mov", ".webm"}, "audio": {".wav", ".mp3", ".m4a", ".flac"}}[kind]
+    if src.suffix.lower() not in allowed: raise ValueError(f"a {src.suffix.lower()} file cannot be used as {kind}")
+    mp0 = src.with_name(src.name + ".meta.json")
+    meta0 = json.loads(mp0.read_text(encoding="utf-8")) if mp0.is_file() else {}
+    _require_consent(pdir, src, meta0)
     outdir = pdir / folder
+    if outdir.is_symlink() or not outdir.resolve().is_relative_to(pdir.resolve()) if outdir.exists() else False:
+        raise ValueError("project media folder must stay inside the project")
     outdir.mkdir(parents=True, exist_ok=True)
     stem, ext = src.stem, src.suffix
     dest = outdir / f"{stem}{ext}"; n = 2

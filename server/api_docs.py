@@ -8,8 +8,8 @@ GROUPS = ["Projects", "Story and documents", "Chat (producer)", "Assets and shot
           "Costs and verification", "Library", "Providers, models and limits", "Integrations", "Files and utility"]
 
 R = [
-    ("GET", "/api/library", True, "Library", "Search the workspace generation library. Read-only; results can span projects.", "query parameters", '{"items": [...], "total"}'),
-    ("GET", "/api/library/{id}", True, "Library", "Read one library item.", "-", "library item"),
+    ("GET", "/api/library", False, "Library", "Search the workspace generation library. Read-only; results can span projects.", "query parameters", '{"items": [...], "total"}'),
+    ("GET", "/api/library/{id}", False, "Library", "Read one library item.", "-", "library item"),
     ("POST", "/api/library/{id}/favorite", False, "Library", "Mark or unmark a library item as favorite. Human session only.", '{"on": true}', "library item"),
     ("POST", "/api/library/rebuild", False, "Library", "Rebuild the index from project media and cost logs. Human session only.", "-", '{"count": 0}'),
     ("POST", "/api/library/promote", False, "Library", "Copy a project asset into the workspace library. Human session only.", '{"project": "...", "file": "stills/hero.png"}', "library item"),

@@ -183,8 +183,9 @@ def create_app(root=None, token=None, rates_path=None, transport=None, static_di
     from aistudio import library as librarymod
 
     @app.get("/api/library", dependencies=[api])
-    def library_search(q: str = "", type: str = "", project: str = "", model: str = "", favorite: str = "", failed: str = "",
+    def library_search(request: Request, q: str = "", type: str = "", project: str = "", model: str = "", favorite: str = "", failed: str = "",
                        date_from: str = "", date_to: str = "", cost_min: str = "", cost_max: str = "", limit: int = 50, offset: int = 0):
+        human_session(request)
         filters = {k: v for k, v in {"type": type, "project": project, "model": model}.items() if v}
         for key, value in (("favorite", favorite), ("failed", failed)):
             if value: filters[key] = value.lower() in ("1", "true", "yes")
@@ -193,35 +194,41 @@ def create_app(root=None, token=None, rates_path=None, transport=None, static_di
         return librarymod.search(ws.root, q, filters, limit, offset)
 
     @app.post("/api/library/rebuild", dependencies=[api])
-    def library_rebuild():
+    def library_rebuild(request: Request):
+        human_session(request)
         return {"count": len(librarymod.rebuild(ws.root))}
 
     @app.get("/api/library/{id}", dependencies=[api])
-    def library_get(id: str):
+    def library_get(id: str, request: Request):
+        human_session(request)
         row = librarymod.get(ws.root, id)
         if not row: raise HTTPException(404, "no such library item")
         return row
 
     @app.post("/api/library/{id}/favorite", dependencies=[api])
     async def library_favorite(id: str, request: Request):
+        human_session(request)
         row = librarymod.set_favorite(ws.root, id, bool((await request.json()).get("on")))
         if not row: raise HTTPException(404, "no such library item")
         return row
 
     @app.post("/api/library/promote", dependencies=[api])
     async def library_promote(request: Request):
+        human_session(request)
         b = await request.json()
         try: return librarymod.promote(ws.root, b.get("project", ""), b.get("file", ""))
         except (ValueError, FileNotFoundError) as e: raise HTTPException(400, str(e)) from None
 
     @app.post("/api/library/use", dependencies=[api])
     async def library_use(request: Request):
+        human_session(request)
         b = await request.json()
         try: return librarymod.use_in_project(ws.root, b.get("id", ""), b.get("project", ""), b.get("kind", "image"))
         except (ValueError, FileNotFoundError) as e: raise HTTPException(400, str(e)) from None
 
     @app.post("/api/library/remix", dependencies=[api])
     async def library_remix(request: Request):
+        human_session(request)
         b = await request.json()
         try: return librarymod.remix(ws.root, b.get("id", ""), b.get("project", ""))
         except ValueError as e: raise HTTPException(400, str(e)) from None
@@ -286,7 +293,7 @@ def create_app(root=None, token=None, rates_path=None, transport=None, static_di
 
     def human_session(request):
         if getattr(request.state, "scope", "") != "session":      # also enforced by api_docs (agent=False); belt and braces
-            raise HTTPException(403, "starting, stopping or undoing a crew run needs the human session")
+            raise HTTPException(403, "this action needs the human session (not an API key)")
 
     @app.post("/api/projects/{name}/crew/runs", dependencies=[api])
     async def crew_run_start(name: str, request: Request):

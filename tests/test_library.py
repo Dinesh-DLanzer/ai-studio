@@ -84,9 +84,48 @@ class LibraryTests(unittest.TestCase):
         client = TestClient(create_app(str(self.root), token="human", static_dir="/nonexistent"))
         human = {"x-aistudio-token": "human"}
         agent = {"x-aistudio-token": client.post("/api/keys", json={"name": "test"}, headers=human).json()["key"]}
-        self.assertEqual(client.get("/api/library", headers=agent).status_code, 200)
+        self.assertEqual(client.get("/api/library", headers=human).status_code, 200)
+        self.assertEqual(client.get("/api/library", headers=agent).status_code, 403)         # cross-project data: human session only, like MCP and the crew
+        self.assertEqual(client.get("/api/library/x", headers=agent).status_code, 403)
         for method, url, body in (("post", "/api/library/rebuild", {}), ("post", "/api/library/promote", {"project": "demo", "file": "stills/hero.png"}),
                                   ("post", "/api/library/use", {"id": "x", "project": "demo", "kind": "image"}),
                                   ("post", "/api/library/remix", {"id": "x", "project": "demo"}),
                                   ("post", "/api/library/x/favorite", {"on": True})):
             self.assertEqual(getattr(client, method)(url, json=body, headers=agent).status_code, 403, url)
+
+
+class LibraryConsentAndAccessTests(unittest.TestCase):
+    def setUp(self):
+        import json
+        from tests import _hermetic  # noqa: F401
+        from aistudio.service import Workspace
+        self.root = Path(tempfile.mkdtemp())
+        self.ws = Workspace(self.root)
+        self.ws.create_project("a")
+        self.ws.create_project("b")
+        self.pa, self.pb = self.ws.pdir("a"), self.ws.pdir("b")
+        (self.pa / "stills").mkdir(exist_ok=True)
+        (self.pa / "stills" / "maya.png").write_bytes(b"\x89PNG\r\n\x1a\n" + b"x" * 20)
+        (self.pa / "stills" / "maya.png.meta.json").write_text(json.dumps({"real_person": True, "subject": "Maya", "prompt": "p"}))
+
+    def test_promote_and_use_need_a_human_recorded_consent(self):
+        from aistudio import consent, library
+        with self.assertRaises(Exception):
+            library.promote(self.root, "a", "stills/maya.png")
+        consent.record(self.pa, "Maya", "I agree", kind="real_person")
+        item = library.promote(self.root, "a", "stills/maya.png")
+        with self.assertRaises(Exception):
+            library.use_in_project(self.root, item["id"], "b", "image")      # the TARGET project needs its own consent
+        consent.record(self.pb, "Maya", "I agree", kind="real_person")
+        self.assertTrue(library.use_in_project(self.root, item["id"], "b", "image"))
+
+    def test_a_hand_written_consent_dict_no_longer_approves_anything(self):
+        import json
+        from aistudio import library
+        (self.pa / "consent.json").write_text(json.dumps({"real_person": True}))
+        with self.assertRaises(Exception):
+            library.promote(self.root, "a", "stills/maya.png")
+
+    def test_rebuild_without_a_projects_folder_returns_empty(self):
+        from aistudio import library
+        self.assertEqual(library.rebuild(tempfile.mkdtemp()), [])
