@@ -226,6 +226,92 @@ class MetadataTests(CastBase):
                 self.ws.remix("demo", bad)
 
 
+class VariantTests(CastBase):
+    def setUp(self):
+        super().setUp()
+        for t in ("meena", "main_place", "s01"):
+            self.run_image(t)
+        self.before = costlog.read_log(self.p)
+
+    def approve_and_run(self, batch):
+        self.ws.batches.approve("demo", batch["id"], batch["batch_hash"])
+        return self.ws.batches.run("demo", batch["id"])
+
+    def test_variant_batch_total_is_n_times_unit_and_each_item_is_its_own_proposal(self):
+        unit = self.ws.spec("demo", "image", "s01")["price"]
+        batch = self.ws.propose_variants("demo", "image", "s01", 3)
+        self.assertEqual((batch["status"], len(batch["items"])), ("awaiting_approval", 3))
+        self.assertEqual(batch["total"], round(3 * unit, 6))
+        self.assertEqual(batch["total"], round(sum(i["price"] for i in batch["items"]), 6))
+        self.assertEqual(len({i["request_hash"] for i in batch["items"]}), 3)
+        self.assertEqual(costlog.read_log(self.p), self.before)                          # creating spends nothing
+        with self.assertRaises(ServiceError):
+            self.ws.batches.run("demo", batch["id"])                                     # and nothing runs unapproved
+        done = self.approve_and_run(batch)
+        self.assertEqual(done["status"], "done")
+        new = costlog.read_log(self.p)[len(self.before):]
+        self.assertEqual(sorted(r["shot"] for r in new), ["s01.v1", "s01.v2", "s01.v3"])
+        self.assertAlmostEqual(sum(float(r["cost"]) for r in new), batch["total"], places=6)
+        used = [x for x in json.loads((self.p / "proposals.json").read_text()) if x["status"] == "used"]
+        self.assertEqual(len(used), len(self.before) + 3)                                # one consumed grant per variant
+        for k in (1, 2, 3):
+            self.assertTrue((self.p / "stills" / f"s01.v{k}.png").is_file())
+        self.assertTrue((self.p / "stills" / "s01.png").is_file())                       # the original is untouched
+
+    def test_stop_loss_applies_to_every_variant(self):
+        batch = self.ws.propose_variants("demo", "image", "s01", 3)
+        b = json.loads((self.p / "budget.json").read_text())
+        b["stop_loss"] = round(costlog.spent(self.p) + 2 * batch["items"][0]["price"] + 0.001, 6)
+        (self.p / "budget.json").write_text(json.dumps(b))
+        done = self.approve_and_run(batch)
+        self.assertEqual([i["status"] for i in done["items"]], ["done", "done", "error"])
+        self.assertEqual(len(costlog.read_log(self.p)) - len(self.before), 2)
+
+    def test_agent_keys_may_propose_variants_but_never_select(self):
+        self.assertTrue(api_docs.agent_allowed("POST", "/api/projects/{name}/variants"))
+        self.assertFalse(api_docs.agent_allowed("POST", "/api/projects/{name}/variants/select"))
+
+    def test_bad_counts_and_kinds_are_refused(self):
+        for args in (("image", "s01", 1), ("image", "s01", 5), ("image", "s01", True), ("review", "s01", 2)):
+            with self.assertRaises(ServiceError):
+                self.ws.propose_variants("demo", *args)
+
+    def test_select_version_discards_the_rest_with_cost_and_never_deletes(self):
+        self.approve_and_run(self.ws.propose_variants("demo", "image", "s01", 3))
+        res = self.ws.select_version("demo", "image", "s01", 2)
+        self.assertEqual((res["selected_version"], res["discarded"]), (2, [1, 3]))
+        self.assertTrue((self.p / "stills" / "s01.v2.png").is_file())
+        recs = self.ws.overview("demo")["discarded"]
+        self.assertEqual(sorted(r["original"] for r in recs), ["stills/s01.v1.png", "stills/s01.v3.png"])
+        for r in recs:
+            self.assertTrue((self.p / r["file"]).is_file())                              # moved, not deleted
+        unit = self.ws.spec("demo", "image", "s01")["price"]
+        self.assertAlmostEqual(costlog.split(self.p)["discarded"], 2 * unit, places=6)  # their cost is tracked as discarded
+        img = next(i for i in self.images()["images"] if i["id"] == "s01")
+        self.assertEqual((img["selected_version"], img["out"]), (2, "stills/s01.v2.png"))
+        shot = next(s for s in self.ws._read(self.p, "shots.json")["shots"] if s["id"] == "s01")
+        self.assertEqual(shot["first_frame"], "stills/s01.v2.png")                       # downstream source follows the selection
+        self.ws.restore("demo", recs[0]["file"])                                         # restorable
+        with self.assertRaises(ServiceError):
+            self.ws.select_version("demo", "image", "s01", 4)
+
+    def test_clip_variants_select_updates_timeline_source(self):
+        from aistudio import editor
+        batch = self.ws.propose_variants("demo", "clip", "s01", 2)
+        self.assertEqual(batch["total"], round(2 * batch["items"][0]["price"], 6))
+        self.approve_and_run(batch)
+        files = sorted(f.name for f in (self.p / "clips").glob("s01.v*.mp4"))
+        self.assertEqual(files, ["s01.v1_final_a1.mp4", "s01.v2_final_a1.mp4"])
+        self.assertEqual(sorted(r["shot"] for r in costlog.read_log(self.p) if r["stage"] == "final"), ["s01.v1", "s01.v2"])
+        res = self.ws.select_version("demo", "clip", "s01", 1)
+        shot = next(s for s in self.ws._read(self.p, "shots.json")["shots"] if s["id"] == "s01")
+        self.assertEqual((shot["selected_version"], shot["final_clip"]), (1, "clips/s01.v1_final_a1.mp4"))
+        self.assertEqual(editor.clip_for_shot(self.p, shot), "clips/s01.v1_final_a1.mp4")
+        self.assertEqual(res["discarded"], [2])
+        self.assertGreater(costlog.split(self.p)["discarded"], 0)
+        self.assertTrue(self.ws.approve_shot("demo", "s01")["final_ok"])
+
+
 @unittest.skipUnless(HAVE_API, "needs fastapi + httpx")
 class ConsentApiTests(unittest.TestCase):
     def setUp(self):

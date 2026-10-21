@@ -464,6 +464,16 @@ def create_app(root=None, token=None, rates_path=None, transport=None, static_di
         b = await request.json() if (await request.body()) else {}
         return guard(ws.identity_sheet, name, aid, b.get("views"), "api-key" if getattr(request.state, "scope", "session") == "agent" else "local")
 
+    @app.post("/api/projects/{name}/variants", dependencies=[api])
+    async def propose_variants(name: str, request: Request):
+        b = await request.json()
+        return guard(ws.propose_variants, name, b.get("kind"), b.get("target"), b.get("count"), "api-key" if getattr(request.state, "scope", "session") == "agent" else "local")
+
+    @app.post("/api/projects/{name}/variants/select", dependencies=[api])
+    async def select_version(name: str, request: Request):
+        b = await request.json()
+        return guard(ws.select_version, name, b.get("kind"), b.get("target"), b.get("version"))
+
     @app.get("/api/projects/{name}/consent", dependencies=[api])
     def consent_list(name: str):
         return {"consent": guard(ws.consent_list, name)}

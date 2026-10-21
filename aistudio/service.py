@@ -256,6 +256,12 @@ class Workspace(SettingsMixin):
     def remix(self, name, meta_rel, reveal_code=False):
         return self.pipeline_domain.remix(name, meta_rel, reveal_code=reveal_code)
 
+    def propose_variants(self, name, kind, target, count, actor="local"):
+        return self.batches.create_variants(name, kind, target, count, actor=actor)
+
+    def select_version(self, name, kind, target, k):
+        return self.pipeline_domain.select_version(name, kind, target, k)
+
     def identity_sheet(self, name, char_id, views=None, actor="local"):
         return self._characters.identity_sheet(name, char_id, views=views, actor=actor)
 

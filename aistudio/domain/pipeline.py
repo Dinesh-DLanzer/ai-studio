@@ -1,6 +1,7 @@
 """Pipeline domain: proposals, approvals, execution, batch generation and review logic."""
 from contextlib import contextmanager
 import json
+import re
 from datetime import datetime
 from pathlib import Path
 import shutil
@@ -13,6 +14,9 @@ from aistudio.domain.common import REVIEW_PRICE, ServiceError, _ident, _sha
 from aistudio.providers import base as pbase
 from aistudio import character_check, consent as consent_mod
 from aistudio.vision import clip_checklist, image_checklist
+
+
+MAX_VARIANTS = 4
 
 
 class PipelineDomain:
@@ -167,6 +171,15 @@ class PipelineDomain:
             raise ServiceError(f"{label} not found: {rel}")
         return f
 
+    @staticmethod
+    def _variant(options):
+        v = (options or {}).get("variant")
+        if v in (None, 0, ""):
+            return None
+        if not isinstance(v, int) or isinstance(v, bool) or not 1 <= v <= MAX_VARIANTS:
+            raise ServiceError(f"variant must be a whole number from 1 to {MAX_VARIANTS}")
+        return v
+
     def _require_consent(self, p, kind, target):
         """Generation touching an asset marked real_person is refused without a human-recorded consent entry (propose AND execute)."""
         doc = self.ws._read(p, "images.json", {"images": []})
@@ -183,13 +196,17 @@ class PipelineDomain:
         p = self.ws.pdir(name)
         options = options or {}
         _ident(target, "target")
+        variant = self._variant(options)
         if kind in ("image", "clip"):
             self._require_consent(p, kind, target)
         if kind == "image":
             sp = spec_mod.resolve(self.ws, p, "image", target)
             spec, refs, prompt = self.ws._image_spec(p, target)
-            return {"prompt": prompt, "aspect_ratio": sp.aspect_ratio, "out": spec["out"], "provider": sp.provider,
-                    "refs": [{"path": r.relative_to(p).as_posix(), "sha": _sha(r)} for r in refs]}, sp.model, sp.price
+            payload = {"prompt": prompt, "aspect_ratio": sp.aspect_ratio, "out": spec["out"], "provider": sp.provider,
+                       "refs": [{"path": r.relative_to(p).as_posix(), "sha": _sha(r)} for r in refs]}
+            if variant:      # only present when asked for, so the request digest of ordinary images is unchanged
+                payload["variant"] = variant
+            return payload, sp.model, sp.price
         if kind == "clip":
             sp = spec_mod.resolve(self.ws, p, "clip", target)
             shot = self._clip_spec(p, target)[0]
@@ -203,6 +220,8 @@ class PipelineDomain:
                 payload["camera_native"] = sp.camera["native"]
             if end:      # only present when asked for, so the request digest of ordinary clips is unchanged
                 payload.update(end_frame=end, end_frame_sha=_sha(p / end))
+            if variant:
+                payload["variant"] = variant
             return payload, sp.model, sp.price
         if kind == "image_edit":
             source = self._source_file(p, options.get("source"), "still")
@@ -302,20 +321,22 @@ class PipelineDomain:
                 raise BudgetStale(stale)
             rows = costlog.read_log(p)
             stage = {"clip": "final", "image": "image", "image_edit": "image_edit", "clip_extend": "clip_extend", "review": "vision"}[kind]
-            pending = [r for r in project_lock.read_reservations(p) if r.get("shot") == target and r.get("stage") == stage]
-            attempted = {r["attempt"] for r in rows if r["shot"] == target and r["stage"] == stage}
+            variant = payload.get("variant")
+            ledger = f"{target}.v{variant}" if variant else target      # a variant is its own ledger shot: own attempts, own cost rows, own discard match
+            pending = [r for r in project_lock.read_reservations(p) if r.get("shot") == ledger and r.get("stage") == stage]
+            attempted = {r["attempt"] for r in rows if r["shot"] == ledger and r["stage"] == stage}
             attempted.update(str(r["attempt"]) for r in pending)
             attempts = len(attempted)
             try:
                 gates.check_run(b, costlog.spent(p) + project_lock.reserved(p), price, attempts if kind in ("clip", "image_edit", "clip_extend") else 0, override=override)
                 request_digest = approvals.request_hash(kind, target, model, price, payload)
                 grant = approvals.consume(p, pid, request_digest)
-                project_lock.reserve(p, pid, price, actor=grant.actor, shot=target, stage=stage, attempt=attempts + 1,
+                project_lock.reserve(p, pid, price, actor=grant.actor, shot=ledger, stage=stage, attempt=attempts + 1,
                                      model=model, provider=payload.get("provider", ""))
             except (gates.GateError, approvals.ApprovalError) as e:
                 raise ServiceError(str(e)) from None
             attempt = attempts + 1
-            log = {"shot": target, "stage": stage, "model": model, "attempt": str(attempt), "job_id": "", "seconds": "", "provider": payload.get("provider", ""), "actor": grant.actor, "override": "yes" if override else "no", "quoted": price}
+            log = {"shot": ledger, "stage": stage, "model": model, "attempt": str(attempt), "job_id": "", "seconds": "", "provider": payload.get("provider", ""), "actor": grant.actor, "override": "yes" if override else "no", "quoted": price}
         activity.record_start(p, pid, kind, target, model, price, source="mcp")
         try:
             # Copy and verify every approved media input before handing it to an
@@ -337,7 +358,7 @@ class PipelineDomain:
             raise
         finally:
             with project_lock.lock(p):
-                logged = any(r.get("shot") == target and r.get("stage") == stage and r.get("attempt") == str(attempt)
+                logged = any(r.get("shot") == ledger and r.get("stage") == stage and r.get("attempt") == str(attempt)
                              for r in costlog.read_log(p))
                 # Never erase evidence of possibly billed work if settlement failed.
                 if logged or not approvals.get(p, pid).get("redeemed"):
@@ -407,6 +428,8 @@ class PipelineDomain:
         if kind == "image":
             refs = [inputs / r["path"] for r in payload.get("refs", [])]
             out = p / payload["out"]
+            if payload.get("variant"):
+                out = out.with_name(f"{out.stem}.v{payload['variant']}{out.suffix}")
             if out.exists():
                 raise ServiceError(f"{payload['out']} exists; discard it first")
             res = self.ws.runner().image(payload["prompt"], [str(r) for r in refs], payload["aspect_ratio"], project_dir=p, grant=grant,
@@ -440,7 +463,7 @@ class PipelineDomain:
             if res["status"] == "failed":
                 costlog.append_log(p, {**row, "cost": res.get("cost", 0), "result": "failed"})
                 return {"kind": kind, "error": res["error"], "cost": res.get("cost", 0)}
-            out = p / "clips" / f"{target}_final_a{attempt}.mp4"
+            out = p / "clips" / f"{log['shot']}_final_a{attempt}.mp4"
             with self._logged_output(p, {**row, "cost": res["cost"]}):
                 out.parent.mkdir(parents=True, exist_ok=True)
                 out.write_bytes(res["bytes"])
@@ -527,11 +550,56 @@ class PipelineDomain:
             project_mod.save_json(outdir, "review.json", review)
         return {"kind": "review", "review": review}
 
+    def select_version(self, name, kind, target, k):
+        """Pick version k of a still (stills/<id>.v<k>.<ext>) or a clip (clips/<id>.v<k>_final_a<n>.mp4). Every other version of that target goes
+        through the normal discard path (moved to _discarded with its cost, restorable, never deleted). The shot (clip) or the asset (still)
+        records selected_version, and the timeline / first-frame source now points at the chosen file. A human decision (not an agent route)."""
+        p = self.ws.pdir(name)
+        if kind not in ("image", "clip"):
+            raise ServiceError("versions are for images and clips")
+        k = self._variant({"variant": k}) or (_ for _ in ()).throw(ServiceError("choose a version number"))
+        _ident(target, "target")
+        d = "stills" if kind == "image" else "clips"
+        pat = re.escape(target) + (r"\.v(\d+)\.[A-Za-z0-9]+" if kind == "image" else r"\.v(\d+)_final_a\d+\.mp4")
+        found = {}
+        for f in sorted((p / d).glob(f"{target}.v*")) if (p / d).is_dir() else []:
+            m = re.fullmatch(pat, f.name)
+            if m and f.is_file():
+                found.setdefault(int(m.group(1)), f.relative_to(p).as_posix())
+        if k not in found:
+            raise ServiceError(f"version {k} of {target} does not exist (have: {', '.join(map(str, sorted(found))) or 'none'})")
+        chosen = found[k]
+        for n, rel in sorted(found.items()):
+            if n != k:
+                self.ws.discard(name, rel, f"version {n} not selected (kept v{k})")
+        if kind == "clip":
+            doc = self.ws._read(p, "shots.json")
+            shot = next((s for s in doc["shots"] if s["id"] == target), None) or (_ for _ in ()).throw(ServiceError(f"unknown shot {target}"))
+            shot.update(selected_version=k, final_clip=chosen)
+            project_mod.save_json(p, "shots.json", doc)
+        else:
+            doc = self.ws._read(p, "images.json", {"images": []})
+            img = next((i for i in doc["images"] if i["id"] == target), None) or (_ for _ in ()).throw(ServiceError(f"unknown image id {target}"))
+            old = img["out"]
+            img.update(selected_version=k, out=chosen)
+            shots = self.ws._read(p, "shots.json", {"shots": []})
+            for s in shots.get("shots", []):
+                if s.get("first_frame") == old:
+                    s["first_frame"] = chosen
+            project_mod.save_json(p, "images.json", doc)
+            project_mod.save_json(p, "shots.json", shots)
+        self.ws._changed(name, "assets", "shots")
+        return {"kind": kind, "target": target, "selected_version": k, "file": chosen, "discarded": sorted(n for n in found if n != k)}
+
     def approve_shot(self, name, shot_id):
         p = self.ws.pdir(name)
         doc = self.ws._read(p, "shots.json")
         shot = next((s for s in doc["shots"] if s["id"] == shot_id), None) or (_ for _ in ()).throw(ServiceError("unknown shot"))
         done = [r for r in costlog.read_log(p) if r["shot"] == shot_id and r["stage"] == "final" and r["result"] == "completed"]
+        if not done and shot.get("selected_version") and shot.get("final_clip") and (p / shot["final_clip"]).is_file():
+            shot["final_ok"] = True      # the human-selected variant (paid through its own cost-log rows) is the clip being approved
+            project_mod.save_json(p, "shots.json", doc)
+            return shot
         if not done:
             raise ServiceError("no completed clip to approve")
         shot["final_ok"] = True
