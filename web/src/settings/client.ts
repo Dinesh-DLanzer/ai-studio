@@ -1,5 +1,5 @@
 import { api } from "../api";
-import type { ChainRef, ChatGPTStatus, ModelInfo, PriceCard, Provider, ProviderType, ProvidersResponse, Role, RolesResponse, TestRow } from "./types";
+import type { CapabilityModel, CapabilityProfile, ChainRef, ChatGPTStatus, ModelInfo, PriceCard, Provider, ProviderType, ProvidersResponse, Role, RolesResponse, TestRow } from "./types";
 
 const q = (project?: string) => (project ? `?project=${encodeURIComponent(project)}` : "");
 const enc = encodeURIComponent;
@@ -25,6 +25,9 @@ export const settingsApi = {
   addModel: (id: string, model: string, capability: string) => api<{ models: ModelInfo[] }>("POST", `/api/providers/${enc(id)}/models`, { id: model, capability }),
   models: (capability?: string) => api<{ models: ModelInfo[]; errors: Record<string, string> }>("GET", `/api/models${capability ? `?capability=${capability}` : ""}`).then((r) => ({ ...r, models: notFake(r.models) })),
   putPrice: (provider: string, model: string, card: PriceCard) => api<{ price: string }>("PUT", `/api/prices/${enc(provider)}/${model.split("/").map(enc).join("/")}`, card),
+  capabilities: (capability?: string) => api<{ models: CapabilityModel[] }>("GET", `/api/capabilities${capability ? `?capability=${capability}` : ""}`).then((r) => ({ models: notFake(r.models) })),
+  putCapability: (provider: string, model: string, partial: Partial<CapabilityProfile>) => api<{ profile: CapabilityProfile; override: Partial<CapabilityProfile> }>("PUT", `/api/capabilities/${enc(provider)}/${model.split("/").map(enc).join("/")}`, partial),
+  deleteCapability: (provider: string, model: string) => api<{ ok: boolean }>("DELETE", `/api/capabilities/${enc(provider)}/${model.split("/").map(enc).join("/")}`),
   roles: (project?: string) => api<RolesResponse>("GET", `/api/roles${q(project)}`).then(hideFake),
   putRole: (role: Role, chain: ChainRef[], policy?: { retries?: number; timeout?: number }, project?: string) => api<RolesResponse>("PUT", `/api/roles/${role}${q(project)}`, { chain, policy }).then(hideFake),
   testRole: (role: Role, project?: string, provider?: string, model?: string) => {
