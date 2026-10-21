@@ -210,6 +210,26 @@ TOOLS = {
                        lambda ws, a: {"runs": _runs().list_runs(ws, a["name"])}),
     "get_crew_run": ("Read-only: one crew run with its step log, document diffs, proposals and batch.", S(name=STR, id=STR), lambda ws, a: _runs().get_run(ws, a["name"], a["id"])),
     "search_library": ("Search the workspace library of generated media. Human-session only because it can reveal data across projects.", S(q={"type": "string", "optional": True}), lambda ws, a: __import__("aistudio.library", fromlist=["search"]).search(ws.root, a.get("q", ""))),
+    "remix": (
+        "Create a proposal pre-filled from an output's .meta.json file (nothing is approved or spent). Pre-fills today's proposal for the same kind and target. A human approves the returned proposal before execution.",
+        S(name=STR, meta=STR),
+        lambda ws, a: ws.remix(a["name"], a.get("meta") or a.get("meta_rel") or a.get("meta_file"), reveal_code=False),
+    ),
+    "propose_variants": (
+        "Freeze N candidates (2-4) of one still or clip as ONE awaiting-approval batch: N separate items, each with its own price, request hash and proposal; the total is N times the unit price. Nothing is approved or spent; a human approves the batch.",
+        S(name=STR, kind={"type": "string", "enum": ["image", "clip"]}, target=STR, count={"type": "integer", "description": "Number of variants (2-4)"}),
+        lambda ws, a: ws.propose_variants(a["name"], a["kind"], a["target"], int(a["count"]), actor="mcp"),
+    ),
+    "select_version": (
+        "Choose version k of a still or clip. Unselected versions are moved to _discarded with their cost (never deleted); the shot or asset records selected_version, and the timeline/first-frame source points at the chosen version. Free.",
+        S(name=STR, kind={"type": "string", "enum": ["image", "clip"]}, target=STR, version={"type": "integer", "description": "Version number to select (e.g. 1, 2)"}),
+        lambda ws, a: ws.select_version(a["name"], a["kind"], a["target"], int(a.get("version", a.get("k")))),
+    ),
+    "drift_check": (
+        "Create a proposal for a paid identity-drift check of a shot or still (scores each character against its reference images in checks/<id>.json; verification flags scores below 0.6). Nothing is spent until a human approves the proposal.",
+        S(name=STR, target=STR),
+        lambda ws, a: ws.drift_check(a["name"], a["target"]),
+    ),
 }
 
 
@@ -217,11 +237,12 @@ FREE_READ = ("get_project", "read_doc", "get_brief", "get_model_setup", "get_tod
              "list_providers", "production_progress", "get_batch", "get_edit", "unregistered_stills", "list_recipes", "list_formats")
 FREE_WRITE = ("write_doc", "update_brief", "rename_asset", "rename_shot", "convert_story", "update_shots", "update_images", "update_edit",
               "import_stills", "add_todo", "toggle_todo", "remove_todo", "export_edit", "export_project")
-PAID = ("propose", "analyze_character", "edit_still", "extend_clip", "clip_tool", "audio_tool", "generate_all_plan", "build_identity_sheet")
+PAID = ("propose", "analyze_character", "edit_still", "extend_clip", "clip_tool", "audio_tool", "generate_all_plan", "build_identity_sheet",
+        "remix", "propose_variants", "drift_check")
 # approve/execute/override/cancel/delete/budget tools, tools that reveal codes, and tools that reach outside the run's project
 # (other projects, trash, local file paths, the job ledger of every project) are never crew tools.
 APPROVAL = ("approve_budget", "approve_proposal", "approve_batch", "approve_shot", "run_proposal", "run_batch", "reject_proposal", "set_max_attempts",
-            "estimate", "discard", "restore")
+            "estimate", "discard", "restore", "select_version")
 HUMAN_ONLY = ("delete_project", "create_project", "list_projects", "list_trash", "restore_trash", "upload_image", "list_jobs", "get_job",
               "list_crew_runs", "get_crew_run", "search_library", "plan_recipe", "list_voices")      # reading runs is for humans and MCP; a crew agent has no use for it
 
