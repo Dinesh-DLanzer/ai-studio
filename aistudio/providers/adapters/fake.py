@@ -21,6 +21,7 @@ class FakeAdapter(Adapter):
     type = "fake"
     capabilities = frozenset({"chat", "vision", "image", "video"})
     request_features = frozenset({"end_frame"})
+    task_methods = frozenset({"upscale", "reframe", "video_to_video", "motion_transfer"})
 
     def __init__(self, conn=None, transport=None):
         super().__init__(conn or {"id": "fake", "type": "fake"}, transport=lambda *a, **k: {})
@@ -66,6 +67,13 @@ class FakeAdapter(Adapter):
         if int(seconds) not in legacy.ALLOWED_SECONDS:
             raise Rejected("seconds must be one of %s" % (legacy.ALLOWED_SECONDS,))
         return {"job_id": f"fake-ext-{int(seconds)}-S", "model": model}
+
+    def video_task(self, model, task, video_path, prompt, params, reference=None, seconds=0):
+        _maybe_fail(model)
+        if task not in self.task_methods:
+            raise Rejected(f"fake cannot do {task}")
+        tag = "fail" if "FAIL_ME" in prompt else task.replace("_", "")
+        return {"job_id": f"fake-{tag}-{int(seconds)}-S", "model": model}
 
     def video_poll(self, job):
         _, tag, secs, a = job["job_id"].split("-")

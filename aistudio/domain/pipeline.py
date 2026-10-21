@@ -17,6 +17,8 @@ from aistudio.vision import clip_checklist, image_checklist
 
 
 MAX_VARIANTS = 4
+AI_TOOLS = spec_mod.AI_TOOLS
+ASPECTS = ("9:16", "16:9", "1:1", "4:5")
 
 
 class PipelineDomain:
@@ -192,6 +194,57 @@ class PipelineDomain:
             ids += [Path(shot[k]).stem for k in ("first_frame", "end_frame") if shot.get(k)]
         consent_mod.require_assets(p, doc, ids)
 
+    def _require_source_consent(self, p, kind, target, options):
+        """Editing, extending or restyling a real person's asset needs the same human-recorded consent, and consent is also bound to the file bytes:
+        a file a human marked (consent.mark_real_person) stays covered when the real_person flag is cleared. motion_transfer and character_swap always
+        need a recorded consent for the named subject."""
+        files = [options["source"], *([options["reference"]] if options.get("reference") else [])]
+        ids = {target}
+        for f in files:
+            stem = Path(str(f)).stem
+            ids |= {stem, stem.split("_edit_a")[0], stem.split("_extended")[0], stem.split(".v")[0], stem.split("_final_a")[0]}
+        consent_mod.require_assets(p, self.ws._read(p, "images.json", {"images": []}), sorted(ids))
+        consent_mod.require_shas(p, [_sha(self._source_file(p, f, "source")) for f in files])
+        if kind in ("motion_transfer", "character_swap"):
+            subject = str(options.get("subject") or "").strip()
+            if not subject:
+                raise ServiceError(f"{kind} needs the person's name as 'subject' (their recorded consent is required)")
+            consent_mod.require(p, subject)
+
+    def _tool_payload(self, p, kind, target, options):
+        """Payload, model, price of a paid AI clip tool: the source and reference are bound by path and bytes, with the prompt, parameters and provider."""
+        source = self._source_file(p, options.get("source"), "clip")
+        if options.get("reference"):
+            ref = self._source_file(p, options["reference"], "reference")
+        elif kind in ("motion_transfer", "character_swap"):
+            raise ServiceError(f"{kind} needs a reference ({'a driving video' if kind == 'motion_transfer' else 'the new character image'})")
+        else:
+            ref = None
+        prompt, params = str(options.get("prompt", "")), {}
+        if kind in ("restyle", "replace") and not prompt.strip():
+            raise ServiceError(f"{kind} needs a prompt describing the result")
+        if kind == "upscale_ai":
+            params["scale"] = options.get("scale", 2)
+            if params["scale"] not in (2, 4) or isinstance(params["scale"], bool):
+                raise ServiceError("scale must be 2 or 4")
+        elif kind == "reframe_ai":
+            params["aspect_ratio"] = options.get("aspect_ratio")
+            if params["aspect_ratio"] not in ASPECTS:
+                raise ServiceError(f"aspect_ratio must be one of {', '.join(ASPECTS)}")
+        elif kind == "replace":
+            params["target"] = options.get("target")
+            if params["target"] not in ("object", "background"):
+                raise ServiceError("target must be object or background")
+        rel = source.relative_to(p.resolve()).as_posix()
+        sp = spec_mod.resolve(self.ws, p, kind, target, {**options, "source": rel})
+        payload = {"task": sp.task, "source": rel, "source_sha": _sha(source), "prompt": prompt, "params": params, "seconds": sp.seconds,
+                   "resolution": sp.resolution, "provider": sp.provider}
+        if ref:
+            payload["refs"] = [{"path": ref.relative_to(p.resolve()).as_posix(), "sha": _sha(ref)}]
+        if kind in ("motion_transfer", "character_swap"):
+            payload["subject"] = str(options["subject"]).strip()
+        return payload, sp.model, sp.price
+
     def _payload_and_price(self, name, kind, target, options=None):
         p = self.ws.pdir(name)
         options = options or {}
@@ -199,10 +252,8 @@ class PipelineDomain:
         variant = self._variant(options)
         if kind in ("image", "clip"):
             self._require_consent(p, kind, target)
-        elif kind in ("image_edit", "clip_extend") and options.get("source"):
-            stem = Path(str(options["source"])).stem      # editing or extending a real person's asset needs the same human-recorded consent
-            ids = {stem, stem.split("_edit_a")[0], stem.split("_extended")[0], stem.split(".v")[0], stem.split("_final_a")[0], target}
-            consent_mod.require_assets(p, self.ws._read(p, "images.json", {"images": []}), sorted(ids))
+        elif kind in ("image_edit", "clip_extend", *AI_TOOLS) and options.get("source"):
+            self._require_source_consent(p, kind, target, options)
         if kind == "image":
             sp = spec_mod.resolve(self.ws, p, "image", target)
             spec, refs, prompt = self.ws._image_spec(p, target)
@@ -231,6 +282,8 @@ class PipelineDomain:
             if variant:
                 payload["variant"] = variant
             return payload, sp.model, sp.price
+        if kind in AI_TOOLS:
+            return self._tool_payload(p, kind, target, options)
         if kind == "image_edit":
             source = self._source_file(p, options.get("source"), "still")
             sp = spec_mod.resolve(self.ws, p, "image_edit", target)
@@ -280,7 +333,7 @@ class PipelineDomain:
                 payload["image_spec"] = {k: spec.get(k) for k in ("id", "kind", "out", "prompt", "refs", "aspect_ratio")}
                 payload["refs"] = [{"path": r.resolve().relative_to(p.resolve()).as_posix(), "sha": _sha(r)} for r in refs]
             return payload, e["model"], REVIEW_PRICE
-        raise ServiceError("kind must be image, clip, image_edit, clip_extend or review")
+        raise ServiceError("kind must be image, clip, image_edit, clip_extend, review or " + ", ".join(AI_TOOLS))
 
     def _review_file(self, p, target):
         rows = [r for r in costlog.read_log(p) if r["shot"] == target and r["stage"] == "final" and r["result"] == "completed"]
@@ -343,7 +396,7 @@ class PipelineDomain:
             if stale:
                 raise BudgetStale(stale)
             rows = costlog.read_log(p)
-            stage = {"clip": "final", "image": "image", "image_edit": "image_edit", "clip_extend": "clip_extend", "review": "vision"}[kind]
+            stage = {"clip": "final", "image": "image", "image_edit": "image_edit", "clip_extend": "clip_extend", "review": "vision", **{k: k for k in AI_TOOLS}}[kind]
             variant = payload.get("variant")
             ledger = f"{target}.v{variant}" if variant else target      # a variant is its own ledger shot: own attempts, own cost rows, own discard match
             pending = [r for r in project_lock.read_reservations(p) if r.get("shot") == ledger and r.get("stage") == stage]
@@ -356,7 +409,7 @@ class PipelineDomain:
                           if (r.get("shot") == base or str(r.get("shot", "")).startswith(base + ".v")) and r.get("stage") == stage)
             gate_attempts = max(attempts, len(family))      # variants of a shot count toward the shot's attempt cap (they cannot multiply it)
             try:
-                gates.check_run(b, costlog.spent(p) + project_lock.reserved(p), price, gate_attempts if kind in ("clip", "image_edit", "clip_extend") else 0, override=override)
+                gates.check_run(b, costlog.spent(p) + project_lock.reserved(p), price, gate_attempts if kind in ("clip", "image_edit", "clip_extend", *AI_TOOLS) else 0, override=override)
                 request_digest = approvals.request_hash(kind, target, model, price, payload)
                 grant = approvals.consume(p, pid, request_digest)
                 project_lock.reserve(p, pid, price, actor=grant.actor, shot=ledger, stage=stage, attempt=attempts + 1,
@@ -435,6 +488,8 @@ class PipelineDomain:
                 out.write_bytes(res["bytes"])
             self._write_meta(p, out, payload, row, grant, res["cost"], kind, target, refs=[(payload["source"], payload["source_sha"])])
             return {"kind": kind, "file": out.relative_to(p).as_posix(), "cost": res["cost"]}
+        if kind in AI_TOOLS:
+            return self._execute_tool(p, kind, target, payload, price, attempt, log, grant, inputs)
         if kind == "clip_extend":
             source = inputs / payload["source"]
             res = self.ws.runner().video_extend(source.as_posix(), payload["prompt"], seconds=payload["seconds"], aspect_ratio=payload["aspect_ratio"], resolution=payload["resolution"], project_dir=p, grant=grant)
@@ -501,6 +556,31 @@ class PipelineDomain:
             self._write_meta(p, out, payload, row, grant, res["cost"], kind, target, refs=frames)
             return {"kind": kind, "file": out.relative_to(p).as_posix(), "cost": res["cost"]}
         return self._do_review(p, target, payload, model, log, grant, inputs)
+
+    def _execute_tool(self, p, kind, target, payload, price, attempt, log, grant, inputs):
+        ref = payload.get("refs") or []
+        res = self.ws.runner().video_task(payload["task"], (inputs / payload["source"]).as_posix(), payload["prompt"], payload["params"],
+                                          reference=(inputs / ref[0]["path"]).as_posix() if ref else None, seconds=payload["seconds"],
+                                          resolution=payload["resolution"], project_dir=p, grant=grant)
+        job = res.get("job") or {}
+        row = {**log, "model": res.get("model") or log["model"], "provider": res.get("provider") or log["provider"], "cost_source": res.get("cost_source", ""),
+               "timestamp": datetime.now().isoformat(timespec="seconds"), "resolution": payload["resolution"], "seconds": str(payload["seconds"]), "job_id": job.get("job_id", "")}
+        if res.get("status") == "pending":
+            costlog.append_log(p, {**row, "cost": price, "result": "pending", "cost_source": "estimated"})
+            return {"kind": kind, "pending": True, "job_id": row["job_id"]}
+        if res.get("status") == "failed":
+            costlog.append_log(p, {**row, "cost": res.get("cost", 0), "result": "failed"})
+            return {"kind": kind, "error": res.get("error", f"{kind} failed"), "cost": res.get("cost", 0)}
+        src = p / payload["source"]
+        base = re.sub(r"\.v\d+$", "", src.stem)
+        k = 1
+        while src.with_name(f"{base}.v{k}{src.suffix}").exists():
+            k += 1
+        out = src.with_name(f"{base}.v{k}{src.suffix}")      # a NEW version beside the source; the source is never touched
+        with self._logged_output(p, {**row, "cost": res["cost"]}):
+            out.write_bytes(res["bytes"])
+        self._write_meta(p, out, payload, row, grant, res["cost"], kind, target, refs=[(payload["source"], payload["source_sha"]), *[(r["path"], r["sha"]) for r in ref]])
+        return {"kind": kind, "file": out.relative_to(p).as_posix(), "cost": res["cost"]}
 
     @staticmethod
     def _write_meta(p, out, payload, row, grant, cost, kind, target, refs=()):

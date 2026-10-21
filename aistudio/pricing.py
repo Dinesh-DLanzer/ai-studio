@@ -138,6 +138,12 @@ class Pricing:
             return None
         return round(base + int(refs) * float(card.get("per_reference_image") or 0), 6)
 
+    def task_price(self, card, seconds, resolution="720p"):
+        """Price of a paid clip tool: a utility card's per_run, else the video card's per-second rate x the source seconds. None = unknown."""
+        if card and card.get("kind") == "utility":
+            return round(float(card["per_run"]), 6)
+        return self.video_price(card, seconds, resolution)
+
     def image_price(self, card, refs=0):
         if not card or card.get("kind") != "image":
             return None

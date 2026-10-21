@@ -387,6 +387,23 @@ class StoryboardDomain:
             "edit_mode": edit_mode, "mask_mode": mask_mode,
         })
 
+    def clip_tool(self, name, tool, clip_id, prompt="", reference=None, subject=None, seconds=None, **params):
+        """PROPOSE a paid AI clip tool (upscale_ai, reframe_ai, restyle, replace, motion_transfer, character_swap) on an existing clip. Nothing is spent;
+        a human approves the exact price, then execution writes a NEW version beside the clip."""
+        from aistudio.domain import spec as spec_mod
+        if tool not in spec_mod.AI_TOOLS:
+            raise ServiceError(f"tool must be one of: {', '.join(spec_mod.AI_TOOLS)}")
+        p = self.ws.pdir(name)
+        src = next((c for c in [*(p / "clips" / f"{clip_id}{e}" for e in (".mp4", ".mov", ".webm")), p / str(clip_id)] if c.is_file()), None)
+        if not src:
+            raise ServiceError(f"clip not found: {clip_id}")
+        rel = src.resolve().relative_to(p.resolve()).as_posix()
+        options = {"source": rel, "prompt": str(prompt or ""), **{k: params[k] for k in ("scale", "aspect_ratio", "target") if params.get(k) is not None}}
+        for k, v in (("reference", reference), ("subject", subject), ("seconds", seconds)):
+            if v not in (None, ""):
+                options[k] = v
+        return self.ws.propose(name, tool, re.sub(r"\.v\d+$", "", src.stem), options=options)
+
     def extend_clip(self, name, clip_id, prompt, seconds=5):
         """Create a clip-extension proposal; execution happens only after human approval."""
         p = self.ws.pdir(name)

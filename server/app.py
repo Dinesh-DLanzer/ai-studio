@@ -539,7 +539,12 @@ def create_app(root=None, token=None, rates_path=None, transport=None, static_di
     @app.post("/api/projects/{name}/consent", dependencies=[api])
     async def consent_record(name: str, request: Request):
         b = await request.json()      # agent=False in api_docs: an API key never reaches here
-        return guard(ws.consent_record, name, b.get("subject"), b.get("statement"), b.get("kind", "real_person"))
+        return guard(ws.consent_record, name, b.get("subject"), b.get("statement"), b.get("kind", "real_person"), b.get("asset_id"))
+
+    @app.post("/api/projects/{name}/consent/mark", dependencies=[api])
+    async def consent_mark(name: str, request: Request):
+        b = await request.json()      # agent=False in api_docs: only the human session can mark (or an agent could never be stopped from unmarking)
+        return guard(ws.consent_mark, name, b.get("asset_id"))
 
     @app.post("/api/projects/{name}/character/analyze", dependencies=[api])
     async def analyze_character(name: str, request: Request):
@@ -640,6 +645,11 @@ def create_app(root=None, token=None, rates_path=None, transport=None, static_di
     async def clip_extend(name: str, shot_id: str, request: Request):
         b = await request.json()
         return guard(ws.extend_clip, name, shot_id, b.get("prompt", ""), int(b.get("seconds", 5)))
+
+    @app.post("/api/projects/{name}/clips/{shot_id}/tool", dependencies=[api])
+    async def clip_tool(name: str, shot_id: str, request: Request):
+        b = await request.json()
+        return guard(ws.clip_tool, name, b.get("tool"), shot_id, **{k: v for k, v in b.items() if k in ("prompt", "reference", "subject", "seconds", "scale", "aspect_ratio", "target")})
 
     @app.get("/api/projects/{name}/spec/{kind}/{target}", dependencies=[api])
     def spec(name: str, kind: str, target: str):

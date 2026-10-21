@@ -168,6 +168,16 @@ TOOLS = {
         S(name=STR, clip_id=STR, prompt=STR, seconds={"type": "integer", "optional": True}),
         lambda ws, a: ws.extend_clip(a["name"], a["clip_id"], a["prompt"], seconds=int(a.get("seconds", 5))),
     ),
+    "clip_tool": (
+        "Propose a PAID AI clip tool on an existing clip: upscale_ai (scale 2|4), reframe_ai (aspect_ratio), restyle (prompt), replace (target object|background + prompt), "
+        "motion_transfer (reference driving video + subject), character_swap (reference image + subject). Nothing is spent; a human must approve the exact price. The result is a new version "
+        "beside the clip. motion_transfer and character_swap need the subject's consent recorded by a human first.",
+        S(name=STR, tool={"type": "string", "enum": ["upscale_ai", "reframe_ai", "restyle", "replace", "motion_transfer", "character_swap"]}, clip_id=STR,
+          prompt={"type": "string", "optional": True}, reference={"type": "string", "optional": True}, subject={"type": "string", "optional": True},
+          seconds={"type": "integer", "optional": True}, scale={"type": "integer", "optional": True}, aspect_ratio={"type": "string", "optional": True},
+          target={"type": "string", "optional": True}),
+        lambda ws, a: ws.clip_tool(a["name"], a["tool"], a["clip_id"], **{k: v for k, v in a.items() if k not in ("name", "tool", "clip_id")}),
+    ),
     "list_crew_runs": ("Read-only: the studio crew's runs in a project (agent, task, status, steps, LLM cost). Starting, stopping and undoing a run is human-only.", S(name=STR),
                        lambda ws, a: {"runs": _runs().list_runs(ws, a["name"])}),
     "get_crew_run": ("Read-only: one crew run with its step log, document diffs, proposals and batch.", S(name=STR, id=STR), lambda ws, a: _runs().get_run(ws, a["name"], a["id"])),
@@ -179,7 +189,7 @@ FREE_READ = ("get_project", "read_doc", "get_brief", "get_model_setup", "get_tod
              "list_providers", "production_progress", "get_batch", "get_edit", "unregistered_stills")
 FREE_WRITE = ("write_doc", "update_brief", "rename_asset", "rename_shot", "convert_story", "update_shots", "update_images", "update_edit",
               "import_stills", "add_todo", "toggle_todo", "remove_todo", "export_edit", "export_project")
-PAID = ("propose", "analyze_character", "edit_still", "extend_clip", "generate_all_plan", "build_identity_sheet")
+PAID = ("propose", "analyze_character", "edit_still", "extend_clip", "clip_tool", "generate_all_plan", "build_identity_sheet")
 # approve/execute/override/cancel/delete/budget tools, tools that reveal codes, and tools that reach outside the run's project
 # (other projects, trash, local file paths, the job ledger of every project) are never crew tools.
 APPROVAL = ("approve_budget", "approve_proposal", "approve_batch", "approve_shot", "run_proposal", "run_batch", "reject_proposal", "set_max_attempts",

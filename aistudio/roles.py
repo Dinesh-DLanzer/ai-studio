@@ -313,6 +313,55 @@ class RoleRunner:
         cost, src = self._cost("video", {"cost": out.get("reported")}, r["card"], extra=req)
         return {**base, "status": "done", "bytes": out["bytes"], "cost": cost, "cost_source": src}
 
+    def video_task(self, task, video_path, prompt, params, reference=None, seconds=5, resolution="720p", project_dir=None, *, grant=None, timeout=None, first=None):
+        """A paid clip tool (upscale, reframe, video_to_video, motion_transfer) on one source clip. Same grant, price-bound and never-resubmit rules as video_extend.
+        Only a model whose profile lists the task AND whose adapter implements it is tried; nothing falls back to a different task."""
+        if self.catalog is None:
+            raise ChainError("no model catalog is loaded, so no model can be shown to support this task", code="unconfigured")
+        grant = self._grant("video", project_dir, grant, first)
+        approved_price = grant.price if grant else None
+        price_of = lambda e: self.pricing.task_price(e["card"], seconds, resolution)
+        pol = self.policy("video", project_dir) if not self._fake("video", project_dir) else cfg.default_policy("video")
+        limit = timeout if timeout is not None else pol.get("timeout", 1500)
+        state = {}
+
+        def call(adapter, model):
+            job = adapter.video_task(model, task, video_path, prompt, params, reference=reference, seconds=seconds)
+            state["job"] = {**job, "provider": adapter.conn["id"]}
+            t0 = self.clock()
+            while True:
+                try:
+                    st = adapter.video_poll(job)
+                except Retryable:
+                    st = {"status": "pending", "error": None, "cost": None}
+                if st["status"] == "done":
+                    try:
+                        data = adapter.video_download(job)
+                    except Retryable:
+                        return {"status": "pending", "job": state["job"]}      # the job exists: never submit a second paid one
+                    except ProviderError as ex:
+                        raise _Stop(f"video download failed: {scrub(ex, adapter.secret)[:200]}")
+                    return {"status": "done", "bytes": data, "reported": st.get("cost"), "job": state["job"]}
+                if st["status"] == "failed":
+                    raise _Stop(st.get("error") or f"{task} failed")
+                if self.clock() - t0 > limit:
+                    return {"status": "pending", "job": state["job"]}
+                self.sleep(self.poll_seconds)
+
+        try:
+            r = self.run("video", call, project_dir, None, approved_price, price_of, first=first, required={"task": task})
+        except _Stop as ex:
+            job = state.get("job") or {}
+            return {"status": "failed", "error": ex.args[0], "job": job, "cost": 0.0, "cost_source": "unknown", "provider": job.get("provider", ""),
+                    "model": job.get("model", ""), "attempts": ex.attempts}
+        out = r["result"]
+        base = {"provider": r["provider"], "model": r["model"], "attempts": r["attempts"], "job": out["job"]}
+        if out["status"] == "pending":
+            return {**base, "status": "pending", "cost": 0.0, "cost_source": "unknown"}
+        reported = out.get("reported")
+        cost, src = self.pricing.actual_cost(reported, self.pricing.task_price(r["card"], seconds, resolution))
+        return {**base, "status": "done", "bytes": out["bytes"], "cost": cost, "cost_source": src}
+
     def video(self, req, project_dir=None, *, grant=None, timeout=None, first=None, required=None, ref_count=0):
         """-> {"status":"done","bytes",...} | {"status":"pending","job"} | {"status":"failed","error",...}. Raises ChainError/NeedsNewApproval."""
         grant = self._grant("video", project_dir, grant, first)
