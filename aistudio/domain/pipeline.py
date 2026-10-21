@@ -10,7 +10,7 @@ from aistudio.domain.costs import BudgetStale
 from aistudio.domain import spec as spec_mod
 from aistudio.domain.common import REVIEW_PRICE, ServiceError, _ident, _sha
 from aistudio.providers import base as pbase
-from aistudio import character_check
+from aistudio import character_check, consent as consent_mod
 from aistudio.vision import clip_checklist, image_checklist
 
 
@@ -166,10 +166,24 @@ class PipelineDomain:
             raise ServiceError(f"{label} not found: {rel}")
         return f
 
+    def _require_consent(self, p, kind, target):
+        """Generation touching an asset marked real_person is refused without a human-recorded consent entry (propose AND execute)."""
+        doc = self.ws._read(p, "images.json", {"images": []})
+        if kind == "image":
+            spec = next((i for i in doc["images"] if i.get("id") == target), {})
+            ids = [target, *spec.get("refs", [])]
+        else:
+            shot = next((s for s in self.ws._read(p, "shots.json", {"shots": []})["shots"] if s["id"] == target), {})
+            ids = [r.get("id") if isinstance(r, dict) else str(r) for r in shot.get("refs") or []]
+            ids += [Path(shot[k]).stem for k in ("first_frame", "end_frame") if shot.get(k)]
+        consent_mod.require_assets(p, doc, ids)
+
     def _payload_and_price(self, name, kind, target, options=None):
         p = self.ws.pdir(name)
         options = options or {}
         _ident(target, "target")
+        if kind in ("image", "clip"):
+            self._require_consent(p, kind, target)
         if kind == "image":
             sp = spec_mod.resolve(self.ws, p, "image", target)
             spec, refs, prompt = self.ws._image_spec(p, target)

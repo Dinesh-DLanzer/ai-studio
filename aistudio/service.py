@@ -299,8 +299,17 @@ class Workspace(SettingsMixin):
     def import_stills(self, name, items):
         return self._storyboard.import_stills(name, items)
 
-    def upload_image(self, name, aid=None, path=None, data=None, kind=None, replace=False, prompt=""):
-        return self._storyboard.upload_image(name, aid=aid, path=path, data=data, kind=kind, replace=replace, prompt=prompt)
+    def upload_image(self, name, aid=None, path=None, data=None, kind=None, replace=False, prompt="", real_person=False, subject=""):
+        return self._storyboard.upload_image(name, aid=aid, path=path, data=data, kind=kind, replace=replace, prompt=prompt, real_person=real_person, subject=subject)
+
+    def consent_list(self, name):
+        from aistudio import consent
+        return consent.read(self.pdir(name))
+
+    def consent_record(self, name, subject, statement, kind="real_person"):
+        """HUMAN session only (the one route is agent=False). Not an MCP/crew tool."""
+        from aistudio import consent
+        return consent.record(self.pdir(name), subject, statement, kind)
 
     def edit_get(self, name):
         return self._storyboard.edit_get(name)

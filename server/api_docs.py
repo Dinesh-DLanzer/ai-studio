@@ -43,6 +43,8 @@ R = [
     ("POST", "/api/projects/{name}/chat", False, "Chat (producer)", "Send one message to the producer (uses your chat model; free models unless you allowed paid). Optional attachments are ids of uploaded images.", '{"text": "...", "attachments": ["logo"], "prefs": {}}', "chat state + reply"),
     # ---- assets and shots
     ("POST", "/api/projects/{name}/upload", False, "Assets and shots", "Upload an image to stills/<id>.<ext> (PNG, JPEG, WebP, GIF, BMP, TIFF, HEIC; converted if needed). ?rel=stills/<id>.png&replace=1.", "raw image bytes (up to 25 MB)", '{"ok": true}'),
+    ("GET", "/api/projects/{name}/consent", True, "Assets and shots", "Read the project's consent records (real people, cloned voices).", "-", '{"consent": [{subject, statement, date, kind}]}'),
+    ("POST", "/api/projects/{name}/consent", False, "Assets and shots", "Record consent for a real person or a voice (human session only; API keys, MCP and the crew cannot). Generation with an asset marked real_person is refused without it.", '{"subject": "Asha Rao", "statement": "I agree ...", "kind": "real_person|voice"}', "the consent entry"),
     ("POST", "/api/projects/{name}/character/analyze", True, "Assets and shots", "Create a proposal for paid character-image analysis; nothing is spent until a human approves the proposal.", '{"rel": "stills/gandhi.png"}', 'proposal object'),
     ("GET", "/api/projects/{name}/stills/unregistered", False, "Assets and shots", "Images in stills/ that are not in the asset list yet, with a category guess.", "-", '{"files": [...]}'),
     ("POST", "/api/projects/{name}/stills/import", False, "Assets and shots", "Register existing images as assets (renames files to <id>.<ext>).", '{"items": [{"file", "id", "kind"}]}', "overview object"),

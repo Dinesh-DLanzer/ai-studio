@@ -240,6 +240,9 @@ def _sanitise(dest):
     if pf.exists():
         pf.unlink()
         notes.append("Approvals and pending paid actions from the zip were dropped (proposals.json). Approve spending again here.")
+    if (dest / "consent.json").exists():
+        (dest / "consent.json").unlink()
+        notes.append("Consent records from the zip were dropped (consent.json). A human must record consent again here.")
     if (dest / "batches").is_dir():
         shutil.rmtree(dest / "batches")
         notes.append("Batch plans from the zip were dropped. Create and approve a new batch here.")
