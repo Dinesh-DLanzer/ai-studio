@@ -66,7 +66,7 @@ def claim(root, jid):
 
 
 def update(root, jid, **fields):
-    assert set(fields) <= {"progress", "provider", "model", "provider_job", "error", "state", "result", "cancel_requested"}, fields
+    assert set(fields) <= {"progress", "provider", "model", "provider_job", "proposal_id", "error", "state", "result", "cancel_requested"}, fields
     if "result" in fields:
         fields["result"] = json.dumps(fields["result"], default=str)
     cols = ", ".join(f"{k} = ?" for k in fields)

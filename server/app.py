@@ -18,7 +18,7 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from starlette.background import BackgroundTask
 from fastapi.staticfiles import StaticFiles
 
-from aistudio import apikeys, editor as editormod, importzip as importmod, notifications
+from aistudio import activity as activitymod, apikeys, editor as editormod, importzip as importmod, jobs as jobsmod, notifications
 from aistudio.service import REPO, ServiceError, Workspace
 from server import api_docs
 
@@ -54,10 +54,69 @@ def create_app(root=None, token=None, rates_path=None, transport=None, static_di
     @contextlib.asynccontextmanager
     async def lifespan(app_instance: FastAPI):
         yield
+        if runner:
+            runner.shutdown()
         _stop_chatgpt_listener(app_instance.state)
 
     app = FastAPI(title="AI Studio", docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
     app.state.ws, app.state.token, jobs, lock = ws, token, {}, threading.Lock()
+    legacy_jobs = os.environ.get("AISTUDIO_LEGACY_JOBS") == "1"   # one-release escape hatch: the old in-memory dict + daemon threads
+
+    def run_batch_job(job, progress):
+        kids = {}
+
+        def record(item, phase):
+            key = (item["kind"], item["target"])
+            if phase == "start":
+                kids[key] = jobsmod.enqueue(ws.root, job["project"], "execute", target=item["target"], batch_id=job["id"], actor=job["actor"],
+                                            model=item["model"], state="running")["id"]
+            else:
+                ok = item["status"] == "done"
+                jobsmod.update(ws.root, kids[key], proposal_id=item.get("proposal", ""))
+                jobsmod.finish(ws.root, kids[key], "completed" if ok else "failed", result={"cost": item.get("cost")},
+                               error="" if ok else str(item.get("error") or "; ".join(item.get("changes", [])) or item["status"]))
+        return ws.batches.run(job["project"], job["target"], record)
+
+    handlers = {
+        # the job only RUNS what a human approved: ws.execute re-checks the approval, budget, gates and consumes the grant itself
+        "execute": lambda job, progress: ws.execute(job["project"], job["proposal_id"], bool(job["payload"].get("override"))),
+        "export": lambda job, progress: ws.edit_export(job["project"], progress),
+        "batch": run_batch_job,
+    }
+
+    def provider_concurrency(provider):
+        try:
+            return int(ws.runner().policy("video").get("concurrency") or jobsmod.DEFAULT_CONCURRENCY)
+        except Exception:
+            return jobsmod.DEFAULT_CONCURRENCY
+    runner = None if legacy_jobs else jobsmod.JobRunner(ws.root, handlers, provider_concurrency, poll=jobsmod.make_poller(ws))
+    if runner:
+        runner.reconcile()
+
+    def start_job(request, project, kind, target="", proposal_id="", payload=None):
+        """Run a long job and return the {"job": id} the page polls.  Ledger by default; the old thread path behind AISTUDIO_LEGACY_JOBS=1."""
+        actor = "api-key" if getattr(request.state, "scope", "session") == "agent" else "local"
+        if runner:
+            return {"job": runner.submit(project, kind, target=target, proposal_id=proposal_id, actor=actor, payload=payload)["id"]}
+        jid = uuid.uuid4().hex[:10]
+        job = {"id": jid, "project": project, "kind": kind, "target": target, "proposal_id": proposal_id, "payload": payload or {}, "actor": actor}
+        with lock:
+            jobs[jid] = {"status": "running", **({"progress": 0} if kind == "export" else {})}
+
+        def prog(pct):
+            with lock:
+                jobs[jid] = {"status": "running", "progress": round(pct, 1)}
+
+        def work():
+            try:
+                res = handlers[kind](job, prog)
+                with lock:
+                    jobs[jid] = {"status": "done", "result": res, **({"progress": 100} if kind == "export" else {})}
+            except Exception as e:   # provider/network failure: report, never crash the server
+                with lock:
+                    jobs[jid] = {"status": "error", "error": jobsmod.error_text(e), **({"budget_diff": e.diff} if hasattr(e, "diff") else {})}
+        threading.Thread(target=work, daemon=True).start()
+        return {"job": jid}
 
     @app.middleware("http")
     async def local_only(request: Request, call_next):
@@ -161,22 +220,9 @@ def create_app(root=None, token=None, rates_path=None, transport=None, static_di
         return guard(ws.batches.approve, name, bid, str((await request.json()).get("batch_hash", "")))
 
     @app.post("/api/projects/{name}/batches/{bid}/run", dependencies=[api])
-    def run_batch(name: str, bid: str):
+    def run_batch(name: str, bid: str, request: Request):
         guard(ws.batches.get, name, bid)
-        jid = uuid.uuid4().hex[:10]
-        with lock:
-            jobs[jid] = {"status": "running"}
-
-        def work():
-            try:
-                res = ws.batches.run(name, bid)
-                with lock:
-                    jobs[jid] = {"status": "done", "result": res}
-            except Exception as e:   # the batch file already records the failure
-                with lock:
-                    jobs[jid] = {"status": "error", "error": f"{type(e).__name__}: {e}"}
-        threading.Thread(target=work, daemon=True).start()
-        return {"job": jid}
+        return start_job(request, name, "batch", target=bid)
 
     @app.get("/api/projects/{name}", dependencies=[api])
     def overview(name: str):
@@ -205,7 +251,7 @@ def create_app(root=None, token=None, rates_path=None, transport=None, static_di
     @app.get("/api/projects/{name}/events", dependencies=[api])
     async def project_events(name: str, request: Request):
         async def event_generator():
-            last_activity = ""
+            last_activity = last_jobs = ""
             last_files_mtime = 0
             while True:
                 if await request.is_disconnected():
@@ -216,6 +262,11 @@ def create_app(root=None, token=None, rates_path=None, transport=None, static_di
                     if act_json != last_activity:
                         last_activity = act_json
                         yield f"data: {json.dumps({'type': 'activity', 'activity': act})}\n\n"
+                    job_events = activitymod.job_events(ws.root, name)
+                    jobs_json = json.dumps(job_events, sort_keys=True)
+                    if jobs_json != last_jobs:
+                        last_jobs = jobs_json
+                        yield f"data: {json.dumps({'type': 'jobs', 'jobs': job_events})}\n\n"
 
                     p = ws.pdir(name)
                     stills_dir = p / "stills"
@@ -308,29 +359,43 @@ def create_app(root=None, token=None, rates_path=None, transport=None, static_di
         body = await request.json() if (await request.body()) else {}
         if body.get("override") and getattr(request.state, "scope", "agent") != "session":
             raise HTTPException(403, "override is human-session-only; agents cannot bypass stop-loss or attempt gates")
-        override = bool(body.get("override"))
-        jid = uuid.uuid4().hex[:10]
-        with lock:
-            jobs[jid] = {"status": "running"}
+        return start_job(request, name, "execute", target=pid, proposal_id=pid, payload={"override": bool(body.get("override"))})
 
-        def work():
-            try:
-                res = ws.execute(name, pid, override)
-                with lock:
-                    jobs[jid] = {"status": "done", "result": res}
-            except ServiceError as e:
-                with lock:
-                    jobs[jid] = {"status": "error", "error": str(e), **({"budget_diff": e.diff} if hasattr(e, "diff") else {})}
-            except Exception as e:   # provider/network failure: report, never crash the server
-                with lock:
-                    jobs[jid] = {"status": "error", "error": f"{type(e).__name__}: {e}"}
-        threading.Thread(target=work, daemon=True).start()
-        return {"job": jid}
+    def legacy_shape(j):
+        """The ledger row in the {status: running|done|error} shape the page has always polled."""
+        s = j["state"]
+        out = {"status": "running" if s in ("queued", "running") else "done" if s in ("completed", "provider_pending") else "error", "state": s}
+        if out["status"] == "done":
+            out["result"] = j["result"]
+        elif out["status"] == "error":
+            out["error"] = j["error"] or s
+            if isinstance(j["result"], dict) and "budget_diff" in j["result"]:
+                out["budget_diff"] = j["result"]["budget_diff"]
+        if j["kind"] == "export" or s == "completed":
+            out["progress"] = j["progress"]
+        return out
+
+    @app.get("/api/jobs", dependencies=[api])
+    def jobs_list(project: str = "", state: str = ""):
+        return {"jobs": jobsmod.list_jobs(ws.root, project or None, state or None)}
 
     @app.get("/api/jobs/{jid}", dependencies=[api])
     def job(jid: str):
         with lock:
-            return jobs.get(jid) or JSONResponse({"error": "unknown job"}, status_code=404)
+            if jid in jobs:
+                return jobs[jid]
+        row = jobsmod.get(ws.root, jid)
+        return legacy_shape(row) if row else JSONResponse({"error": "unknown job"}, status_code=404)
+
+    @app.post("/api/jobs/{jid}/cancel", dependencies=[api])
+    def job_cancel(jid: str, request: Request):
+        # human only (api_docs marks it agent=False): an agent must not be able to stop work a human started, or hide that it ran
+        if getattr(request.state, "scope", "") != "session":
+            raise HTTPException(403, "cancelling a job needs the human session")
+        row = jobsmod.cancel(ws.root, jid)
+        if not row:
+            raise HTTPException(404, "unknown job")
+        return row
 
     @app.post("/api/projects/{name}/shots/{shot}/approve", dependencies=[api])
     def approve_shot(name: str, shot: str):
@@ -666,28 +731,9 @@ def create_app(root=None, token=None, rates_path=None, transport=None, static_di
         return {"edit": guard(ws.edit_put, name, await request.json())}
 
     @app.post("/api/projects/{name}/edit/export", dependencies=[api])
-    def edit_export(name: str):
+    def edit_export(name: str, request: Request):
         guard(ws.pdir, name)
-        jid = uuid.uuid4().hex[:10]
-        with lock:
-            jobs[jid] = {"status": "running", "progress": 0}
-
-        def work():
-            def prog(pct):
-                with lock:
-                    jobs[jid] = {"status": "running", "progress": round(pct, 1)}
-            try:
-                res = ws.edit_export(name, prog)
-                with lock:
-                    jobs[jid] = {"status": "done", "result": res, "progress": 100}
-            except ServiceError as e:
-                with lock:
-                    jobs[jid] = {"status": "error", "error": str(e)}
-            except Exception as e:
-                with lock:
-                    jobs[jid] = {"status": "error", "error": f"{type(e).__name__}: {e}"}
-        threading.Thread(target=work, daemon=True).start()
-        return {"job": jid}
+        return start_job(request, name, "export")
 
     @app.get("/api/projects/{name}/exports", dependencies=[api])
     def exports_list(name: str):
