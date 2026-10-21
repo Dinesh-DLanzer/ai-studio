@@ -190,10 +190,10 @@
    "provider_type": "kling",
    "pattern": "kling-v2-5-turbo",
    "verified_at": "2026-10-21",
-   "note": "Verified 2026-10-21 at https://kling.ai/document-api/api/video/2-5-turbo/image-to-video/legacy: kling-v2-5-turbo image-to-video supports image_tail alongside image. This adapter only enables that model-specific feature; reference images, native camera controls, and video tasks remain disabled.",
+   "note": "Verified 2026-10-21 at https://kling.ai/document-api/api/video/2-5-turbo/image-to-video/legacy: kling-v2-5-turbo image-to-video supports image_tail alongside image. This adapter only enables that model-specific feature; reference images, native camera controls, and video tasks remain disabled. Only image_to_video is claimed: text_to_video and durations were not verified and are left empty on purpose.",
    "profile": {
-    "tasks": ["text_to_video", "image_to_video"],
-    "durations": [5, 10],
+    "tasks": ["image_to_video"],
+    "durations": [],
     "resolutions": [],
     "aspect_ratios": [],
     "audio": "none",
