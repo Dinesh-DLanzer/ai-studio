@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
 import { ArrowRight, Check, CheckCheck, Circle, FolderOpen, Image as ImageIcon, Sliders, X } from "lucide-react";
 import { fileUrl } from "./api";
 import RolesSection from "./settings/Roles";
@@ -10,8 +10,10 @@ import { LogoMark } from "./components/kit";
 import { Markdown } from "./Markdown";
 import { AI_NAME } from "./brand";
 import { useChatStream } from "./hooks/useChatStream";
+import BatchPlanModal from "./components/BatchPlanModal";
 import { useBatchPipeline } from "./hooks/useBatchPipeline";
 import { api } from "./api";
+import { crewApi } from "./hooks/useCrew";
 
 const clock = (ts: string) => { const d = new Date(ts); return ts && !isNaN(+d) ? d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : ""; };
 
@@ -28,6 +30,7 @@ export default function Chat({ project, reloadAll, onApplied, openBudget, start,
     st,
     text,
     setText,
+    routed,
     busy,
     pending,
     files,
@@ -53,6 +56,11 @@ export default function Chat({ project, reloadAll, onApplied, openBudget, start,
     reloadAll,
     load,
   });
+  // typing "@" at the start offers the crew agent ids (human session only, so a failed load just hides the hint)
+  const [crewIds, setCrewIds] = useState<{ id: string; name: string }[]>([]);
+  useEffect(() => { crewApi.agents().then((r) => setCrewIds(r.agents)).catch(() => {}); }, []);
+  const mention = /^@([a-z0-9-]*)$/.exec(text.trimStart());
+  const hints = mention ? crewIds.filter((a) => a.id.startsWith(mention[1])) : [];
   const act = async (n: NextStep) => {
     if (working) return;
     if (n.kind === "apply-story") void apply();
@@ -185,6 +193,16 @@ export default function Chat({ project, reloadAll, onApplied, openBudget, start,
             </section>
           )}
 
+          {routed && (
+            <div className="mb-2 rounded-xl border border-sky/40 bg-sky/10 p-3 text-sm" role="status" data-testid="routed-reply">
+              {routed.reply} <Link className="font-bold underline underline-offset-2" to={`/p/${project}/crew?run=${routed.run}`}>View the @{routed.agent} run</Link>
+            </div>
+          )}
+          {hints.length > 0 && (
+            <ul className="mb-2 flex flex-wrap gap-2" aria-label="Crew agents you can mention" data-testid="agent-hints">
+              {hints.map((a) => <li key={a.id}><button type="button" className="btn btn-outline btn-sm" onClick={() => setText(`@${a.id} `)}>@{a.id} <span className="text-slate-400">{a.name}</span></button></li>)}
+            </ul>
+          )}
           <div className="chat-composer">
             <Field rows={2} placeholder={"Type your message or idea here... (Press Enter to send, Shift+Enter for new line)"} aria-label="Message" value={text}
               onChange={(e) => setText(e.target.value)} disabled={busy}
@@ -258,29 +276,7 @@ export default function Chat({ project, reloadAll, onApplied, openBudget, start,
         </div>
       </Modal>
 
-      <Modal open={!!plan} onClose={() => setPlan(null)} title="Generate everything that is left?">
-        {plan && (
-          <div className="space-y-3 text-sm" data-testid="plan">
-            <div className="flex flex-wrap items-center gap-2">
-              <Badge tone={st.mode === "real" ? "red" : "green"}>{st.mode === "real" ? "REAL PROJECT: spends money" : "TEST PROJECT: no real money"}</Badge>
-              <span className="text-slate-400">{plan.items.length} items, one after the other</span>
-            </div>
-            <div className="panel-quiet p-3">
-              <div className="text-2xl font-extrabold tracking-tight" data-testid="plan-total">{usd(plan.total)}</div>
-              <div className="mt-1 text-xs text-slate-400">The exact price of each item is below. Approving starts them in order; the run stops at the first problem, and the usual budget and stop-loss limits still apply to every item.</div>
-              {plan.budget.estimate != null && <div className="mt-1 text-xs text-slate-400">Budget {usd(plan.budget.estimate)} · spent so far {usd(plan.budget.spent)}</div>}
-              {plan.budget.stop_loss != null && plan.budget.spent + plan.total > plan.budget.stop_loss && <p role="alert" className="mt-2 text-xs text-amber-300">This is more than the stop-loss ({usd(plan.budget.stop_loss)}). The run will stop when the limit is reached.</p>}
-            </div>
-            <ul className="max-h-60 divide-y divide-slate-800 overflow-auto rounded-xl border border-slate-800">
-              {plan.items.map((it) => <li key={`${it.kind}:${it.target}`} className="flex items-center gap-3 px-3 py-2"><span className="min-w-0 flex-1 truncate">{it.label}</span><span className="text-xs text-slate-400">{it.model}</span><span className="font-mono text-xs">{usd(it.price)}</span></li>)}
-            </ul>
-            <div className="flex justify-end gap-2">
-              <Button variant="outline" onClick={() => setPlan(null)}>Cancel</Button>
-              <Button variant="pink" onClick={runAll} data-testid="approve-all">Approve and run all {usd(plan.total)}</Button>
-            </div>
-          </div>
-        )}
-      </Modal>
+      <BatchPlanModal plan={plan} mode={st.mode} onClose={() => setPlan(null)} onApprove={runAll} />
 
       <Modal open={models} onClose={() => setModels(false)} title="Set up models" wide>
         <p className="mb-3 text-sm text-slate-400">Pick the models for chat, vision, image and video. Use the arrows to reorder them: the first is tried first, the next is the fallback.</p>
