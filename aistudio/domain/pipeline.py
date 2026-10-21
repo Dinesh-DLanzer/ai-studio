@@ -610,8 +610,8 @@ class PipelineDomain:
                 costlog.append_log(p, {**row, "cost": price, "result": "pending", "cost_source": "estimated"})
                 return {"kind": kind, "pending": True, "job_id": row["job_id"]}
             if res.get("status") == "failed":
-                costlog.append_log(p, {**row, "cost": res.get("cost", 0), "result": "failed"})
-                return {"kind": kind, "error": res.get("error", "extension failed"), "cost": res.get("cost", 0)}
+                costlog.append_log(p, {**row, "cost": (res["cost"] if res.get("cost") is not None else price), "result": "failed"})
+                return {"kind": kind, "error": res.get("error", "extension failed"), "cost": (res["cost"] if res.get("cost") is not None else price)}
             out = p / "clips" / f"{target}_clip_extend_a{attempt}.mp4"
             with self._logged_output(p, {**row, "cost": res["cost"]}):
                 out.parent.mkdir(parents=True, exist_ok=True)
@@ -656,8 +656,8 @@ class PipelineDomain:
                 costlog.append_log(p, {**row, "cost": price, "result": "pending", "cost_source": "estimated"})
                 return {"kind": kind, "pending": True, "job_id": row["job_id"]}
             if res["status"] == "failed":
-                costlog.append_log(p, {**row, "cost": res.get("cost", 0), "result": "failed"})
-                return {"kind": kind, "error": res["error"], "cost": res.get("cost", 0)}
+                costlog.append_log(p, {**row, "cost": (res["cost"] if res.get("cost") is not None else price), "result": "failed"})
+                return {"kind": kind, "error": res["error"], "cost": (res["cost"] if res.get("cost") is not None else price)}
             out = p / "clips" / f"{log['shot']}_final_a{attempt}.mp4"
             with self._logged_output(p, {**row, "cost": res["cost"]}):
                 out.parent.mkdir(parents=True, exist_ok=True)
@@ -679,8 +679,8 @@ class PipelineDomain:
             costlog.append_log(p, {**row, "cost": price, "result": "pending", "cost_source": "estimated"})
             return {"kind": kind, "pending": True, "job_id": row["job_id"]}
         if res.get("status") == "failed":
-            costlog.append_log(p, {**row, "cost": res.get("cost", 0), "result": "failed"})
-            return {"kind": kind, "error": res.get("error", f"{kind} failed"), "cost": res.get("cost", 0)}
+            costlog.append_log(p, {**row, "cost": (res["cost"] if res.get("cost") is not None else price), "result": "failed"})
+            return {"kind": kind, "error": res.get("error", f"{kind} failed"), "cost": (res["cost"] if res.get("cost") is not None else price)}
         src = p / payload["source"]
         base = re.sub(r"\.v\d+$", "", src.stem)
         k = 1
@@ -703,7 +703,9 @@ class PipelineDomain:
                "cost_source": res.get("cost_source", ""), "timestamp": datetime.now().isoformat(timespec="seconds"),
                "seconds": str(payload.get("seconds", "")), "cost": res.get("cost", 0)}
         if res.get("status") == "pending":
-            costlog.append_log(p, {**row, "result": "pending", "cost_source": "estimated"})
+            # a pending paid job may be billing already: keep the full quote as its cost so spend and the stop-loss do not drop to 0 when the
+            # reservation is released. job_id stays empty on purpose: costs.sync only knows how to finish VIDEO clips and must not touch audio jobs.
+            costlog.append_log(p, {**row, "result": "pending", "cost_source": "estimated", "cost": price, "job_id": ""})
             return {"kind": kind, "pending": True, "job_id": (res.get("job") or {}).get("job_id", "")}
         if kind == "transcribe":
             out_dir = p / "checks" / "transcripts"

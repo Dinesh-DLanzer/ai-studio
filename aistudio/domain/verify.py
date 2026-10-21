@@ -1,5 +1,6 @@
 """Verification, AI settings, model catalog, and background linting domain."""
 from datetime import datetime
+import uuid
 import json
 import os
 from pathlib import Path
@@ -96,17 +97,26 @@ class VerifyDomain:
                        for e in entries if not free(e)), default=0.0)
         unpriced_paid = any(not free(e) and not (e.get("card") or {}).get("per_call") and not (e.get("card") or {}).get("output_per_1m") for e in entries)
         allow = lambda e: (True, "") if free(e) or cfg["allow_paid"] else (False, "paid or unpriced model; turn on 'Allow paid models' (or set it as free) in Settings")
+        rid = f"ai-{uuid.uuid4().hex[:12]}"
         try:
-            with project_lock.lock(p):
-                if paid and (self.ai_spent(name) + planned > cfg["ai_cap_usd"] or (cfg["allow_paid"] and unpriced_paid)):
+            with project_lock.lock(p):      # check the cap and RESERVE the planned cost atomically, then leave the lock: never hold it across a provider call
+                held = sum(float(r.get("price", 0) or 0) for r in project_lock.read_reservations(p) if r.get("shot") == "_ai")
+                if paid and (self.ai_spent(name) + held + planned > cfg["ai_cap_usd"] or (cfg["allow_paid"] and unpriced_paid)):
                     raise ServiceError(f"The AI spending cap for this project (${cfg['ai_cap_usd']:.2f}) would be exceeded by this call. Raise it in AI settings or switch to a free model.")
+                if paid:
+                    project_lock.reserve(p, rid, planned, actor="local", shot="_ai", stage=role, model="", provider="")
+            try:
                 res = runner.chat(role, messages, {"max_tokens": 8192, "temperature": 0.4}, project_dir=p, allow=allow)
-                if paid or res.get("cost"):
-                    attempt = 1 + len([r for r in costlog.read_log(p) if r["stage"] == role])
-                    costlog.append_log(p, {"timestamp": datetime.now().isoformat(timespec="seconds"), "shot": "_ai", "stage": role,
-                        "model": res["model"], "resolution": "", "seconds": "", "attempt": str(attempt), "job_id": "",
-                        "cost": res.get("cost", 0), "result": "completed", "provider": res.get("provider", ""),
-                        "cost_source": res.get("cost_source", ""), "actor": "local"})
+            finally:
+                if paid:
+                    with project_lock.lock(p):
+                        project_lock.release(p, rid)
+            if paid or res.get("cost"):
+                attempt = 1 + len([r for r in costlog.read_log(p) if r["stage"] == role])
+                costlog.append_log(p, {"timestamp": datetime.now().isoformat(timespec="seconds"), "shot": "_ai", "stage": role,
+                    "model": res["model"], "resolution": "", "seconds": "", "attempt": str(attempt), "job_id": "",
+                    "cost": res.get("cost", 0), "result": "completed", "provider": res.get("provider", ""),
+                    "cost_source": res.get("cost_source", ""), "actor": "local"})
         except (pbase.ProviderError, roles_mod.ChainError, ValueError) as e:
             raise ServiceError(f"The {role} model is unavailable: {e}") from None
         return res

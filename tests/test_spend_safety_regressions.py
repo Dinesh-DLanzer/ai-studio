@@ -158,3 +158,24 @@ class TestSpendSafetyRegressions(unittest.TestCase):
                 thread.join(5)
         self.assertEqual(errors, [])
         self.assertEqual(len(costlog.read_log(self.p)), 1)
+
+
+class LockOrderAndPendingAudioTests(unittest.TestCase):
+    def test_ai_call_never_holds_the_project_lock_across_the_provider_call(self):
+        import inspect
+        from aistudio.domain import verify
+        src = inspect.getsource(verify.VerifyDomain._ai_call)
+        i = src.index("runner.chat(")
+        self.assertEqual(src[:i].count("with project_lock.lock(p):"), 1)          # the check + reserve block ...
+        before_call = src[:i]
+        self.assertIn("project_lock.reserve(", before_call)
+        # ... has ended (dedented) before the provider call: the call line is indented only inside the inner try
+        call_line = [l for l in src.splitlines() if "runner.chat(" in l][0]
+        lock_line = [l for l in src.splitlines() if "with project_lock.lock(p):" in l][0]
+        self.assertLessEqual(len(lock_line) - len(lock_line.lstrip()), len(call_line) - len(call_line.lstrip()) - 4)
+
+    def test_pending_audio_job_keeps_the_quote_as_its_logged_cost(self):
+        import inspect
+        from aistudio.domain import pipeline
+        src = inspect.getsource(pipeline.PipelineDomain._execute_audio)
+        self.assertIn('"result": "pending", "cost_source": "estimated", "cost": price', src)
