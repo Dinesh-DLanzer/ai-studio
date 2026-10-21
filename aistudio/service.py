@@ -28,6 +28,7 @@ from aistudio.domain.common import (
 )
 from aistudio.domain import spec as spec_mod
 from aistudio.domain.batches import BatchDomain
+from aistudio.domain.blender import BlenderDomain
 from aistudio.domain.costs import CostDomain
 from aistudio.domain.pipeline import PipelineDomain
 from aistudio.domain.projects import ProjectDomain
@@ -63,6 +64,7 @@ class Workspace(SettingsMixin):
         self._costs = CostDomain(self)
         self._verify = VerifyDomain(self)
         self._agents = AgentDomain(self)
+        self._blender = BlenderDomain(self)
         self.batches = BatchDomain(self)
 
         # Public domain accessors
@@ -75,6 +77,7 @@ class Workspace(SettingsMixin):
         self.costs_domain = self._costs
         self.verify_domain = self._verify
         self.agents_domain = self._agents
+        self.blender_domain = self._blender
 
     # ---------------------------------------------------------------- providers and roles (settings v2)
     def ensure_settings(self):
@@ -304,6 +307,27 @@ class Workspace(SettingsMixin):
 
     def put_images(self, name, doc):
         return self._storyboard.put_images(name, doc)
+
+    # ---------------------------------------------------------------- blender domain delegation
+    def camera_move(self, name, shot, payload):
+        """Classify a sampled camera move and propose a direction.  Nothing is saved."""
+        return self._blender.camera_move(name, shot, payload)
+
+    def apply_direction(self, name, shot, direction, replace=False):
+        """Apply a validated direction to a shot (saved with history)."""
+        return self._blender.apply_direction(name, shot, direction, replace)
+
+    def plan_previs(self, name, blend, shots):
+        """Validate a headless previs request (the .blend file and the shots)."""
+        return self._blender.plan_previs(name, blend, shots)
+
+    def run_previs(self, name, payload, progress=None):
+        """Render the blocking frames with headless Blender."""
+        return self._blender.run_previs(name, payload, progress=progress)
+
+    def list_previs(self, name):
+        """The frames rendered into the project's previs/ folder."""
+        return self._blender.list_previs(name)
 
     @staticmethod
     def _slug(stem):
