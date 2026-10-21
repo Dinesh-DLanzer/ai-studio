@@ -7,6 +7,7 @@ import { settingsApi } from "./client";
 import ChainEditor from "./ChainEditor";
 import ModelPicker from "./ModelPicker";
 import PriceDialog, { type PriceTarget } from "./PriceDialog";
+import CapabilitiesDialog, { type CapTarget } from "./CapabilitiesDialog";
 import type { ChainEntry, ChainRef, ModelInfo, Provider, Role, RoleView, RolesResponse, TestRow } from "./types";
 
 const ORDER: Role[] = ["chat", "vision", "image", "video", "verify"];
@@ -23,7 +24,7 @@ function RoleCard({ role, view, allRoles, providers, project, hasProviders, busy
 }) {
   const toast = useToast();
   const { icon: Icon, tone } = LOOK[role];
-  const [pick, setPick] = useState(false); const [price, setPrice] = useState<PriceTarget | null>(null);
+  const [pick, setPick] = useState(false); const [price, setPrice] = useState<PriceTarget | null>(null); const [caps, setCaps] = useState<CapTarget | null>(null);
   const [adv, setAdv] = useState(false);
   const [retries, setRetries] = useState(String(view.policy.retries)); const [timeout, setTimeoutS] = useState(String(view.policy.timeout));
   const [tests, setTests] = useState<TestRow[] | null>(null); const [testing, setTesting] = useState(false);
@@ -158,6 +159,7 @@ function RoleCard({ role, view, allRoles, providers, project, hasProviders, busy
       )}
       <ChainEditor role={role} chain={chain} hasProviders={hasProviders} disabled={busy} onReorder={reorder} onRemove={remove}
         onAdd={() => setPick(true)} onSetPrice={(e) => setPrice({ provider: e.provider, provider_label: e.provider_label, model: e.model, capability: view.capability, card: e.card })}
+        onCapabilities={(e) => setCaps({ provider: e.provider, provider_label: e.provider_label, model: e.model, capability: view.capability })}
         onTestOne={runTestOne} testingMap={testingMap} copySources={copySources} onCopy={handleCopy} />
       <div className="flex flex-wrap items-center gap-2 border-t border-slate-800 pt-3">
         <Button variant="outline" size="sm" onClick={() => void runTest()} disabled={testing || chain.length === 0}>{testing ? "Testing..." : "Test chain"}</Button>
@@ -186,6 +188,7 @@ function RoleCard({ role, view, allRoles, providers, project, hasProviders, busy
       <ModelPicker open={pick} onClose={() => setPick(false)} capability={role === "verify" ? "chat" : view.capability} roleTitle={view.title}
         taken={new Set(chain.map((e) => `${e.provider}\u0000${e.model}`))} onPick={add} />
       <PriceDialog target={price} onClose={() => setPrice(null)} onSaved={onReload} />
+      <CapabilitiesDialog target={caps} onClose={() => setCaps(null)} onSaved={onReload} />
     </Card>
   );
 }

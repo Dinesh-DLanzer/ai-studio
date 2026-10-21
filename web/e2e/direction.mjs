@@ -10,7 +10,7 @@ import { fileURLToPath } from "node:url";
 const here = dirname(fileURLToPath(import.meta.url)); const repo = resolve(here, "../..");
 const home = mkdtempSync(join(tmpdir(), "aistudio-direction-"));
 const port = 8822, token = "dirtoken", base = `http://127.0.0.1:${port}`;
-const srv = spawn(join(repo, ".venv/bin/python"), ["-m", "server.app"], { cwd: repo, env: { ...process.env, AISTUDIO_HOME: home, AISTUDIO_TOKEN: token, AISTUDIO_PORT: String(port), AISTUDIO_ALL_TEST: "1", AISTUDIO_NO_NETWORK: "1" } });
+const srv = spawn(join(repo, ".venv/bin/python"), ["-m", "server.app"], { cwd: repo, env: { ...process.env, AISTUDIO_HOME: home, AISTUDIO_TOKEN: token, AISTUDIO_PORT: String(port), AISTUDIO_ALL_TEST: "1", AISTUDIO_NO_NETWORK: "1", AISTUDIO_SECRETS_DIR: join(home, "secrets"), AISTUDIO_NO_KEYRING: "1" } });
 let failed = false; const ok = (c, m) => { console.log((c ? "PASS " : "FAIL ") + m); if (!c) failed = true; };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const hdr = { "x-aistudio-token": token, "content-type": "application/json" };
@@ -70,6 +70,24 @@ try {
   await page.getByTestId("price-breakdown").waitFor(); ok(/Total/.test(await page.getByTestId("price-breakdown").innerText()), "the approve dialog lists the price breakdown");
   ok(await page.getByTestId("profile-chips").isVisible(), "the approve dialog shows the model capabilities");
   await page.getByRole("button", { name: "Cancel" }).click();
+
+  // Settings > Model Configuration: Capabilities dialog on a local (keyless) ComfyUI provider
+  const prov = await (await fetch(`${base}/api/providers`, { method: "POST", headers: hdr, body: JSON.stringify({ type: "replicate", label: "Replicate", secret: { api_key: "r8_dummy_test_key" } }) })).json();
+  await fetch(`${base}/api/providers/${prov.id}/models`, { method: "POST", headers: hdr, body: JSON.stringify({ id: "wan-test", capability: "video" }) });
+  await fetch(`${base}/api/prices/${prov.id}/wan-test`, { method: "PUT", headers: hdr, body: JSON.stringify({ kind: "video", per_second: { "720p": 0.05 } }) });
+  const rr = await fetch(`${base}/api/roles/video`, { method: "PUT", headers: hdr, body: JSON.stringify({ chain: [{ provider: prov.id, model: "wan-test" }] }) });
+  ok(rr.ok, "a local video model is added to the video chain");
+  await page.goto(`${base}/#/settings`);
+  await page.getByRole("button", { name: "Capabilities of wan-test" }).click();
+  const cd = page.getByTestId("cap-dialog"); await cd.waitFor(); await page.getByTestId("cap-source").waitFor({ timeout: 5000 }).catch(async () => { console.log("DBG", await cd.innerText()); });
+  ok(/Default|Built-in|Provider/.test(await page.getByTestId("cap-source").innerText()), "the dialog shows where the profile comes from");
+  await page.getByLabel("Durations in seconds").fill("5, 10"); await page.getByLabel("Camera control mode").selectOption("none");
+  await page.getByRole("button", { name: "Save capabilities" }).click(); await cd.waitFor({ state: "hidden" });
+  await page.getByRole("button", { name: "Capabilities of wan-test" }).click(); await page.getByTestId("cap-source").waitFor();
+  ok(/Your override/.test(await page.getByTestId("cap-source").innerText()) && (await page.getByLabel("Durations in seconds").inputValue()) === "5, 10", "the override is saved and reloaded");
+  await page.getByRole("button", { name: "Reset my override" }).click(); await cd.waitFor({ state: "hidden" });
+  const after = await (await fetch(`${base}/api/capabilities?capability=video`, { headers: hdr })).json();
+  ok(!after.models.find((x) => x.id === "wan-test").override, "reset removes the override");
   ok(errors.length === 0, "no page errors" + (errors.length ? ": " + errors.join("; ") : ""));
   await browser.close();
 } finally { srv.kill(); }

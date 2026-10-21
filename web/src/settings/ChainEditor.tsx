@@ -5,9 +5,9 @@ import type { ChainEntry, Role, TestRow } from "./types";
 
 const ordinal = (i: number) => (i === 0 ? "Primary" : `Fallback ${i + 1}`);
 
-export default function ChainEditor({ role, chain, hasProviders, disabled, onReorder, onRemove, onAdd, onSetPrice, onTestOne, testingMap, copySources, onCopy }: {
+export default function ChainEditor({ role, chain, hasProviders, disabled, onReorder, onRemove, onAdd, onSetPrice, onCapabilities, onTestOne, testingMap, copySources, onCopy }: {
   role: Role; chain: ChainEntry[]; hasProviders: boolean; disabled?: boolean;
-  onReorder: (from: number, to: number) => void; onRemove: (i: number) => void; onAdd: () => void; onSetPrice: (e: ChainEntry) => void;
+  onReorder: (from: number, to: number) => void; onRemove: (i: number) => void; onAdd: () => void; onSetPrice: (e: ChainEntry) => void; onCapabilities?: (e: ChainEntry) => void;
   onTestOne?: (entry: ChainEntry) => void; testingMap?: Record<string, boolean>;
   copySources?: { role: Role; title: string; count: number }[];
   onCopy?: (fromRole: Role) => void;
@@ -87,6 +87,9 @@ export default function ChainEditor({ role, chain, hasProviders, disabled, onReo
                 ? <button type="button" disabled={disabled} className={`tag ${e.free ? "tag-emerald" : ""} cursor-pointer inline-flex items-center gap-1 hover:brightness-125`} onClick={() => onSetPrice(e)}
                     title="Change price (free or paid)" aria-label={`Change price for ${e.model}`}>{e.free ? "free" : e.price}<Pencil size={10} aria-hidden /></button>
                 : <button type="button" className="tag tag-amber cursor-pointer hover:brightness-125" onClick={() => onSetPrice(e)} aria-label={`Set price for ${e.model}`}>Set price</button>}
+              {onCapabilities && (role === "image" || role === "video") && (
+                <button type="button" disabled={disabled} className="tag cursor-pointer hover:border-slate-500 hover:text-white" onClick={() => onCapabilities(e)} aria-label={`Capabilities of ${e.model}`}>Capabilities</button>
+              )}
               {onTestOne && (
                 <button
                   type="button"
