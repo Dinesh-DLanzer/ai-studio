@@ -20,6 +20,8 @@ Commands:
   python3 -m aistudio.cli progress <p> [--json]      Production checklist and queue
   python3 -m aistudio.cli plan <project> [--json]    Batch generation proposal plan
   python3 -m aistudio.cli export-project <p> [--json] Export project zip archive
+  python3 -m aistudio.cli review export <p> [--out O] [--include-prompts] [--json] Export review package
+  python3 -m aistudio.cli review import <p> <file> [--json] Import reviewer feedback
   python3 -m aistudio.cli crew run <p> --agent A --task T [--autonomy assist|copilot] [--json]   Run a studio-crew agent
   python3 -m aistudio.cli crew status <p> [run] [--json]   List runs, or show one run
   python3 -m aistudio.cli crew undo <p> <run> [--json]     Restore the documents a run changed
@@ -211,6 +213,19 @@ def main(argv=None, ask=input, out=print):
     pub_export.add_argument("--preset", required=True)
     for c in (pub_draft, pub_export):
         c.add_argument("--json", action="store_true")
+    p_rev = sp.add_parser("review", help="Review package export and feedback import")
+    rev_sp = p_rev.add_subparsers(dest="review_cmd", required=True)
+
+    rev_exp = rev_sp.add_parser("export", help="Export review package (folder or zip)")
+    rev_exp.add_argument("project")
+    rev_exp.add_argument("--out", "-o", default=None, help="Output folder or .zip path")
+    rev_exp.add_argument("--include-prompts", action="store_true", help="Include prompts in shot list")
+    rev_exp.add_argument("--json", action="store_true")
+
+    rev_imp = rev_sp.add_parser("import", help="Import reviewer feedback (feedback.json)")
+    rev_imp.add_argument("project")
+    rev_imp.add_argument("file", help="Path to feedback.json")
+    rev_imp.add_argument("--json", action="store_true")
 
     p_set = sp.add_parser("agent-setup", help="Configure agent manifests")
     p_set.add_argument("agent", choices=["claude", "agy", "all"], default="all", nargs="?")
@@ -503,6 +518,22 @@ def main(argv=None, ask=input, out=print):
             args.out.parent.mkdir(parents=True, exist_ok=True)
             args.out.write_bytes(data)
             out(str(args.out))
+        elif args.cmd == "review":
+            if args.review_cmd == "export":
+                from aistudio import review_package
+                path = str(review_package.export(ws, args.project, out=args.out, include_prompts=args.include_prompts))
+                if is_json:
+                    out(json.dumps({"path": path}, indent=2))
+                else:
+                    out(f"Exported review package: {path}")
+            elif args.review_cmd == "import":
+                from aistudio import comments
+                content = Path(args.file).read_text(encoding="utf-8")
+                res = comments.import_feedback(ws, args.project, content)
+                if is_json:
+                    out(json.dumps(res, indent=2))
+                else:
+                    out(f"Imported {res['imported']} comments (total: {res['total']})")
 
         elif args.cmd == "agent-setup":
             res = _setup_agent(args.agent, home, out=out)

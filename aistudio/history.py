@@ -6,7 +6,7 @@ from pathlib import Path
 import re
 
 
-DOCUMENTS = {"shots.json", "images.json", "edit.json", "brief.json", "todos.json", "Story.md"}
+DOCUMENTS = {"shots.json", "images.json", "edit.json", "brief.json", "todos.json", "Story.md", "comments.json"}
 _TS_RE = re.compile(r"^\d{8}T\d{9}Z$")
 
 
