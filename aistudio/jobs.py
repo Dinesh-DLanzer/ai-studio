@@ -13,6 +13,7 @@ import secrets
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
+from aistudio.context import RequestContext, get_context, use_context
 
 from aistudio import costlog, store
 from aistudio.domain.common import ServiceError
@@ -37,22 +38,22 @@ def _row(r):
 
 
 # ---------------------------------------------------------------- ledger functions (any process)
-def enqueue(root, project, kind, target="", proposal_id="", batch_id="", actor=store.ACTOR, provider="", model="", payload=None, state="queued"):
+def enqueue(root, project, kind, target="", proposal_id="", batch_id="", actor=None, provider="", model="", payload=None, state="queued"):
     now = time.time()
     jid = secrets.token_hex(5)
     store.execute(root, f"INSERT INTO jobs ({', '.join(COLS)}) VALUES ({', '.join('?' * len(COLS))})",
-                  (jid, store.TENANT, actor, project, kind, target, proposal_id, batch_id, state, provider, model, "", 0.0, "", now, now,
+                  (jid, store.current_tenant(), actor or store.current_actor(), project, kind, target, proposal_id, batch_id, state, provider, model, "", 0.0, "", now, now,
                    1 if state == "running" else 0, json.dumps(payload or {}), "", 0))
     return get(root, jid)
 
 
 def get(root, jid):
-    rows = store.query(root, "SELECT * FROM jobs WHERE id = ? AND tenant_id = ?", (jid, store.TENANT))
+    rows = store.query(root, "SELECT * FROM jobs WHERE id = ? AND tenant_id = ?", (jid, store.current_tenant()))
     return _row(rows[0]) if rows else None
 
 
 def list_jobs(root, project=None, state=None, batch_id=None, limit=200):
-    sql, args = "SELECT * FROM jobs WHERE tenant_id = ?", [store.TENANT]
+    sql, args = "SELECT * FROM jobs WHERE tenant_id = ?", [store.current_tenant()]
     for col, val in (("project", project), ("state", state), ("batch_id", batch_id)):
         if val:
             sql += f" AND {col} = ?"
@@ -60,10 +61,22 @@ def list_jobs(root, project=None, state=None, batch_id=None, limit=200):
     return [_row(r) for r in store.query(root, sql + " ORDER BY created DESC, id LIMIT ?", (*args, int(limit)))]
 
 
+def _all_jobs(root, state=None):
+    """Internal maintenance listing across tenants (restart reconcile and the poller); never exposed through a route."""
+    sql, args = "SELECT * FROM jobs", ()
+    if state:
+        sql, args = sql + " WHERE state = ?", (state,)
+    return [_row(r) for r in store.query(root, sql + " ORDER BY created DESC, id LIMIT 100000", args)]
+
+
+def _job_context(job):
+    return RequestContext(tenant_id=job["tenant_id"], actor=job["actor"])
+
+
 def claim(root, jid):
     """queued -> running, atomically.  False if somebody else got it or it was cancelled meanwhile."""
-    return store.execute(root, "UPDATE jobs SET state = 'running', attempts = attempts + 1, updated = ? WHERE id = ? AND state = 'queued'",
-                         (time.time(), jid)) == 1
+    return store.execute(root, "UPDATE jobs SET state = 'running', attempts = attempts + 1, updated = ? WHERE id = ? AND tenant_id = ? AND state = 'queued'",
+                         (time.time(), jid, store.current_tenant())) == 1
 
 
 def update(root, jid, **fields):
@@ -71,7 +84,7 @@ def update(root, jid, **fields):
     if "result" in fields:
         fields["result"] = json.dumps(fields["result"], default=str)
     cols = ", ".join(f"{k} = ?" for k in fields)
-    store.execute(root, f"UPDATE jobs SET {cols}, updated = ? WHERE id = ?", (*fields.values(), time.time(), jid))
+    store.execute(root, f"UPDATE jobs SET {cols}, updated = ? WHERE id = ? AND tenant_id = ?", (*fields.values(), time.time(), jid, store.current_tenant()))
 
 
 def finish(root, jid, state, result=None, error=""):
@@ -82,22 +95,22 @@ def finish(root, jid, state, result=None, error=""):
 def cancel(root, jid):
     """Queued: cancelled at once.  Provider-pending: we stop watching it, but the provider may still bill.  Running: asked to stop."""
     with store.transaction(root) as tx:
-        rows = tx.query("SELECT state FROM jobs WHERE id = ? AND tenant_id = ?", (jid, store.TENANT))
+        rows = tx.query("SELECT state FROM jobs WHERE id = ? AND tenant_id = ?", (jid, store.current_tenant()))
         if not rows:
             return None
         state, now = rows[0]["state"], time.time()
         if state == "queued":
-            tx.execute("UPDATE jobs SET state = 'cancelled', updated = ? WHERE id = ?", (now, jid))
+            tx.execute("UPDATE jobs SET state = 'cancelled', updated = ? WHERE id = ? AND tenant_id = ?", (now, jid, store.current_tenant()))
         elif state == "provider_pending":
-            tx.execute("UPDATE jobs SET state = 'cancelled', cancel_requested = 1, error = ?, updated = ? WHERE id = ?",
-                       ("cancel requested; the provider may still bill for this job", now, jid))
+            tx.execute("UPDATE jobs SET state = 'cancelled', cancel_requested = 1, error = ?, updated = ? WHERE id = ? AND tenant_id = ?",
+                       ("cancel requested; the provider may still bill for this job", now, jid, store.current_tenant()))
         elif state == "running":
-            tx.execute("UPDATE jobs SET cancel_requested = 1, updated = ? WHERE id = ?", (now, jid))
+            tx.execute("UPDATE jobs SET cancel_requested = 1, updated = ? WHERE id = ? AND tenant_id = ?", (now, jid, store.current_tenant()))
     return get(root, jid)
 
 
 def prune(root, days=KEEP_DAYS):
-    return store.execute(root, "DELETE FROM jobs WHERE state IN ('completed','failed','cancelled') AND updated < ?", (time.time() - days * 86400,))
+    return store.execute(root, "DELETE FROM jobs WHERE tenant_id = ? AND state IN ('completed','failed','cancelled') AND updated < ?", (store.current_tenant(), time.time() - days * 86400))
 
 
 _SECRET_PATTERNS = (re.compile(r"(?i)((?:api[_-]?key|key|token|secret|password|authorization)=)[^&\s\"']+"),
@@ -137,8 +150,13 @@ class JobRunner:
 
     def submit(self, project, kind, **kw):
         job = enqueue(self.root, project, kind, **kw)
-        self.pool.submit(self._run, job["id"])
+        request_context = get_context()
+        self.pool.submit(self._run_in_context, job["id"], request_context)
         return job
+
+    def _run_in_context(self, jid, request_context):
+        with use_context(request_context):
+            self._run(jid)
 
     def _run(self, jid):
         job = get(self.root, jid)
@@ -178,14 +196,15 @@ class JobRunner:
                 self._poller.start()
 
     def poll_once(self):
-        pending = list_jobs(self.root, state="provider_pending")
+        pending = _all_jobs(self.root, state="provider_pending")
         for job in pending:
-            try:
-                outcome = self.poll(job)
-            except Exception:
-                continue    # transient; try again next round
-            if outcome and get(self.root, job["id"])["state"] == "provider_pending":
-                finish(self.root, job["id"], outcome, error="" if outcome == "completed" else "the provider reported the job failed")
+            with use_context(_job_context(job)):
+                try:
+                    outcome = self.poll(job)
+                except Exception:
+                    continue    # transient; try again next round
+                if outcome and get(self.root, job["id"])["state"] == "provider_pending":
+                    finish(self.root, job["id"], outcome, error="" if outcome == "completed" else "the provider reported the job failed")
         return len(pending)
 
     def _poll_loop(self):
@@ -195,18 +214,22 @@ class JobRunner:
     # ---- startup
     def reconcile(self):
         """Run once when the server starts (a single server owns the ledger).  Never re-runs paid work."""
-        for job in list_jobs(self.root, limit=100000):
-            free = job["kind"] in FREE_KINDS
-            if job["state"] in ("queued", "running") and free:
-                update(self.root, job["id"], state="queued")
-                self.pool.submit(self._run, job["id"])
-            elif job["state"] == "running":
-                update(self.root, job["id"], state="needs_sync",
-                       error="the server stopped while this was running; it may already have been billed. Check Costs, sync, then propose again if needed")
-            elif job["state"] == "queued":
-                update(self.root, job["id"], state="needs_sync",
-                       error="the server stopped before this started; approvals do not carry over a restart. Propose again if you still want it")
-        prune(self.root)
+        for job in _all_jobs(self.root):
+            ctx = _job_context(job)
+            with use_context(ctx):
+                free = job["kind"] in FREE_KINDS
+                if job["state"] in ("queued", "running") and free:
+                    update(self.root, job["id"], state="queued")
+                    self.pool.submit(self._run_in_context, job["id"], ctx)
+                elif job["state"] == "running":
+                    update(self.root, job["id"], state="needs_sync",
+                           error="the server stopped while this was running; it may already have been billed. Check Costs, sync, then propose again if needed")
+                elif job["state"] == "queued":
+                    update(self.root, job["id"], state="needs_sync",
+                           error="the server stopped before this started; approvals do not carry over a restart. Propose again if you still want it")
+        for tid in {j["tenant_id"] for j in _all_jobs(self.root)}:
+            with use_context(RequestContext(tenant_id=tid)):
+                prune(self.root)
         self._start_poller()
 
     def shutdown(self):

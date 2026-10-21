@@ -29,7 +29,7 @@ from . import project_lock
 # Also serialize threads when project_lock's platform-specific flock is unavailable.
 _WRITE_LOCK = threading.Lock()
 
-LOG_COLS = ["timestamp", "shot", "stage", "model", "resolution", "seconds", "attempt", "job_id", "cost", "result", "provider", "cost_source", "actor", "override", "quoted"]
+LOG_COLS = ["timestamp", "shot", "stage", "model", "resolution", "seconds", "attempt", "job_id", "cost", "result", "provider", "cost_source", "actor", "override", "quoted", "tenant_id"]
 
 
 def read_log(pdir):
@@ -47,7 +47,9 @@ def _validate_row(row):
 
 
 def _new_row(row):
-    return {k: row.get(k, "local" if k == "actor" else "no" if k == "override" else "") for k in LOG_COLS}
+    from .context import get_context
+    ctx = get_context()
+    return {k: row.get(k, ctx.tenant_id if k == "tenant_id" else ctx.actor if k == "actor" else "no" if k == "override" else "") for k in LOG_COLS}
 
 
 def _rows_for_write(path):

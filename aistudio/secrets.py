@@ -81,12 +81,22 @@ class SecretStore:
         if not isinstance(ref, str) or not REF_RE.match(ref):
             raise SecretError("invalid secret reference")
 
+    @classmethod
+    def _scoped_ref(cls, ref, namespace):
+        cls._check(ref)
+        if not isinstance(namespace, str) or not REF_RE.match(namespace):
+            raise SecretError("invalid secret namespace")
+        return ref if namespace == "local" else f"{namespace}/{ref}"   # "/" is rejected by REF_RE, so no tenant/ref pair can collide with another
+
     # -- public API
     def backend(self):
         return "keychain" if self.kr else "file"
 
-    def set(self, ref, fields):
-        self._check(ref)
+    def set(self, ref, fields, namespace=None):
+        if namespace is None:
+            from .context import get_context
+            namespace = get_context().tenant_id
+        ref = self._scoped_ref(ref, namespace)
         if not isinstance(fields, dict) or not fields or not all(
                 isinstance(k, str) and FIELD_RE.match(k) and isinstance(v, str) and v.strip() for k, v in fields.items()):
             raise SecretError("a secret needs one or more non-empty text fields")
@@ -101,8 +111,11 @@ class SecretStore:
         data[ref] = clean
         self._write(data)
 
-    def get(self, ref):
-        self._check(ref)
+    def get(self, ref, namespace=None):
+        if namespace is None:
+            from .context import get_context
+            namespace = get_context().tenant_id
+        ref = self._scoped_ref(ref, namespace)
         if self.kr:
             try:
                 raw = self.kr.get_password(SERVICE, ref) or self.kr.get_password(LEGACY_SERVICE, ref)
@@ -112,11 +125,14 @@ class SecretStore:
                 pass
         return dict(self._read().get(ref) or {})
 
-    def has(self, ref):
-        return bool(self.get(ref))
+    def has(self, ref, namespace=None):
+        return bool(self.get(ref, namespace=namespace))
 
-    def delete(self, ref):
-        self._check(ref)
+    def delete(self, ref, namespace=None):
+        if namespace is None:
+            from .context import get_context
+            namespace = get_context().tenant_id
+        ref = self._scoped_ref(ref, namespace)
         if self.kr:
             for service in (SERVICE, LEGACY_SERVICE):      # also clear entries made before the rename
                 try:
@@ -128,8 +144,8 @@ class SecretStore:
             del data[ref]
             self._write(data)
 
-    def masked(self, ref):
-        s = self.get(ref)
+    def masked(self, ref, namespace=None):
+        s = self.get(ref, namespace=namespace)
         return {"set": bool(s), "fields": {k: "…" + v[-4:] if len(v) > 8 else "…" for k, v in s.items()}}
 
     def values(self):

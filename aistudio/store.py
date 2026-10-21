@@ -64,7 +64,7 @@ def _migrate(con):
         raise
 
 
-def connect(root):
+def _sqlite_connect(root):
     """This thread's connection to <root>/state/aistudio.db (created and migrated on first use)."""
     path = db_path(root)
     cons = getattr(_local, "cons", None)
@@ -94,21 +94,21 @@ def connect(root):
     return con
 
 
-def close_all():
+def _sqlite_close_all():
     """Close this thread's connections."""
     for con in getattr(_local, "cons", {}).values():
         con.close()
     _local.cons = {}
 
 
-def execute(root, sql, params=()):
+def _sqlite_execute(root, sql, params=()):
     """Run one write statement in its own short transaction; returns the number of rows changed."""
-    with transaction(root) as tx:
+    with _sqlite_transaction(root) as tx:
         return tx.execute(sql, params)
 
 
-def query(root, sql, params=()):
-    return [dict(r) for r in connect(root).execute(sql, params).fetchall()]
+def _sqlite_query(root, sql, params=()):
+    return [dict(r) for r in _sqlite_connect(root).execute(sql, params).fetchall()]
 
 
 class _Tx:
@@ -123,9 +123,9 @@ class _Tx:
 
 
 @contextlib.contextmanager
-def transaction(root):
+def _sqlite_transaction(root):
     """BEGIN IMMEDIATE ... COMMIT: takes the write lock up front, so two processes queue instead of failing half way."""
-    con = connect(root)
+    con = _sqlite_connect(root)
     con.execute("BEGIN IMMEDIATE")
     try:
         yield _Tx(con)
@@ -133,3 +133,53 @@ def transaction(root):
     except BaseException:
         con.execute("ROLLBACK")
         raise
+
+
+class SQLiteBackend:
+    """Current local backend. Implements the portable execute/query/transaction contract."""
+    def connect(self, root): return _sqlite_connect(root)
+    def close_all(self): return _sqlite_close_all()
+    def execute(self, root, sql, params=()): return _sqlite_execute(root, sql, params)
+    def query(self, root, sql, params=()): return _sqlite_query(root, sql, params)
+    def transaction(self, root): return _sqlite_transaction(root)
+
+
+class PostgresBackendStub:
+    """Hosted backend seam only. Implement SQL placeholder and transaction semantics before use; no dependency is installed."""
+    def __getattr__(self, name):
+        if name in {"connect", "close_all", "execute", "query", "transaction"}:
+            raise NotImplementedError("Postgres backend is intentionally not implemented in the local foundation slice")
+        raise AttributeError(name)
+
+
+_backend = SQLiteBackend()
+
+
+def set_backend(backend=None):
+    """Select a backend implementing connect/close_all/execute/query/transaction; None restores SQLite."""
+    global _backend
+    _backend = backend or SQLiteBackend()
+
+
+def get_backend():
+    return _backend
+
+
+def connect(root): return _backend.connect(root)
+def close_all(): return _backend.close_all()
+def execute(root, sql, params=()): return _backend.execute(root, sql, params)
+def query(root, sql, params=()): return _backend.query(root, sql, params)
+
+
+def transaction(root):
+    return _backend.transaction(root)
+
+
+def current_tenant():
+    from .context import get_context
+    return get_context().tenant_id
+
+
+def current_actor():
+    from .context import get_context
+    return get_context().actor
