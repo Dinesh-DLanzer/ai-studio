@@ -7,6 +7,7 @@ becomes needs_sync (it may already have been billed) and is never run again by t
 States: queued, running, provider_pending (the provider still renders it; polled through the existing sync path), completed, failed,
 cancelled, needs_sync.  All SQL lives in aistudio/store.py.
 """
+import re
 import json
 import secrets
 import threading
@@ -99,8 +100,20 @@ def prune(root, days=KEEP_DAYS):
     return store.execute(root, "DELETE FROM jobs WHERE state IN ('completed','failed','cancelled') AND updated < ?", (time.time() - days * 86400,))
 
 
+_SECRET_PATTERNS = (re.compile(r"(?i)((?:api[_-]?key|key|token|secret|password|authorization)=)[^&\s\"']+"),
+                    re.compile(r"(?i)(bearer\s+)[A-Za-z0-9._~+/=-]{8,}"),
+                    re.compile(r"\b(sk|rk|pk|xi|r8|AIza)[-_A-Za-z0-9]{16,}"))
+
+
+def redact(text):
+    """Best-effort scrub of keys/tokens that may travel inside an error message (URLs with ?key=, bearer headers, key-like strings)."""
+    text = _SECRET_PATTERNS[0].sub(r"\1***", text)
+    text = _SECRET_PATTERNS[1].sub(r"\1***", text)
+    return _SECRET_PATTERNS[2].sub("***", text)
+
+
 def error_text(e):
-    return str(e) if isinstance(e, ServiceError) else f"{type(e).__name__}: {e}"
+    return redact(str(e) if isinstance(e, ServiceError) else f"{type(e).__name__}: {e}")
 
 
 # ---------------------------------------------------------------- the worker (server process only)

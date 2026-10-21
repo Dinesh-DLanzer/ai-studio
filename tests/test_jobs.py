@@ -178,3 +178,13 @@ class TestInterfaces(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ErrorRedactionTests(unittest.TestCase):
+    def test_error_text_scrubs_keys_in_urls_and_headers(self):
+        from aistudio import jobs
+        out = jobs.error_text(RuntimeError("GET https://x.test/v1?key=AIzaSyDUMMYDUMMYDUMMYDUMMY1234&a=1 failed; Authorization: Bearer abcdef1234567890XYZ; sk-abcdefghijklmnopqrstuv"))
+        self.assertNotIn("AIzaSyDUMMY", out)
+        self.assertNotIn("abcdef1234567890XYZ", out)
+        self.assertNotIn("sk-abcdefghijklmnopqrstuv", out)
+        self.assertIn("key=***", out)
