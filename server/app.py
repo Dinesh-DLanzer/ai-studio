@@ -345,16 +345,17 @@ def create_app(root=None, token=None, rates_path=None, transport=None, static_di
         return {**res, "run": rid}
 
     # ---- Settings > Agents: prompt and limits only; tools can never be changed
-    @app.get("/api/agents", dependencies=[api])
-    def agents_list():
+    @app.get("/api/crew/agents", dependencies=[api])
+    def crew_agents_list(request: Request):
         from aistudio.crew import agents as crew_agents
+        human_session(request)
         try:
             return crew_agents.describe(ws.settings_dir)
         except crew_agents.AgentError as e:
             raise HTTPException(400, str(e)) from None
 
-    @app.put("/api/agents/{agent_id}", dependencies=[api])
-    async def agents_put(agent_id: str, request: Request):
+    @app.put("/api/crew/agents/{agent_id}", dependencies=[api])
+    async def crew_agents_put(agent_id: str, request: Request):
         from aistudio.crew import agents as crew_agents
         human_session(request)
         try:

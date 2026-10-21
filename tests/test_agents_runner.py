@@ -30,6 +30,7 @@ class TestAgentsRunner(unittest.TestCase):
         data = res.json()
         self.assertIn("agents", data)
         self.assertTrue(len(data["agents"]) >= 3)
+        self.assertTrue(all({"id", "binary", "detected"} <= set(a) for a in data["agents"]))      # the terminal-agent shape, not the crew definitions
 
     def test_abort_non_running_agent(self):
         ok = self.ws.abort_agent("claude")
@@ -38,3 +39,4 @@ class TestAgentsRunner(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+

@@ -65,16 +65,16 @@ class StageApiTests(unittest.TestCase):
         self.script([])
         rid = self.start()
         calls = [("GET", f"{self.base}/plan"), ("POST", f"{self.base}/plan"), ("POST", f"{self.base}/stages/qa/run"),
-                 ("POST", f"{self.base}/runs/{rid}/continue"), ("PUT", "/api/agents/writer")]
+                 ("POST", f"{self.base}/runs/{rid}/continue"), ("PUT", "/api/crew/agents/writer")]
         for m, url in calls:
             r = self.c.request(m, url, json={"plan_hash": "x", "decision": "approve_continue"}, headers=self.A)
             self.assertEqual(r.status_code, 403, (m, url))
         for m, path in (("GET", "/api/projects/{name}/crew/plan"), ("POST", "/api/projects/{name}/crew/plan"), ("POST", "/api/projects/{name}/crew/stages/{stage}/run"),
-                        ("POST", "/api/projects/{name}/crew/runs/{rid}/continue"), ("PUT", "/api/agents/{agent_id}")):
+                        ("POST", "/api/projects/{name}/crew/runs/{rid}/continue"), ("PUT", "/api/crew/agents/{agent_id}")):
             self.assertFalse(api_docs.agent_allowed(m, path), path)
         self.assertEqual(api_docs.undocumented(self.c.app), [])
         self.assertEqual(self.getrun(rid)["status"], "awaiting_checkpoint")      # nothing was continued
-        self.assertEqual(self.c.get("/api/agents", headers=self.A).status_code, 403)
+        self.assertEqual(self.c.get("/api/crew/agents", headers=self.A).status_code, 403)
 
     def test_plan_endpoint_shows_costs_and_creates_nothing(self):
         self.c.post("/api/projects/demo/estimate", json={"failure": 0.2}, headers=self.S)
@@ -117,16 +117,16 @@ class StageApiTests(unittest.TestCase):
         self.assertEqual(self.getrun(rid)["decisions"][0]["decision"], "stop")
 
     def test_agents_list_and_safe_overrides(self):
-        got = self.c.get("/api/agents", headers=self.S).json()
+        got = self.c.get("/api/crew/agents", headers=self.S).json()
         self.assertEqual({a["id"] for a in got["agents"]}, {"producer", "writer", "director", "scene-designer", "image-artist", "video-director", "editor", "qa"})
         self.assertEqual(got["hard_limits"], agents.HARD)
         tools = next(a for a in got["agents"] if a["id"] == "writer")["tools"]
-        put = lambda body, aid="writer": self.c.put(f"/api/agents/{aid}", json=body, headers=self.S)
+        put = lambda body, aid="writer": self.c.put(f"/api/crew/agents/{aid}", json=body, headers=self.S)
         r = put({"prompt": "Write very short stories.", "limits": {"max_steps": 5}})
         self.assertEqual(r.status_code, 200, r.text)
         self.assertEqual((r.json()["prompt"], r.json()["limits"]["max_steps"], r.json()["tools"]), ("Write very short stories.", 5, tools))
         self.assertEqual(agents.load("writer", Workspace(self.root).settings_dir)["limits"]["max_steps"], 5)
-        again = next(a for a in self.c.get("/api/agents", headers=self.S).json()["agents"] if a["id"] == "writer")
+        again = next(a for a in self.c.get("/api/crew/agents", headers=self.S).json()["agents"] if a["id"] == "writer")
         self.assertEqual(again["overridden"], ["limits", "prompt"])
         for bad in ({"tools": ["approve_budget"]}, {"limits": {"max_steps": 51}}, {"limits": {"max_llm_usd": 99}}, {"limits": {"tools": 1}}, {"limits": [1]},
                     {"prompt": ""}, {"engine": "codex"}, {"prompt": "x" * 13000}, ["x"]):
