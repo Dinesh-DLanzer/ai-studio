@@ -7,6 +7,7 @@ capability profile can serve the request. A feature the chosen model lacks is an
 from dataclasses import dataclass, field
 
 from aistudio import catalog as catalog_mod
+from aistudio.domain.characters import pick_refs
 from aistudio.domain.common import ServiceError
 
 ROLE = {"image": "image", "image_edit": "image", "clip": "video", "clip_extend": "video"}
@@ -168,30 +169,12 @@ def resolve(ws, p, kind, target, options=None, loose=False):
         image = frame.get("image") if isinstance(frame, dict) else None
         if image and not (p / frame_path(image)).is_file() and not loose:
             raise ServiceError(f"keyframe missing: {image}")
-    raw_refs = list(shot.get("refs") or [])
-    # Derive roles from image kind and retain the best references when a model has a small limit.
-    image_by_id = {i.get("id"): i for i in image_doc.get("images", []) if i.get("id")}
-    priority = {"character": 0, "location": 1, "style": 2, "product": 3}
-    shot_refs = []
-    for ref in raw_refs:
-        rid = ref.get("id") if isinstance(ref, dict) else str(ref)
-        asset = image_by_id.get(rid, {})
-        kind = asset.get("kind", "other")
-        reference_role = ref.get("role") if isinstance(ref, dict) else None
-        reference_role = reference_role or ("character" if kind == "character" else "location" if kind == "background" else "style")
-        if reference_role not in priority:
-            reference_role = "style"
-        path = asset.get("out") or (ref.get("path") if isinstance(ref, dict) else rid)
-        shot_refs.append({"id": rid, "role": reference_role, "path": path})
-    shot_refs.sort(key=lambda r: priority[r["role"]])
     req = {"task": "image_to_video" if ff else "text_to_video", "end_frame": bool(end), "keyframes": len(keyframes), "refs": 0}
     entry, explicit = select_entry(ws, p, role, shot.get("model"), req, f"shot {target}")
     profile = _profile(ws, entry)
-    ref_limit = profile["references"]["max"]
-    if len(shot_refs) > ref_limit:
-        dropped = shot_refs[ref_limit:]
+    shot_refs, dropped = pick_refs(shot, profile, image_doc)
+    if dropped:
         warnings.append("reference limit; dropped: " + ", ".join(r["id"] for r in dropped))
-        shot_refs = shot_refs[:ref_limit]
         req["refs"] = len(shot_refs)
     seconds = _snap(profile, int(shot["seconds"]), warnings)
     if profile["resolutions"] and res not in profile["resolutions"]:

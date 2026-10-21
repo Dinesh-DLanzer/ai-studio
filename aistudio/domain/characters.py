@@ -25,6 +25,47 @@ def resolve_character_image(p, rel):
     raise ServiceError(f"image not found: {rel}")
 
 
+ROLE_ORDER = {"character": 0, "location": 1, "style": 2, "product": 3}      # plan 15 order: what gets cut last first
+CLOSE = ("close-up", "extreme-close-up", "medium-close", "insert")
+WIDE = ("extreme-wide", "wide", "medium-wide")
+# preferred identity views per framing: faces for close-ups, full body for wide shots
+VIEW_PREFERENCE = {"close": ("front", "expression", "three-quarter", "profile"),
+                   "wide": ("full-body", "front", "three-quarter"),
+                   "mid": ("three-quarter", "front", "full-body", "profile")}
+
+
+def pick_refs(shot, profile, images=None):
+    """-> (kept, dropped): the references a shot sends, cut to profile.references.max.
+
+    Each ref is {id, role, path}. A character with identity-sheet views contributes the view that fits direction.framing (plus a second
+    one, ranked last so it is the first thing cut); a character without views contributes its master image as before. Order: characters,
+    location, style, product (plan 15), then the extra character views; `dropped` lists what the limit cut."""
+    by = {i.get("id"): i for i in (images or {}).get("images", []) if i.get("id")}
+    framing = (shot.get("direction") or {}).get("framing")
+    pref = VIEW_PREFERENCE["close" if framing in CLOSE else "wide" if framing in WIDE else "mid"]
+    main, extra = [], []
+    for ref in shot.get("refs") or []:
+        rid = ref.get("id") if isinstance(ref, dict) else str(ref)
+        asset = by.get(rid, {})
+        kind = asset.get("kind", "other")
+        role = ref.get("role") if isinstance(ref, dict) else None
+        role = role or ("character" if kind == "character" else "location" if kind == "background"
+                        else asset.get("role") if asset.get("role") in ROLE_ORDER else "style")
+        if role not in ROLE_ORDER:
+            role = "style"
+        path = asset.get("out") or (ref.get("path") if isinstance(ref, dict) else rid)
+        views = sorted((v for v in asset.get("views") or [] if v.get("view") in pref and v.get("file")), key=lambda v: pref.index(v["view"]))
+        if role == "character" and views:
+            main.append({"id": views[0]["id"], "role": role, "path": views[0]["file"]})
+            extra += [{"id": v["id"], "role": role, "path": v["file"]} for v in views[1:2]]
+        else:
+            main.append({"id": rid, "role": role, "path": path})
+    main.sort(key=lambda r: ROLE_ORDER[r["role"]])
+    refs = main + extra
+    limit = (profile.get("references") or {}).get("max", len(refs))
+    return refs[:limit], refs[limit:]
+
+
 class CharacterDomain:
     def __init__(self, ws):
         self.ws = ws

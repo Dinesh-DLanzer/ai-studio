@@ -86,6 +86,36 @@ class ConsentTests(CastBase):
         self.assertTrue(api_docs.agent_allowed("GET", "/api/projects/{name}/consent"))
 
 
+class PickRefsTests(unittest.TestCase):
+    DOC = {"images": [
+        {"id": "ana", "kind": "character", "out": "stills/ana.png", "views": [
+            {"id": "ana_front", "view": "front", "file": "stills/ana_front.png"},
+            {"id": "ana_full", "view": "full-body", "file": "stills/ana_full.png"},
+            {"id": "ana_prof", "view": "profile", "file": "stills/ana_prof.png"}]},
+        {"id": "bo", "kind": "character", "out": "stills/bo.png"},
+        {"id": "cafe", "kind": "background", "out": "stills/cafe.png"},
+        {"id": "ink", "kind": "other", "role": "style", "out": "stills/ink.png"},
+        {"id": "mug", "kind": "other", "role": "product", "out": "stills/mug.png"}]}
+
+    def pick(self, framing, mx, refs=("mug", "ink", "cafe", "bo", "ana")):
+        from aistudio.domain.characters import pick_refs
+        shot = {"refs": list(refs), "direction": {"framing": framing} if framing else {}}
+        kept, dropped = pick_refs(shot, {"references": {"max": mx}}, self.DOC)
+        return [r["id"] for r in kept], [r["id"] for r in dropped]
+
+    def test_close_up_uses_face_view_and_wide_uses_full_body(self):
+        self.assertEqual(self.pick("close-up", 9)[0][:2], ["bo", "ana_front"])
+        self.assertEqual(self.pick("wide", 9)[0][:2], ["bo", "ana_full"])
+        self.assertEqual(self.pick(None, 9, ("bo",))[0], ["bo"])          # master image when a character has no views (plan 15 behaviour)
+
+    def test_order_and_cut_to_limit(self):
+        kept, dropped = self.pick("wide", 9)
+        self.assertEqual(kept, ["bo", "ana_full", "cafe", "ink", "mug", "ana_front"])      # extra identity view is ranked last
+        kept, dropped = self.pick("wide", 3)
+        self.assertEqual((kept, dropped), (["bo", "ana_full", "cafe"], ["ink", "mug", "ana_front"]))
+        self.assertEqual(self.pick("wide", 0), ([], ["bo", "ana_full", "cafe", "ink", "mug", "ana_front"]))
+
+
 @unittest.skipUnless(HAVE_API, "needs fastapi + httpx")
 class ConsentApiTests(unittest.TestCase):
     def setUp(self):
