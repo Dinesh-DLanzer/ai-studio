@@ -1,10 +1,20 @@
+import type { CapabilityProfile } from "../settings/types";
+
+export interface Direction {
+  preset?: string; movement?: string; framing?: string; angle?: string; lens_mm?: number; aperture?: string; focus?: string; speed?: string; motion?: number; lighting?: string;
+}
 export interface Shot {
   id: string; model: string; seconds: number; prompt: string; resolution?: string; audio?: boolean;
   first_frame?: string; note?: string; final_ok?: boolean; final_clip?: string;
+  direction?: Direction; end_frame?: string; keyframes?: { at: number; image: string }[]; camera?: string;
 }
 export interface ImageSpec { id: string; kind: "character" | "background" | "frame" | "other"; out: string; prompt: string; refs: string[]; aspect_ratio?: string; }
 export interface Review { verdict: "pass" | "warn" | "fail"; findings: { frame: number; issue: string; severity: string }[]; summary: string; cost?: number; model?: string; advisory?: string; }
-export interface ProposalSummary { provider?: string | null; prompt?: string; seconds?: number | null; audio?: boolean | null; first_frame?: string | null; refs?: string[]; file?: string | null; }
+export interface PriceBreakdown { base: number | null; minimum_applied: boolean; billed_seconds?: number; refs: number; audio: boolean; total: number | null; retrieved_at?: string | null; age_days?: number | null; source?: string | null; }
+export interface ProposalSummary {
+  provider?: string | null; prompt?: string; seconds?: number | null; audio?: boolean | null; first_frame?: string | null; refs?: string[]; file?: string | null;
+  profile?: CapabilityProfile; warnings?: string[]; end_frame?: string | null; price_breakdown?: PriceBreakdown;
+}
 export interface Proposal { id: string; kind: string; shot: string; model: string; price: number; status: string; code?: string; expires: number; summary?: ProposalSummary; }
 export interface ActivityJob {
   id: string;

@@ -343,7 +343,9 @@ export function CostsTab({ o, name, load }: TabProps) {
                           <span className={`tag ${modelTag(r.model)}`}>{String(r.model || "").split("/").pop()}</span>
                         </td>
                         <td className="text-slate-400">{r.seconds ? `${r.seconds}.0s` : "—"}</td>
-                        <td className="text-right font-bold">{money(Number(r.cost || 0))}</td>
+                        <td className="text-right font-bold">{money(Number(r.cost || 0))}
+                          {r.over_quoted && <div className="text-[0.7rem] font-semibold text-amber-300" data-testid="over-quoted">Charged more than the {money(Number(r.quoted))} quote</div>}
+                        </td>
                         <td>
                           <Badge
                             tone={

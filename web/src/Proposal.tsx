@@ -5,6 +5,7 @@ import { Button, Modal, Badge, money } from "./ui";
 import { useToast } from "./toast";
 import { notifyDone, notifyStart } from "./notify";
 import type { Proposal } from "./types";
+import ProposalDetails from "./components/ProposalDetails";
 
 export const Spinner = ({ size = 14 }: { size?: number }) => <Loader2 size={size} className="animate-spin" aria-hidden />;
 
@@ -72,6 +73,7 @@ export function useProposal(project: string, mode: string, onDone: () => void) {
             <div className="text-2xl font-extrabold tracking-tight">{money(prop.price)}</div>
             <div className="mt-1 text-xs text-slate-400">This exact request, price and prompt. If anything changes after you approve, the approval is void.</div>
           </div>
+          <ProposalDetails summary={prop.summary} />
           {msg && <p className="text-red-600">{msg}</p>}
           <div className="flex items-center justify-end gap-2">
             <label className="mr-auto flex items-center gap-1.5 text-xs text-slate-400"><input type="checkbox" checked={override} onChange={(e) => setOverride(e.target.checked)} /> override stop-loss / attempt limit</label>
