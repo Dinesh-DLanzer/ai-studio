@@ -238,7 +238,8 @@ class PipelineDomain:
                    "review_type": payload.get("review_type"), "provider": payload.get("provider")}
         if kind in ("image", "clip"):      # what the model can do, and what was adjusted, shown to the approver
             sp = spec_mod.resolve(self.ws, p, kind, target)
-            summary.update(profile=sp.profile, warnings=sp.warnings, end_frame=sp.end_frame or None)
+            summary.update(profile=sp.profile, warnings=sp.warnings, end_frame=sp.end_frame or None,
+                           price_breakdown=self.ws.pricing().breakdown(sp.entry["card"], sp.seconds, sp.resolution, sp.audio, len(sp.refs)))
         return approvals.propose(p, kind, target, model, price, payload, reveal_code=reveal_code, summary=summary, options=options)
 
     def approve_human(self, name, pid):
@@ -294,7 +295,7 @@ class PipelineDomain:
             except (gates.GateError, approvals.ApprovalError) as e:
                 raise ServiceError(str(e)) from None
             attempt = attempts + 1
-            log = {"shot": target, "stage": stage, "model": model, "attempt": str(attempt), "job_id": "", "seconds": "", "provider": payload.get("provider", ""), "actor": grant.actor, "override": "yes" if override else "no"}
+            log = {"shot": target, "stage": stage, "model": model, "attempt": str(attempt), "job_id": "", "seconds": "", "provider": payload.get("provider", ""), "actor": grant.actor, "override": "yes" if override else "no", "quoted": price}
         activity.record_start(p, pid, kind, target, model, price, source="mcp")
         try:
             # Copy and verify every approved media input before handing it to an
@@ -402,7 +403,7 @@ class PipelineDomain:
             end = payload.get("end_frame")
             if end:
                 req["last_frame"] = str(inputs / end)
-            res = self.ws.runner().video(req, project_dir=p, grant=grant, first=self._pin("video", p, payload, model),
+            res = self.ws.runner().video(req, project_dir=p, grant=grant, first=self._pin("video", p, payload, model), ref_count=len(self._clip_spec(p, target)[0].get("refs") or []),
                                          required={"task": "image_to_video" if ff else "text_to_video", "end_frame": bool(end), "refs": 0})
             job = res.get("job") or {}
             row = {**log, "model": res.get("model") or model, "provider": res.get("provider") or log["provider"], "cost_source": res.get("cost_source", ""),

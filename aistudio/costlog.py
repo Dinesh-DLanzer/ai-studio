@@ -1,7 +1,7 @@
 """E2: cost log (cost_log.csv) and discard-aware totals.  Standard library only.
 
 Contract (tests in tests/test_costlog.py):
-  LOG_COLS = ["timestamp","shot","stage","model","resolution","seconds","attempt","job_id","cost","result","provider","cost_source","actor","override"]
+  LOG_COLS = ["timestamp","shot","stage","model","resolution","seconds","attempt","job_id","cost","result","provider","cost_source","actor","override","quoted"]
       (provider and cost_source were added in v2; older log files without them are still read, the values are then missing/"")
   read_log(pdir: Path) -> list[dict]        rows of pdir/cost_log.csv as dicts of strings; [] if the file is missing.
   append_log(pdir: Path, row: dict) -> None  appends one row, migrating legacy headers atomically first.
@@ -29,7 +29,7 @@ from . import project_lock
 # Also serialize threads when project_lock's platform-specific flock is unavailable.
 _WRITE_LOCK = threading.Lock()
 
-LOG_COLS = ["timestamp", "shot", "stage", "model", "resolution", "seconds", "attempt", "job_id", "cost", "result", "provider", "cost_source", "actor", "override"]
+LOG_COLS = ["timestamp", "shot", "stage", "model", "resolution", "seconds", "attempt", "job_id", "cost", "result", "provider", "cost_source", "actor", "override", "quoted"]
 
 
 def read_log(pdir):

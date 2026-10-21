@@ -118,7 +118,7 @@ class CostDomain:
             sp = spec_mod.resolve(self.ws, p, "clip", s["id"], loose=True)
             k = pricing_mod.key(sp.provider, sp.model)
             rates[k] = sp.entry["card"]["per_second"]
-            priced.append({**s, "model": k, "seconds": sp.seconds, "resolution": sp.resolution, "audio": sp.audio})
+            priced.append({**s, "model": k, "seconds": sp.seconds, "resolution": sp.resolution, "audio": sp.audio, "price": sp.price})
         todo = [i for i in images["images"] if i["id"] not in existing]
         image_total = 0.0
         for i in todo:
@@ -149,7 +149,13 @@ class CostDomain:
 
     def costs(self, name):
         p = self.ws.pdir(name)
-        return {"split": costlog.split(p), "rows": costlog.read_log(p), "budget": self.ws._read(p, "budget.json", {})}
+        rows = costlog.read_log(p)
+        for r in rows:      # quoted vs charged: flag a charge more than 10% above the quote (rows from before the column have no quote)
+            try:
+                r["over_quoted"] = float(r["quoted"]) > 0 and float(r["cost"]) > float(r["quoted"]) * 1.1
+            except (KeyError, TypeError, ValueError):
+                r["over_quoted"] = False
+        return {"split": costlog.split(p), "rows": rows, "budget": self.ws._read(p, "budget.json", {})}
 
     def sync(self, name):
         """Resolve clips left pending by a timeout: fetch real status/cost and save the clip."""
