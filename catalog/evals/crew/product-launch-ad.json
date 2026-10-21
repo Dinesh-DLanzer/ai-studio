@@ -1,0 +1,28 @@
+{
+  "id": "product-launch-ad",
+  "name": "Wireless Earbuds Product Ad (16:9)",
+  "description": "Commercial product ad showcasing active noise cancelling and battery life.",
+  "format": "16:9",
+  "stage": "write_storyboard",
+  "brief": {
+    "brand": "Aura Sound",
+    "goal": "Launch Aura Pods Pro with studio quality sound",
+    "story": "Commuter steps onto a noisy subway; puts on earbuds; subway noise drops to absolute silence; vivid cinematic soundwave visuals.",
+    "audience": "Tech enthusiasts and commuters",
+    "platform": "youtube",
+    "length_seconds": 30,
+    "language": "English",
+    "characters": "Maya (music enthusiast and everyday commuter)",
+    "setting": "Bustling subway station transitioning to abstract sonic space",
+    "cta": "Hear the silence. Pre-order now at AuraSound.com.",
+    "budget_cap": 0.80
+  },
+  "expected": {
+    "min_shots": 4,
+    "max_shots": 8,
+    "format": "16:9",
+    "language": "English",
+    "script": "latin",
+    "max_paid_total": 0.80
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "id": "english-coffee-reel",
+  "name": "English Artisan Coffee Reel (9:16)",
+  "description": "Fast-paced social media reel launch for ready-to-drink nitro cold brew.",
+  "format": "9:16",
+  "stage": "write_storyboard",
+  "brief": {
+    "brand": "Volt Cold Brew",
+    "goal": "Drive pre-orders for can launch",
+    "story": "Cracking open a sleek nitro cold brew can; slow-motion pour over clear ice; urban creators energized on the go.",
+    "audience": "Active urban professionals 20-35",
+    "platform": "tiktok",
+    "length_seconds": 15,
+    "language": "English",
+    "characters": "Alex (creative freelancer in minimalist hoodie)",
+    "setting": "Sunlit loft creative studio and bustling downtown street",
+    "cta": "Grab your first pack with 20% off today.",
+    "budget_cap": 0.50
+  },
+  "expected": {
+    "min_shots": 3,
+    "max_shots": 6,
+    "format": "9:16",
+    "language": "English",
+    "script": "latin",
+    "max_paid_total": 0.50
+  }
+}

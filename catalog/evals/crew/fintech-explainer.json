@@ -1,0 +1,28 @@
+{
+  "id": "fintech-explainer",
+  "name": "Fintech Budgeting App Explainer (16:9)",
+  "description": "Clear, approachable explainer video demonstrating automated savings and smart categorization.",
+  "format": "16:9",
+  "stage": "write_storyboard",
+  "brief": {
+    "brand": "PennyWise",
+    "goal": "Explain 3-step automatic micro-investing",
+    "story": "Person overwhelmed by spreadsheets; opens PennyWise app; animated rounded-up purchases into emergency savings; peace of mind.",
+    "audience": "Young adults starting personal finance",
+    "platform": "youtube",
+    "length_seconds": 30,
+    "language": "English",
+    "characters": "Sam (young professional)",
+    "setting": "Clean home desk setup with phone and stylized UI overlays",
+    "cta": "Download PennyWise free and start building wealth automatically.",
+    "budget_cap": 0.80
+  },
+  "expected": {
+    "min_shots": 4,
+    "max_shots": 8,
+    "format": "16:9",
+    "language": "English",
+    "script": "latin",
+    "max_paid_total": 0.80
+  }
+}
