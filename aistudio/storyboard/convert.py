@@ -239,7 +239,10 @@ def parse_story(md):
 def _audio_suffix(shot, language=None):
     if shot.get("voice_mode") == "silent" or not shot.get("voice_line"):
         return ""
-    spoken = '"%s" (%s).' % (shot["voice_line"], shot.get("english", ""))
+    line, english = shot["voice_line"], (shot.get("english") or "").strip()
+    # The translation is only added when it says something different: repeating the same words made the video model say the line twice.
+    spoken = '"%s" (%s).' % (line, english) if english and english.casefold() != line.strip().casefold() else '"%s".' % line
+    spoken += " Say only this line once, then stay silent: no other speech, no other language."      # a clip longer than the line otherwise gets filled with improvised speech
     lang = " in %s" % language if language else ""      # tells the video model which language to speak
     if shot["voice_mode"] == "on-camera":
         return " AUDIO: The speaker says this line%s, clearly, lips synced to the words: " % lang + spoken

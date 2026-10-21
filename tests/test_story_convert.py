@@ -94,8 +94,8 @@ class TestStory(unittest.TestCase):
         a, b, c = d["shots"]
         self.assertEqual((a["id"], a["model"], a["seconds"], a["resolution"], a["audio"], a["first_frame"]),
                          ("s01", "google/veo-3.1-lite", 4, "720p", True, "stills/s01.png"))
-        self.assertEqual(a["prompt"], 'SUBJECT: Ramesh. ACTION: checks phone. AUDIO: The speaker says this line, clearly, lips synced to the words: "கடை இருக்கு..." (I have a shop...).')
-        self.assertEqual(b["prompt"], 'SUBJECT: phone. AUDIO: An off-camera narrator says this line, clearly: "ஆனா சேல்ஸ் வரவே இல்ல!" (But no sales!).')
+        self.assertEqual(a["prompt"], 'SUBJECT: Ramesh. ACTION: checks phone. AUDIO: The speaker says this line, clearly, lips synced to the words: "கடை இருக்கு..." (I have a shop...). Say only this line once, then stay silent: no other speech, no other language.')
+        self.assertEqual(b["prompt"], 'SUBJECT: phone. AUDIO: An off-camera narrator says this line, clearly: "ஆனா சேல்ஸ் வரவே இல்ல!" (But no sales!). Say only this line once, then stay silent: no other speech, no other language.')
         self.assertEqual((c["audio"], "first_frame" in c, c["prompt"]), (False, False, "SUBJECT: montage."))
         self.assertEqual(a["note"], "HOOK 0:00–0:04")
         self.assertEqual(S.to_shots_doc(self.st, model="m", seconds=6, resolution="480p")["shots"][0]["seconds"], 6)
@@ -113,6 +113,15 @@ class TestStory(unittest.TestCase):
         self.assertEqual(len(d["images"]), 1)
         self.assertEqual(d["images"][0], {"id": "s01", "kind": "frame", "out": "stills/s01.png", "aspect_ratio": "9:16",
                                           "refs": [], "prompt": "Ramesh stands outside his quiet shop."})
+
+
+    def test_the_translation_is_not_repeated_when_it_is_the_same_words(self):
+        from aistudio.storyboard.convert import _audio_suffix
+        same = _audio_suffix({"voice_mode": "on-camera", "voice_line": "Hello friends!", "english": "Hello friends!"})
+        self.assertEqual(same.count("Hello friends!"), 1)
+        self.assertIn("Say only this line once", same)
+        self.assertEqual(_audio_suffix({"voice_mode": "on-camera", "voice_line": "Hello friends!", "english": "hello FRIENDS!"}).count("ello"), 1)
+        self.assertIn("(Namaste friends)", _audio_suffix({"voice_mode": "on-camera", "voice_line": "Vanakkam nanbargale", "english": "Namaste friends"}))
 
 
 if __name__ == "__main__":
