@@ -269,7 +269,15 @@ class RoleRunner:
                 except Retryable:
                     st = {"status": "pending", "error": None, "cost": None}
                 if st["status"] == "done":
-                    return {"status": "done", "bytes": adapter.video_download(job), "reported": st.get("cost"), "job": state["job"]}
+                    try:
+                        data = adapter.video_download(job)
+                    except Retryable:
+                        # The provider job already exists; never retry the whole
+                        # callback and submit a second paid job. Reconcile later.
+                        return {"status": "pending", "job": state["job"]}
+                    except ProviderError as ex:
+                        raise _Stop(f"video download failed: {scrub(ex, adapter.secret)[:200]}")
+                    return {"status": "done", "bytes": data, "reported": st.get("cost"), "job": state["job"]}
                 if st["status"] == "failed":
                     raise _Stop(st.get("error") or "extension failed")
                 if self.clock() - t0 > limit:
@@ -308,7 +316,15 @@ class RoleRunner:
                 except Retryable:
                     st = {"status": "pending", "error": None, "cost": None}
                 if st["status"] == "done":
-                    return {"status": "done", "bytes": adapter.video_download(job), "reported": st.get("cost"), "job": state["job"]}
+                    try:
+                        data = adapter.video_download(job)
+                    except Retryable:
+                        # The provider job already exists; never retry the whole
+                        # callback and submit a second paid job. Reconcile later.
+                        return {"status": "pending", "job": state["job"]}
+                    except ProviderError as ex:
+                        raise _Stop(f"video download failed: {scrub(ex, adapter.secret)[:200]}")
+                    return {"status": "done", "bytes": data, "reported": st.get("cost"), "job": state["job"]}
                 if st["status"] == "failed":
                     raise _Stop(st.get("error") or "generation failed")
                 if self.clock() - t0 > limit:

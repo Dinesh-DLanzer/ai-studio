@@ -32,7 +32,7 @@ export default function Notifications() {
     const timer = window.setInterval(() => void poll(), 5000);
     return () => { alive = false; window.clearInterval(timer); };
   }, []);
-  
+
   const running = list.filter((n) => n.status === "running").length; const unread = list.filter((n) => n.status !== "running" && !n.read).length;
   return (
     <Menu.Root onOpenChange={(o) => { if (!o) markAllRead(); }}>

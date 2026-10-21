@@ -50,7 +50,11 @@ class Script(Adapter):
         return s
 
     def video_download(self, job):
-        return b"MP4"
+        steps = self.plan.get("download:" + job["model"], [b"MP4"])
+        s = steps.pop(0) if len(steps) > 1 else steps[0]
+        if isinstance(s, Exception):
+            raise s
+        return s
 
 
 def setup(plan=None, chains=None, providers=None, secrets=("g", "o", "k", "r"), mode_fake=False, overrides=None):
@@ -258,6 +262,13 @@ class TestPaid(unittest.TestCase):
         self.assertIn("price unknown", str(c.exception))
         self.assertIsNone(c.exception.price)
         self.assertEqual(Script.log, [])
+
+    def test_download_retry_does_not_resubmit_paid_video(self):
+        r, p = setup({"g": {"download:veo": [Retryable("temporary")]}},
+                     {"video": ch(("g", "veo"))})
+        out = r.video(self.REQ, project_dir=p, grant=self.grant(p, "clip", 0.2, model="veo"))
+        self.assertEqual(out["status"], "pending")
+        self.assertEqual([event for event in Script.log if event[2] == "submit"], [("g", "veo", "submit")])
 
     def test_unknown_image_and_video_fallback_need_new_approval(self):
         for role, kind, primary, price, operation in (("image", "image", "img", 0.04, "image"),
