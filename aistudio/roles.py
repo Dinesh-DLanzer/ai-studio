@@ -230,8 +230,15 @@ class RoleRunner:
                 return float(quoted), "estimated"
         return self.pricing.actual_cost(reported, computed)
 
-    def chat(self, role, messages, opts=None, project_dir=None, allow=None):
-        r = self.run(role, lambda a, m: a.chat(m, messages, opts), project_dir, allow)
+    def chat(self, role, messages, opts=None, project_dir=None, allow=None, tools=None):
+        def _call(a, m):
+            if tools is not None:
+                try:
+                    return a.chat_tools(m, messages, tools, opts)
+                except pbase.Unsupported:
+                    pass
+            return a.chat(m, messages, opts)
+        r = self.run(role, _call, project_dir, allow)
         out = r["result"]
         cost, src = self._cost(role, out, r["card"])
         return {**out, "cost": cost, "cost_source": src, "provider": r["provider"], "attempts": r["attempts"]}
