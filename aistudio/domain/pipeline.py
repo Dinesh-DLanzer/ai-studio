@@ -6,6 +6,7 @@ import shutil
 import tempfile
 
 from aistudio import activity, approvals, chat as chat_mod, costlog, editor as editor_mod, frames as frames_mod, gates, palette as palette_mod, project as project_mod, project_lock, roles as roles_mod
+from aistudio.domain.costs import BudgetStale
 from aistudio.domain.common import REVIEW_PRICE, ServiceError, _ident, _sha
 from aistudio.providers import base as pbase
 from aistudio import character_check
@@ -292,9 +293,9 @@ class PipelineDomain:
             kind, target = prop["kind"], prop["shot"]
             payload, model, price = self._payload_and_price(name, kind, target, prop.get("options"))
             b = self.ws._read(p, "budget.json", {})
-            current_fingerprints = self.ws._costs.fingerprints(p)
-            if b.get("plan_hash") and (b.get("plan_hash") != current_fingerprints["plan_hash"] or b.get("pricing_hash") != current_fingerprints["pricing_hash"]):
-                raise ServiceError("budget approval is stale after a plan or price change; estimate again and ask the human to approve it")
+            stale = self.ws._costs.stale_budget(p, b)
+            if stale:
+                raise BudgetStale(stale)
             rows = costlog.read_log(p)
             stage = {"clip": "final", "image": "image", "image_edit": "image_edit", "clip_extend": "clip_extend", "review": "vision"}[kind]
             pending = [r for r in project_lock.read_reservations(p) if r.get("shot") == target and r.get("stage") == stage]

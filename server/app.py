@@ -93,6 +93,8 @@ def create_app(root=None, token=None, rates_path=None, transport=None, static_di
         try:
             return fn(*a, **kw)
         except ServiceError as e:
+            if hasattr(e, "diff"):
+                return JSONResponse({"detail": str(e), "budget_diff": e.diff}, status_code=400)
             raise HTTPException(400, str(e)) from None
 
     @app.get("/api/health")
@@ -284,7 +286,7 @@ def create_app(root=None, token=None, rates_path=None, transport=None, static_di
                     jobs[jid] = {"status": "done", "result": res}
             except ServiceError as e:
                 with lock:
-                    jobs[jid] = {"status": "error", "error": str(e)}
+                    jobs[jid] = {"status": "error", "error": str(e), **({"budget_diff": e.diff} if hasattr(e, "diff") else {})}
             except Exception as e:   # provider/network failure: report, never crash the server
                 with lock:
                     jobs[jid] = {"status": "error", "error": f"{type(e).__name__}: {e}"}

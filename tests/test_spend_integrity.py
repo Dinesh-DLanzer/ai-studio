@@ -114,5 +114,38 @@ class MultiProcessStopLossTests(unittest.TestCase):
         self.assertEqual(rows[0]["result"], "completed")
 
 
+class BudgetDiffTests(unittest.TestCase):
+    def setUp(self):
+        self.ws, self.p, _ = make_project(self)
+
+    def edit_shot(self, **fields):
+        doc = json.loads((self.p / "shots.json").read_text())
+        doc["shots"][0].update(fields)
+        (self.p / "shots.json").write_text(json.dumps(doc))
+        return doc["shots"][0]["id"]
+
+    def run_image(self):
+        prop = self.ws.propose("demo", "image", "s01")
+        self.ws.approve_human("demo", prop["id"])
+        return self.ws.execute("demo", prop["id"])
+
+    def test_prompt_edit_keeps_budget_valid(self):
+        self.edit_shot(prompt="a completely different prompt")
+        self.assertIn("file", self.run_image())
+
+    def test_seconds_change_voids_budget_with_structured_diff(self):
+        shot_id = self.edit_shot(seconds=8)
+        prop = self.ws.propose("demo", "image", "s01")
+        self.ws.approve_human("demo", prop["id"])
+        with self.assertRaises(ServiceError) as ctx:
+            self.ws.execute("demo", prop["id"])
+        diff = ctx.exception.diff
+        self.assertIn({"field": "seconds", "id": shot_id, "from": 4, "to": 8}, diff["changes"])
+        self.assertIsNotNone(diff["approved_estimate"])
+        self.assertIsNotNone(diff["new_estimate"])
+        self.assertIn("Budget out of date", str(ctx.exception))
+        self.assertEqual(costlog.read_log(self.p), [])
+
+
 if __name__ == "__main__":
     unittest.main()
