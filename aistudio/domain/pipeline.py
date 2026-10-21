@@ -199,6 +199,10 @@ class PipelineDomain:
         variant = self._variant(options)
         if kind in ("image", "clip"):
             self._require_consent(p, kind, target)
+        elif kind in ("image_edit", "clip_extend") and options.get("source"):
+            stem = Path(str(options["source"])).stem      # editing or extending a real person's asset needs the same human-recorded consent
+            ids = {stem, stem.split("_edit_a")[0], stem.split("_extended")[0], stem.split(".v")[0], stem.split("_final_a")[0], target}
+            consent_mod.require_assets(p, self.ws._read(p, "images.json", {"images": []}), sorted(ids))
         if kind == "image":
             sp = spec_mod.resolve(self.ws, p, "image", target)
             spec, refs, prompt = self.ws._image_spec(p, target)
@@ -346,8 +350,13 @@ class PipelineDomain:
             attempted = {r["attempt"] for r in rows if r["shot"] == ledger and r["stage"] == stage}
             attempted.update(str(r["attempt"]) for r in pending)
             attempts = len(attempted)
+            base = target.split(".v")[0]
+            family = {(r["shot"], str(r["attempt"])) for r in rows if (r["shot"] == base or r["shot"].startswith(base + ".v")) and r["stage"] == stage}
+            family.update((r.get("shot"), str(r["attempt"])) for r in project_lock.read_reservations(p)
+                          if (r.get("shot") == base or str(r.get("shot", "")).startswith(base + ".v")) and r.get("stage") == stage)
+            gate_attempts = max(attempts, len(family))      # variants of a shot count toward the shot's attempt cap (they cannot multiply it)
             try:
-                gates.check_run(b, costlog.spent(p) + project_lock.reserved(p), price, attempts if kind in ("clip", "image_edit", "clip_extend") else 0, override=override)
+                gates.check_run(b, costlog.spent(p) + project_lock.reserved(p), price, gate_attempts if kind in ("clip", "image_edit", "clip_extend") else 0, override=override)
                 request_digest = approvals.request_hash(kind, target, model, price, payload)
                 grant = approvals.consume(p, pid, request_digest)
                 project_lock.reserve(p, pid, price, actor=grant.actor, shot=ledger, stage=stage, attempt=attempts + 1,

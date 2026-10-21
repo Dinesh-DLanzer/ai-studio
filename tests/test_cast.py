@@ -383,3 +383,17 @@ class ConsentApiTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestReviewNotesFixed(unittest.TestCase):
+    def test_edit_of_a_real_person_asset_needs_consent(self):
+        from tests.test_spec import make
+        ws, p = make(self)
+        (p / "stills").mkdir(exist_ok=True)
+        (p / "stills" / "maya.png").write_bytes(b"x")
+        doc = ws._read(p, "images.json", {"images": []})
+        doc.setdefault("images", []).append({"id": "maya", "kind": "character", "out": "stills/maya.png", "prompt": "p", "refs": [], "aspect_ratio": "3:2", "real_person": True})
+        ws.put_images("demo", doc)
+        with self.assertRaises(Exception) as cm:
+            ws._pipeline._payload_and_price("demo", "image_edit", "maya", {"source": "stills/maya.png", "prompt": "swap"})
+        self.assertIn("consent", str(cm.exception).lower())
