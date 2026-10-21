@@ -128,6 +128,17 @@ class TestApprovals(unittest.TestCase):
         with self.assertRaises(A.ApprovalError):
             A.redeem_code(self.p, challenge["id"], challenge["code"], "proposal", "proposal", "hash", "second", now=101.0)
 
+    def test_fallback_code_locks_after_too_many_wrong_tries(self):
+        secret = "secret"
+        challenge = A.issue_code(self.p, "proposal", "proposal", "hash", secret, now=100.0)
+        wrong = "000000" if challenge["code"] != "000000" else "000001"
+        for i in range(A.MAX_TRIES):
+            with self.assertRaises(A.ApprovalError):
+                A.redeem_code(self.p, challenge["id"], wrong, "proposal", "proposal", "hash", secret, now=101.0 + i)
+        # even the correct code no longer works once locked
+        with self.assertRaises(A.ApprovalError):
+            A.redeem_code(self.p, challenge["id"], challenge["code"], "proposal", "proposal", "hash", secret, now=120.0)
+
     def test_negative_price(self):
         with self.assertRaises(A.ApprovalError):
             self.prop(price=-1)
