@@ -153,22 +153,19 @@ class TestAiSettingsAndCap(Base):
         self.assertIn("built-in", off["source"])
         self.assertTrue(all(m["free"] for m in off["models"]))
 
-    def test_paid_chat_is_logged_and_capped(self):
+    def test_unpriced_paid_chat_is_refused_before_provider_call(self):
         s = self.ws.ai_settings()["stored"]
         s.update(allow_paid=True, ai_cap_usd=0.5); s["chat"]["models"] = ["openai/gpt-5"]
         self.ws.put_ai_settings(s)
-        t = FakeTransport([chat_reply({"reply": "one"}, 0.4), chat_reply({"reply": "two"}, 0.4), chat_reply({"reply": "three"}, 0.4)])
+        t = FakeTransport([chat_reply({"reply": "one"}, 0.4)])
         ws = Workspace(self.ws.root, transport=t); HERM.real_projects(self)
-        self.assertEqual(ws.chat_send("demo", "hi")["reply"], "one")
-        self.assertEqual(ws.ai_spent("demo"), 0.4)
-        self.assertEqual(ws.chat_send("demo", "again")["reply"], "two")       # 0.4 < 0.5 cap: allowed, now 0.8 spent
         with self.assertRaises(ServiceError) as c:
-            ws.chat_send("demo", "third")
+            ws.chat_send("demo", "hi")
         self.assertIn("cap", str(c.exception))
-        self.assertEqual(len(t.calls), 2)                                    # the refused call never reached the provider
+        self.assertEqual(len(t.calls), 0)                                    # unpriced calls cannot be bounded against the cap
         rows = [r for r in ws.costs("demo")["rows"] if r["stage"] == "chat"]
-        self.assertEqual([(r["shot"], r["cost"]) for r in rows], [("_ai", "0.4"), ("_ai", "0.4")])
-        self.assertAlmostEqual(ws.costs("demo")["split"]["total"], 0.8)
+        self.assertEqual(rows, [])
+        self.assertEqual(ws.ai_spent("demo"), 0)
 
     def test_free_chat_logs_nothing(self):
         t = FakeTransport([chat_reply({"reply": "hi"}, 0.0)])

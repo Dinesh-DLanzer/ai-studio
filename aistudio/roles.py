@@ -214,12 +214,19 @@ class RoleRunner:
     def _cost(self, role, out, card, usage=None, extra=None):
         reported = out.get("cost")
         computed = None
-        if role in ("chat", "verify", "vision"):
-            computed = self.pricing.text_cost(card, usage or out.get("usage"))
-        elif role == "image":
-            computed = self.pricing.image_price(card, (extra or {}).get("refs", 0))
-        elif role == "video" and extra:
-            computed = self.pricing.video_price(card, extra["seconds"], extra.get("resolution", "720p"), extra.get("audio", False), extra.get("refs", 0))
+        try:
+            if role in ("chat", "verify", "vision"):
+                computed = self.pricing.text_cost(card, usage or out.get("usage"))
+            elif role == "image":
+                computed = self.pricing.image_price(card, (extra or {}).get("refs", 0))
+            elif role == "video" and extra:
+                computed = self.pricing.video_price(card, extra["seconds"], extra.get("resolution", "720p"), extra.get("audio", False), extra.get("refs", 0))
+        except (KeyError, TypeError, ValueError):
+            computed = None
+        if computed is None and reported is None and card and not self.pricing.is_free(card) and role not in ("chat", "verify", "vision"):
+            quoted = (extra or {}).get("quoted")
+            if quoted is not None:
+                return float(quoted), "estimated"
         return self.pricing.actual_cost(reported, computed)
 
     def chat(self, role, messages, opts=None, project_dir=None, allow=None):
@@ -251,7 +258,7 @@ class RoleRunner:
         price_of = lambda e: self.pricing.image_price(e["card"], len(refs))
         r = self.run("image", lambda a, m: a.image(m, prompt, refs, aspect_ratio, opts), project_dir, None, approved_price, price_of, first=first, required=required)
         out = r["result"]
-        cost, src = self._cost("image", out, r["card"], extra={"refs": len(refs)})
+        cost, src = self._cost("image", out, r["card"], extra={"refs": len(refs), "quoted": grant.price if grant else None})
         return {**out, "cost": cost, "cost_source": src, "provider": r["provider"], "attempts": r["attempts"]}
 
     def image_edit(self, image_path, prompt, edit_mode="inpaint_insertion", mask_mode="MASK_MODE_BACKGROUND", aspect_ratio="9:16", opts=None, project_dir=None, *, grant=None):
@@ -260,7 +267,7 @@ class RoleRunner:
         price_of = lambda e: self.pricing.image_price(e["card"])
         r = self.run("image", lambda a, m: a.image_edit(m, image_path, prompt, edit_mode=edit_mode, mask_mode=mask_mode, opts={**(opts or {}), "aspect_ratio": aspect_ratio}), project_dir, None, approved_price, price_of)
         out = r["result"]
-        cost, src = self._cost("image", out, r["card"])
+        cost, src = self._cost("image", out, r["card"], extra={"quoted": grant.price if grant else None})
         return {**out, "cost": cost, "cost_source": src, "provider": r["provider"], "attempts": r["attempts"]}
 
     def video_price(self, entry, req, refs=0):
@@ -310,7 +317,7 @@ class RoleRunner:
         base = {"provider": r["provider"], "model": r["model"], "attempts": r["attempts"], "job": out["job"]}
         if out["status"] == "pending":
             return {**base, "status": "pending", "cost": 0.0, "cost_source": "unknown"}
-        cost, src = self._cost("video", {"cost": out.get("reported")}, r["card"], extra=req)
+        cost, src = self._cost("video", {"cost": out.get("reported")}, r["card"], extra={**req, "quoted": grant.price if grant else None})
         return {**base, "status": "done", "bytes": out["bytes"], "cost": cost, "cost_source": src}
 
     def video_task(self, task, video_path, prompt, params, reference=None, seconds=5, resolution="720p", project_dir=None, *, grant=None, timeout=None, first=None):
@@ -320,7 +327,7 @@ class RoleRunner:
             raise ChainError("no model catalog is loaded, so no model can be shown to support this task", code="unconfigured")
         grant = self._grant("video", project_dir, grant, first)
         approved_price = grant.price if grant else None
-        price_of = lambda e: self.pricing.task_price(e["card"], seconds, resolution)
+        price_of = lambda e: self.pricing.task_price(e["card"], seconds, resolution, refs=int(reference is not None))
         pol = self.policy("video", project_dir) if not self._fake("video", project_dir) else cfg.default_policy("video")
         limit = timeout if timeout is not None else pol.get("timeout", 1500)
         state = {}
@@ -359,7 +366,10 @@ class RoleRunner:
         if out["status"] == "pending":
             return {**base, "status": "pending", "cost": 0.0, "cost_source": "unknown"}
         reported = out.get("reported")
-        cost, src = self.pricing.actual_cost(reported, self.pricing.task_price(r["card"], seconds, resolution))
+        computed = self.pricing.task_price(r["card"], seconds, resolution, refs=int(reference is not None))
+        cost, src = self.pricing.actual_cost(reported, computed)
+        if reported is None and computed is None and r["card"] and not self.pricing.is_free(r["card"]) and grant:
+            cost, src = grant.price, "estimated"
         return {**base, "status": "done", "bytes": out["bytes"], "cost": cost, "cost_source": src}
 
     def video(self, req, project_dir=None, *, grant=None, timeout=None, first=None, required=None, ref_count=0):
@@ -406,7 +416,7 @@ class RoleRunner:
         base = {"provider": r["provider"], "model": r["model"], "attempts": r["attempts"], "job": out["job"]}
         if out["status"] == "pending":
             return {**base, "status": "pending", "cost": 0.0, "cost_source": "unknown"}
-        cost, src = self._cost("video", {"cost": out.get("reported")}, r["card"], extra={**req, "refs": ref_count})
+        cost, src = self._cost("video", {"cost": out.get("reported")}, r["card"], extra={**req, "refs": ref_count, "quoted": grant.price if grant else None})
         return {**base, "status": "done", "bytes": out["bytes"], "cost": cost, "cost_source": src}
 
     def review(self, prompt, images, opts=None, project_dir=None, *, grant=None, allow_paid=False):
@@ -423,7 +433,9 @@ class RoleRunner:
         if st["status"] == "pending":
             return {"status": "pending", "job": job}
         if st["status"] == "failed":
-            return {"status": "failed", "error": st.get("error") or "failed", "cost": float(st.get("cost") or 0), "job": job}
+            reported = st.get("cost")
+            return {"status": "failed", "error": st.get("error") or "failed", "cost": None if reported is None else float(reported),
+                    "cost_source": "reported" if reported is not None else "unreconciled", "job": job}
         card = self.pricing.card(p["id"], p["type"], job["model"])
         cost, src = self.pricing.actual_cost(st.get("cost"), self.pricing.video_price(card, (req or {}).get("seconds", 0), (req or {}).get("resolution", "720p"), (req or {}).get("audio", False)) if req else None)
         return {"status": "done", "bytes": adapter.video_download(job), "cost": cost, "cost_source": src, "job": job}

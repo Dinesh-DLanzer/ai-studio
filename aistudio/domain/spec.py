@@ -154,6 +154,17 @@ def clip_seconds(p, options, entry=None):
     return real
 
 
+def _source_resolution(p, options, entry=None):
+    """Return the source clip's billing bucket; unreadable fake media uses the legacy 720p quote."""
+    from aistudio import editor
+    source = (options or {}).get("source")
+    info = editor.probe(p / str(source)) if source else None
+    height = (info or {}).get("height") if info else None
+    if not height:
+        return "720p"
+    return "480p" if height <= 480 else "720p" if height <= 720 else "1080p" if height <= 1080 else "4k"
+
+
 def resolve(ws, p, kind, target, options=None, loose=False):
     """GenerationSpec for an image, image_edit, clip or clip_extend. loose=True lets a first frame that is not made yet pass (planning)."""
     options = options or {}
@@ -183,20 +194,23 @@ def resolve(ws, p, kind, target, options=None, loose=False):
     runner = ws.runner()
     if kind in AI_TOOLS:
         task = AI_TOOLS[kind]
+        refs = options.get("refs") or ([options["reference"]] if options.get("reference") else [])
         entry, _ = select_entry(ws, p, role, None, {"task": task}, kind.replace("_", " "))
         seconds = clip_seconds(p, options, entry)
-        price = ws.pricing().task_price(entry["card"], seconds, "720p")
+        resolution = _source_resolution(p, options, entry)
+        price = ws.pricing().task_price(entry["card"], seconds, resolution, len(refs))
         if price is None:
             raise ServiceError(f"No price for {entry['model']} ({task.replace('_', ' ')}, {seconds}s). Set it in Settings > Model Configuration.")
-        return GenerationSpec(kind, target, role, entry, task, _profile(ws, entry), seconds, "720p", price=price, warnings=_age(ws.pricing(), entry))
+        return GenerationSpec(kind, target, role, entry, task, _profile(ws, entry), seconds, resolution, price=price, warnings=_age(ws.pricing(), entry))
     if kind == "clip_extend":
         entry, _ = select_entry(ws, p, role, None, {}, "clip extension")
         profile = _profile(ws, entry)
         seconds = _snap(profile, int(options.get("seconds", 5)), warnings)
-        price = runner.video_price(entry, {"seconds": seconds, "resolution": "720p", "audio": False})
+        resolution = _source_resolution(p, options, entry)
+        price = runner.video_price(entry, {"seconds": seconds, "resolution": resolution, "audio": False})
         if price is None:
             raise ServiceError(f"No price for {entry['model']} at 720p ({seconds}s). Set it in Settings > Model Configuration.")
-        return GenerationSpec(kind, target, role, entry, "video_extend", profile, seconds, "720p", "16:9", price=price, warnings=warnings + _age(pricing, entry))
+        return GenerationSpec(kind, target, role, entry, "video_extend", profile, seconds, resolution, "16:9", price=price, warnings=warnings + _age(pricing, entry))
     pipe = ws.pipeline_domain
     shot, doc, res, audio, ff = (pipe._clip_spec_loose if loose else pipe._clip_spec)(p, target)
     end = shot.get("end_frame") or ""

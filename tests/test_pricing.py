@@ -26,6 +26,10 @@ class TestPricing(unittest.TestCase):
         self.assertIsNone(self.p.video_price(c, 4, "1080p", True))
         self.assertIsNone(self.p.video_price(None, 4))
 
+    def test_task_price_includes_reference_image_fees(self):
+        card = {"kind": "video", "per_second": {"720p": 0.1}, "per_reference_image": 0.03}
+        self.assertEqual(self.p.task_price(card, 4, "720p", refs=2), 0.46)
+
     def test_suggest(self):
         s = self.p.suggest("veo-3.1-lite-generate-preview")
         self.assertEqual(s["from"], "google/veo-3.1-lite")

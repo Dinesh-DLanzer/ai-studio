@@ -1,7 +1,9 @@
 import json
+from concurrent.futures import ThreadPoolExecutor
 import tempfile, unittest
 from pathlib import Path
 from aistudio import approvals as A
+from aistudio import project_lock
 
 
 class TestApprovals(unittest.TestCase):
@@ -88,6 +90,24 @@ class TestApprovals(unittest.TestCase):
         A.approve(self.p, r["id"], r["code"])
         grant = A.consume(self.p, r["id"], r["hash"])
         self.assertEqual(grant.price, self.req["price"])
+
+    def test_concurrent_fallback_guesses_cannot_exceed_try_limit(self):
+        challenge = A.issue_code(self.p, "p", "clip", "hash", "secret")
+        def guess(_):
+            try:
+                A.redeem_code(self.p, challenge["id"], "wrong", "p", "clip", "hash", "secret")
+            except A.ApprovalError:
+                pass
+        with ThreadPoolExecutor(max_workers=12) as pool:
+            list(pool.map(guess, range(12)))
+        item = next(x for x in json.loads((self.p / "approval_challenges.json").read_text()) if x["id"] == challenge["id"])
+        self.assertEqual(item["tries"], A.MAX_TRIES)
+        self.assertEqual(item["status"], "locked")
+
+    def test_project_lock_is_reentrant_for_same_thread(self):
+        with project_lock.lock(self.p):
+            with project_lock.lock(self.p):
+                self.assertTrue((self.p / ".spend.lock").exists())
 
     def test_consume_rejects_wrong_request_hash(self):
         r = self.prop()

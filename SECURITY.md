@@ -19,6 +19,7 @@ AI Studio runs **on your own machine** and calls paid AI APIs with **your own ke
 ## Limits (be honest)
 - This is a single-user local tool. A hostile process running as you on the same machine can read project metadata and the external local state. The fallback HMAC secret is kept in the OS keychain when available (or the 0600 external secrets file); challenge codes are never stored in a project. The approval design stops accidents and agent self-approval, not a malicious local user.
 - Do not expose the server to a network. If you change the bind address, add real authentication first.
+- Live grant capabilities are intentionally kept in memory and fail closed after a server restart; the consumed approval cannot be replayed.
 - AI clips can contain unwanted people, garbled text, or logos: always review frames and listen to audio yourself. The vision check is advisory.
 
 ## Reporting

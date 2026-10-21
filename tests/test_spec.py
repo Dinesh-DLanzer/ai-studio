@@ -2,6 +2,7 @@ import tests._hermetic as HERM  # noqa: F401  (first: no real keys, no network)
 import json
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 from aistudio import catalog as catalog_mod, costlog
@@ -10,6 +11,7 @@ from aistudio.providers.adapters.replicate import ReplicateAdapter
 from aistudio.schemas.catalog import validate_profile
 from aistudio.secrets import SecretStore
 from aistudio.service import ServiceError, Workspace
+from aistudio.domain.spec import _source_resolution
 from tests._adapter_helpers import FakeTransport
 
 FIX = Path(__file__).parent / "fixtures" / "replicate" / "model_video.json"
@@ -39,6 +41,15 @@ def shots(ws, *items):
 
 
 class TestLookupOrder(unittest.TestCase):
+    def test_source_resolution_price_bucket_uses_probe_height(self):
+        p = Path(tempfile.mkdtemp())
+        with patch("aistudio.editor.probe", return_value={"height": 1080}):
+            self.assertEqual(_source_resolution(p, {"source": "clips/source.mp4"}), "1080p")
+        with patch("aistudio.editor.probe", return_value={"height": 2160}):
+            self.assertEqual(_source_resolution(p, {"source": "clips/source.mp4"}), "4k")
+        with patch("aistudio.editor.probe", return_value=None):
+            self.assertEqual(_source_resolution(p, {"source": "clips/fake.mp4"}), "720p")
+
     def test_user_over_cache_over_builtin_over_default(self):
         d = Path(tempfile.mkdtemp())
         cat = catalog_mod.Catalog(d)
