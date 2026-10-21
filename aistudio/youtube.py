@@ -260,33 +260,48 @@ def check_consent(project_dir):
                 consent.require_assets(p, images_doc, ids)
         except Exception as se:
             raise ValueError(f"real person consent required before YouTube upload: {se}") from se
-    marked = consent.real_person_shas(p)
-    if marked:
-        from aistudio.domain.common import _sha
-        edit_file = p / "edit.json"
-        if edit_file.is_file():
-            try:
-                edit_doc = json.loads(edit_file.read_text(encoding="utf-8"))
-                shas_to_check = []
-                for track in edit_doc.get("tracks", {}).values():
-                    if isinstance(track, list):
-                        for item in track:
-                            if not isinstance(item, dict):
-                                continue
-                            rel = item.get("src") or item.get("file") or item.get("source") or item.get("path")
-                            if isinstance(rel, str) and rel:
-                                fp = (p / rel).resolve()
-                                if fp.is_relative_to(p.resolve()) and fp.is_file():
-                                    h = _sha(fp)
-                                    if h in marked:
-                                        shas_to_check.append(h)
-                if shas_to_check:
-                    consent.require_shas(p, shas_to_check)
-            except Exception as se:
-                raise ValueError(f"real person consent required before YouTube upload: {se}") from se
+    from aistudio.domain.common import _sha
+    edit_file = p / "edit.json"
+    if edit_file.is_file():
+        try:
+            edit_doc = json.loads(edit_file.read_text(encoding="utf-8"))
+            shas_to_check = []
+            for track in edit_doc.get("tracks", {}).values():
+                if isinstance(track, list):
+                    for item in track:
+                        if not isinstance(item, dict):
+                            continue
+                        rel = item.get("src") or item.get("file") or item.get("source") or item.get("path")
+                        if isinstance(rel, str) and rel:
+                            fp = (p / rel).resolve()
+                            if fp.is_relative_to(p.resolve()) and fp.is_file():
+                                shas_to_check.append(_sha(fp))
+            if shas_to_check:
+                consent.require_verified_shas(p, shas_to_check)
+        except Exception as se:
+            raise ValueError(f"real person consent required before YouTube upload: {se}") from se
+
+
+def _thumbnail_info(root, rel):
+    try:
+        thumb = _project_file(root, rel)
+    except Exception as exc:
+        raise ValueError("thumbnail is missing or cannot be read") from exc
+    mime = mimetypes.guess_type(thumb.name)[0]
+    if mime not in ("image/png", "image/jpeg"):
+        raise ValueError("thumbnail must be a readable PNG or JPEG")
+    digest = hashlib.sha256()
+    try:
+        with thumb.open("rb") as stream:
+            for block in iter(lambda: stream.read(1024 * 1024), b""):
+                digest.update(block)
+    except OSError:
+        raise ValueError("thumbnail cannot be read or hashed") from None
+    return thumb, digest.hexdigest(), mime
 
 
 def preview(project_dir, preset, preflight=None, privacy="private", channel_title=""):
+    from aistudio import consent
     if not channel_title:
         raise ValueError("could not verify the connected YouTube channel; reconnect and try again")
     root = Path(project_dir).resolve()
@@ -306,19 +321,12 @@ def preview(project_dir, preset, preflight=None, privacy="private", channel_titl
         for block in iter(lambda: f.read(1024 * 1024), b""):
             digest.update(block)
 
+    consent.require_verified_shas(root, [digest.hexdigest()])
     thumb_sha = ""
     thumb_rel = doc.get("thumbnail", "")
     if thumb_rel:
-        try:
-            thumb_file = _project_file(root, thumb_rel)
-            if thumb_file.is_file():
-                td = hashlib.sha256()
-                with thumb_file.open("rb") as tf:
-                    for blk in iter(lambda: tf.read(1024 * 1024), b""):
-                        td.update(blk)
-                thumb_sha = td.hexdigest()
-        except Exception:
-            pass
+        _thumb, thumb_sha, _mime = _thumbnail_info(root, thumb_rel)
+        consent.require_verified_shas(root, [thumb_sha])
 
     return {"file": rel.as_posix(), "size": file_path.stat().st_size, "sha256": digest.hexdigest(),
             "title": doc["title"], "description": doc["description"], "privacy": privacy if privacy in ("private", "unlisted", "public") else "private",
@@ -432,6 +440,10 @@ def upload_file(secret_store, call, path, metadata, privacy="private", progress=
 
 
 def queue_upload(ws, project, preset, privacy="private", confirm_title="", preflight=None, runner=None, sha256="", title=""):
+    if not isinstance(confirm_title, str) or not confirm_title.strip():
+        raise ValueError("type the exact publish title to confirm the upload")
+    if not isinstance(sha256, str) or not sha256.strip():
+        raise ValueError("preview sha256 is required to confirm the upload")
     pdir = ws.pdir(project)
     check_consent(pdir)
     doc = publish.get(ws, project)
@@ -484,13 +496,13 @@ def upload_job(secret_store, project_dir, job, progress, call=None):
         meta = {"title": payload["title"], "description": payload.get("description", ""),
                 "tags": payload.get("tags", []), "category_id": payload.get("category_id", "22"),
                 "thumbnail": payload.get("thumbnail", "")}
-        if meta["thumbnail"] and payload.get("thumbnail_sha256"):
-            thumb = _project_file(project_dir, meta["thumbnail"])
-            t_digest = hashlib.sha256()
-            with thumb.open("rb") as tf:
-                for block in iter(lambda: tf.read(1024 * 1024), b""):
-                    t_digest.update(block)
-            if t_digest.hexdigest() != payload["thumbnail_sha256"]:
+        thumb = None
+        thumb_mime = None
+        if meta["thumbnail"]:
+            if not payload.get("thumbnail_sha256"):
+                raise ValueError("thumbnail sha256 is required; review and queue again")
+            thumb, actual_thumb_sha, thumb_mime = _thumbnail_info(project_dir, meta["thumbnail"])
+            if actual_thumb_sha != payload["thumbnail_sha256"]:
                 raise ValueError("thumbnail changed after confirmation; review and queue again")
         result = upload_file(secret_store, call, f, meta, payload.get("privacy", "private"), progress,
                              file_size=path.stat().st_size, filename=path.name)
@@ -499,22 +511,11 @@ def upload_job(secret_store, project_dir, job, progress, call=None):
 
     if meta["thumbnail"]:
         try:
-            thumb = _project_file(project_dir, meta["thumbnail"])
             if thumb.stat().st_size > 50 * 1024 * 1024:
                 raise ValueError("thumbnail exceeds YouTube's 50 MB limit")
-            mime = mimetypes.guess_type(thumb.name)[0]
-            if mime not in ("image/png", "image/jpeg"):
-                raise ValueError("thumbnail must be a PNG or JPEG")
-            if payload.get("thumbnail_sha256"):
-                t_digest = hashlib.sha256()
-                with thumb.open("rb") as tf:
-                    for block in iter(lambda: tf.read(1024 * 1024), b""):
-                        t_digest.update(block)
-                if t_digest.hexdigest() != payload["thumbnail_sha256"]:
-                    raise ValueError("thumbnail changed after confirmation; review and queue again")
             tokens = valid_tokens(secret_store, call)
             url = UPLOAD + "/thumbnails/set?videoId=" + urllib.parse.quote(result["video_id"])
-            resp = _call(call, "POST", url, headers={"Authorization": "Bearer " + tokens["access_token"], "Content-Type": mime}, body=thumb.read_bytes())
+            resp = _call(call, "POST", url, headers={"Authorization": "Bearer " + tokens["access_token"], "Content-Type": thumb_mime}, body=thumb.read_bytes())
             if int(resp.get("status", 200)) >= 400:
                 raise ValueError(_safe_provider_error(resp))
         except Exception as exc:

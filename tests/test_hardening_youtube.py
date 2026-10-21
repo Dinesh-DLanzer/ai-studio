@@ -54,6 +54,7 @@ class TestHardeningYouTube(unittest.TestCase):
         self.video_file = self.export_dir / "demo.mp4"
         self.video_bytes = b"MP4-VIDEO-PAYLOAD-FOR-TEST"
         self.video_file.write_bytes(self.video_bytes)
+        (self.video_file.with_name(self.video_file.name + ".meta.json")).write_text(json.dumps({"editor_render": True}), encoding="utf-8")
         self.video_sha = hashlib.sha256(self.video_bytes).hexdigest()
 
         # Create thumbnail
@@ -62,7 +63,9 @@ class TestHardeningYouTube(unittest.TestCase):
         self.thumb_file = self.thumb_dir / "thumb.png"
         self.thumb_bytes = b"\x89PNG\r\n\x1a\nTHUMBNAIL-BYTES"
         self.thumb_file.write_bytes(self.thumb_bytes)
+        (self.thumb_file.with_name(self.thumb_file.name + ".meta.json")).write_text(json.dumps({"source_sha": "test-source-sha"}), encoding="utf-8")
         self.thumb_sha = hashlib.sha256(self.thumb_bytes).hexdigest()
+        HERM.register_test_media(self.project, "exports/youtube/platform/demo.mp4", "exports/thumbnails/thumb.png")
 
         self.publish_doc = {
             "platform": "youtube",
@@ -136,6 +139,33 @@ class TestHardeningYouTube(unittest.TestCase):
             # Correct previewed values -> 200
             res = client.post(url, headers=headers, json={"preset": "youtube", "sha256": self.video_sha, "title": "My Great Video", "privacy": "private"})
             self.assertEqual(res.status_code, 200)
+
+    def test_queue_upload_requires_title_and_sha_at_function_boundary(self):
+        for kwargs in ({"confirm_title": "", "sha256": self.video_sha},
+                       {"confirm_title": "My Great Video", "sha256": ""}):
+            with self.assertRaises(ValueError):
+                youtube.queue_upload(self.ws, "demo", "youtube", preflight=[], runner=self.runner, **kwargs)
+
+    def test_named_thumbnail_must_be_readable_supported_and_hashable(self):
+        self.thumb_file.unlink()
+        with self.assertRaisesRegex(ValueError, "thumbnail"):
+            youtube.preview(self.project, "youtube", preflight=[], channel_title="AI Studio Test Channel")
+        self.thumb_file.write_bytes(self.thumb_bytes)
+        bad = self.project / "exports" / "thumbnails" / "thumb.gif"
+        bad.write_bytes(b"gif")
+        doc = dict(self.publish_doc, thumbnail="exports/thumbnails/thumb.gif")
+        (self.project / "publish.json").write_text(json.dumps(doc), encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "thumbnail"):
+            youtube.preview(self.project, "youtube", preflight=[], channel_title="AI Studio Test Channel")
+
+    def test_upload_job_requires_thumbnail_digest_before_video_upload(self):
+        prev = youtube.preview(self.project, "youtube", preflight=[], channel_title="AI Studio Test Channel")
+        prev.pop("thumbnail_sha256")
+        calls = []
+        with self.assertRaisesRegex(ValueError, "thumbnail"):
+            youtube.upload_job(self.store, self.project, {"payload": prev}, lambda _pct: None,
+                               call=lambda *a, **kw: calls.append(a))
+        self.assertEqual(calls, [])
 
     def test_freeze_thumbnail_sha_at_queue_time_and_refuse_if_changed(self):
         # Preview includes thumbnail_sha256
@@ -214,6 +244,7 @@ class TestHardeningYouTube(unittest.TestCase):
         clip_file = self.project / "clips" / "scene1.mp4"
         clip_file.parent.mkdir(parents=True, exist_ok=True)
         clip_file.write_bytes(b"ACTOR-CLIP-BYTES")
+        HERM.register_test_media(self.project, "clips/scene1.mp4")
         clip_sha = _sha(clip_file)
         consent.mark_real_person(self.project, "scene1", clip_sha, "Actor Alex")
 

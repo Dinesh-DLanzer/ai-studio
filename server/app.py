@@ -719,7 +719,7 @@ def create_app(root=None, token=None, rates_path=None, transport=None, static_di
         data = await request.body()
         if len(data) > 25_000_000:
             raise HTTPException(413, "file too large")
-        guard(ws.add_file, name, rel, data, bool(replace))
+        guard(ws.add_file, name, rel, data, bool(replace), request.state.scope == "agent")
         return {"ok": True}
 
     @app.post("/api/projects/{name}/characters/{aid}/identity-sheet", dependencies=[api])
@@ -753,8 +753,15 @@ def create_app(root=None, token=None, rates_path=None, transport=None, static_di
 
     @app.post("/api/projects/{name}/consent", dependencies=[api])
     async def consent_record(name: str, request: Request):
+        human_session(request)
         b = await request.json()      # agent=False in api_docs: an API key never reaches here
-        return guard(ws.consent_record, name, b.get("subject"), b.get("statement"), b.get("kind", "real_person"), b.get("asset_id"))
+        return guard(ws.consent_record, name, b.get("subject"), b.get("statement"), b.get("kind", "real_person"), b.get("asset_id"), b.get("sha"))
+
+    @app.post("/api/projects/{name}/consent/clear", dependencies=[api])
+    async def consent_clear(name: str, request: Request):
+        human_session(request)
+        b = await request.json()
+        return guard(ws.consent_clear, name, b.get("asset_id"), b.get("clearance"), b.get("sha"))
 
     @app.post("/api/projects/{name}/consent/mark", dependencies=[api])
     async def consent_mark(name: str, request: Request):

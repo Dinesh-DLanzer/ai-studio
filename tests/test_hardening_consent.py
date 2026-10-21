@@ -76,6 +76,7 @@ class TestHardeningConsent(unittest.TestCase):
         # Using driver as reference in motion_transfer requires sha-bound consent
         src = self.p / "clips" / "s01_final_a1.mp4"
         src.write_bytes(b"SRC-VIDEO-BYTES")
+        consent.clear_sha(self.p, _sha(src), "not_a_real_person")
         opts = {"source": "clips/s01_final_a1.mp4", "reference": "clips/driver.mp4", "subject": "Dancer", "seconds": 3}
 
         # Name-only consent is not enough for sha-marked file
@@ -114,6 +115,69 @@ class TestHardeningConsent(unittest.TestCase):
         consent.record(self.p, "Subject", "I consent", sha=sha)
         # Now require_shas must pass
         consent.require_shas(self.p, [derived_sha])
+
+    def test_unregistered_media_is_unverified_until_sha_clearance(self):
+        outsider = self.p / "stills" / "outside-copy.png"
+        outsider.write_bytes(b"re-encoded portrait")
+        sha = _sha(outsider)
+        with self.assertRaisesRegex(ServiceError, "unverified"):
+            consent.require_verified_shas(self.p, [sha])
+        consent.clear_sha(self.p, sha, "not_a_real_person")
+        consent.require_verified_shas(self.p, [sha])
+
+    def test_pipeline_lineage_verifies_derived_media(self):
+        source = self.p / "stills" / "registered.png"
+        source.write_bytes(b"registered source")
+        project_mod.save_json(self.p, "images.json", {"images": [{"id": "registered", "out": "stills/registered.png"}]})
+        derived = self.p / "stills" / "derived.png"
+        derived.write_bytes(b"pipeline result")
+        project_mod.save_json(self.p, "stills/derived.png.meta.json", {"source_sha": _sha(source), "tool": "pipeline"})
+        consent.require_shas(self.p, [_sha(derived)])
+
+    def test_unverified_media_accepts_sha_bound_consent(self):
+        outsider = self.p / "audio" / "voice.wav"
+        outsider.parent.mkdir(exist_ok=True)
+        outsider.write_bytes(b"voice sample")
+        sha = _sha(outsider)
+        with self.assertRaisesRegex(ServiceError, "unverified"):
+            consent.require_verified_shas(self.p, [sha])
+        consent.record(self.p, "Singer", "I consent to this voice", kind="voice", sha=sha)
+        consent.require_verified_shas(self.p, [sha])
+        consent.require_verified_shas(self.p, [sha])
+
+    def test_pipeline_metadata_without_registered_ancestor_is_still_unverified(self):
+        outsider = self.p / "stills" / "fake-lineage.png"
+        outsider.write_bytes(b"copy with forged sidecar")
+        project_mod.save_json(self.p, "stills/fake-lineage.png.meta.json", {"tool": "pipeline", "spec_hash": "anything"})
+        with self.assertRaisesRegex(ServiceError, "unverified"):
+            consent.require_verified_shas(self.p, [_sha(outsider)])
+
+    def test_agent_upload_is_recorded_as_unverified(self):
+        from PIL import Image
+        from io import BytesIO
+        stream = BytesIO()
+        Image.new("RGB", (2, 2), "red").save(stream, format="PNG")
+        self.ws.add_file("demo", "stills/agent-upload.png", stream.getvalue(), is_agent=True)
+        uploaded = self.p / "stills" / "agent-upload.png"
+        meta = json.loads(Path(str(uploaded) + ".meta.json").read_text())
+        self.assertTrue(meta["unverified"])
+        with self.assertRaisesRegex(ServiceError, "unverified"):
+            consent.require_verified_shas(self.p, [_sha(uploaded)])
+
+    def test_sha_clearance_route_is_human_only_even_with_confirm_flag(self):
+        from fastapi.testclient import TestClient
+        from server.app import create_app
+        client = TestClient(create_app(self.root, token="human", static_dir="/nonexistent"))
+        key = client.post("/api/keys", json={"name": "agent"}, headers={"x-aistudio-token": "human"}).json()["key"]
+        outsider = self.p / "stills" / "route-copy.png"
+        outsider.write_bytes(b"external copy")
+        sha = _sha(outsider)
+        url = "/api/projects/demo/consent/clear"
+        denied = client.post(url, json={"sha": sha, "clearance": "not_a_real_person", "confirm": True}, headers={"x-aistudio-token": key})
+        self.assertEqual(denied.status_code, 403)
+        allowed = client.post(url, json={"sha": sha, "clearance": "not_a_real_person"}, headers={"x-aistudio-token": "human"})
+        self.assertEqual(allowed.status_code, 200, allowed.text)
+        consent.require_verified_shas(self.p, [sha])
 
     def test_consent_checked_for_references_of_ordinary_clip_generation(self):
         ref_file = self.p / "stills" / "actor.png"

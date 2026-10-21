@@ -228,7 +228,9 @@ class PipelineDomain:
             stem = Path(str(f)).stem
             ids |= {stem, stem.split("_edit_a")[0], stem.split("_extended")[0], stem.split(".v")[0], stem.split("_final_a")[0]}
         consent_mod.require_assets(p, self.ws._read(p, "images.json", {"images": []}), sorted(ids))
-        consent_mod.require_shas(p, [_sha(self._source_file(p, f, "source")) for f in files])
+        shas = [_sha(self._source_file(p, f, "source")) for f in files]
+        person_operation = kind in ("motion_transfer", "character_swap", "replace", "restyle")
+        (consent_mod.require_verified_shas if person_operation else consent_mod.require_shas)(p, shas)
         if kind in ("motion_transfer", "character_swap"):
             subject = str(options.get("subject") or "").strip()
             if not subject:
@@ -296,7 +298,7 @@ class PipelineDomain:
             rel = f.relative_to(p.resolve()).as_posix()
             digest = _sha(f)
             if key == "video":
-                consent_mod.require_shas(p, [digest])
+                consent_mod.require_verified_shas(p, [digest])
                 imgdoc = self.ws._read(p, "images.json", {"images": []})
                 ids = [Path(rel).stem, Path(rel).stem.split(".v")[0]]
                 consent_mod.require_assets(p, imgdoc, ids)
@@ -325,9 +327,9 @@ class PipelineDomain:
                 seconds = max((d for d in offered if d <= seconds), default=offered[0])
         if kind == "transcribe":
             seconds = duration
-        elif kind == "lipsync":
+        elif kind in ("lipsync", "transcribe"):
             seconds = duration
-            consent_mod.require_shas(p, [digest for _key, _rel, digest, _f in files])
+            consent_mod.require_verified_shas(p, [digest for _key, _rel, digest, _f in files])
         chars = len(text)
         price = self.ws.pricing().audio_task_price(entry["card"], task, chars=chars, seconds=seconds)
         if price is None:
@@ -403,14 +405,17 @@ class PipelineDomain:
                 chars = [c for c in dict.fromkeys(ids) if by.get(c, {}).get("kind") == "character" and (p / by[c]["out"]).is_file() and c != target]
                 if not chars:
                     raise ServiceError(f"{target} has no character with a made reference image to compare against")
+                consent_mod.require_verified_shas(p, [_sha(f), *[_sha(p / by[c]["out"]) for c in chars]])
                 e = self.ws._primary("vision", p)
                 return {"review_type": "drift", "target": target, "file": f.resolve().relative_to(p.resolve()).as_posix(), "file_sha": _sha(f), "provider": e["provider"]["id"],
                         "characters": chars, "refs": [{"path": by[c]["out"], "sha": _sha(p / by[c]["out"])} for c in chars]}, e["model"], REVIEW_PRICE
             if options.get("review_type") == "character":
                 f = self._source_file(p, options.get("file"), "character image")
+                consent_mod.require_verified_shas(p, [_sha(f)])
                 e = self.ws._primary("vision", p)
                 return {"review_type": "character", "target": target, "file": f.relative_to(p.resolve()).as_posix(), "file_sha": _sha(f), "provider": e["provider"]["id"]}, e["model"], REVIEW_PRICE
             f = self._review_file(p, target)
+            consent_mod.require_verified_shas(p, [_sha(f)])
             e = self.ws._primary("vision", p)
             payload = {"target": target, "file": f.resolve().relative_to(p.resolve()).as_posix(), "file_sha": _sha(f), "provider": e["provider"]["id"]}
             if f.suffix == ".mp4":
@@ -424,6 +429,7 @@ class PipelineDomain:
                 spec = next((i for i in imgs["images"] if i["id"] == target), {"id": target})
                 by = {i["id"]: i for i in imgs["images"]}
                 refs = [(p / by[r]["out"]) for r in spec.get("refs", []) if r in by and (p / by[r]["out"]).exists()]
+                consent_mod.require_verified_shas(p, [_sha(f), *[_sha(r) for r in refs]])
                 payload["review_prompt"] = image_checklist.build_prompt(spec, [r.name for r in refs])
                 payload["image_spec"] = {k: spec.get(k) for k in ("id", "kind", "out", "prompt", "refs", "aspect_ratio")}
                 payload["refs"] = [{"path": r.resolve().relative_to(p.resolve()).as_posix(), "sha": _sha(r)} for r in refs]

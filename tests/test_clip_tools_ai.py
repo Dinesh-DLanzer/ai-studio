@@ -34,6 +34,7 @@ class Base(unittest.TestCase):
         (self.p / SRC).write_bytes(b"FAKEMP4-source")
         (self.p / "clips" / "driver.mp4").write_bytes(b"FAKEMP4-driver")
         (self.p / "stills" / "newchar.png").write_bytes(b"PNG-new")
+        HERM.register_test_media(self.p, SRC, "clips/driver.mp4", "stills/newchar.png")
         self.ws.estimate("demo", 0.5)
         self.ws.approve_budget("demo")
 
@@ -155,6 +156,7 @@ class TestConsent(Base):
         doc = self.ws._read(self.p, "images.json")
         doc["images"][0].update(id="s01_final_a1", real_person=True, subject="Asha Rao")
         self.ws.put_images("demo", doc)
+        HERM.register_test_media(self.p, SRC, "clips/driver.mp4", "stills/newchar.png")
         with self.assertRaises(ServiceError):
             self.propose("upscale_ai")
         self.consent()
@@ -169,10 +171,12 @@ class TestConsent(Base):
         doc = self.ws._read(self.p, "images.json")
         doc["images"][0].update(id="s01_final_a1", real_person=True, subject="Asha Rao")
         self.ws.put_images("demo", doc)
+        HERM.register_test_media(self.p, SRC, "clips/driver.mp4", "stills/newchar.png")
         sha = _sha(self.p / SRC)
         consent.mark_real_person(self.p, "s01_final_a1", sha)
         doc["images"][0].pop("real_person")                                      # an agent clears the flag
         self.ws.put_images("demo", doc)
+        HERM.register_test_media(self.p, SRC, "clips/driver.mp4", "stills/newchar.png")
         self.consent()                                                           # a name-only consent is not enough for marked bytes
         with self.assertRaises(ServiceError) as e:
             self.propose("restyle")
@@ -192,7 +196,8 @@ class TestConsent(Base):
         self.ws.consent_mark("demo", "s01")
         self.ws.consent_record("demo", "Asha Rao", "I agree", asset_id="s01")
         self.assertEqual(len(consent.real_person_shas(self.p)), 1)
-        self.assertEqual(sum(1 for x in consent.read(self.p) if x.get("sha")), 2)
+        sha = _sha(self.p / "stills" / "s01.png")
+        self.assertEqual(sum(1 for x in consent.read(self.p) if x.get("sha") == sha), 2)
 
 
 class TestEntryPoints(Base):

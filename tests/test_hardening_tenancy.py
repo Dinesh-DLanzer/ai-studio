@@ -8,6 +8,8 @@ from unittest.mock import patch
 
 import tests._hermetic as HERM
 from aistudio import context, costlog, library, store
+from aistudio.service import Workspace
+from aistudio import approvals, project_lock
 from aistudio.tenancy import Role
 
 
@@ -141,6 +143,55 @@ class TestHardeningTenancy(unittest.TestCase):
             self.assertEqual(rows_2[0]["shot"], "s2")
             self.assertAlmostEqual(costlog.spent(pdir), 2.75)
             self.assertAlmostEqual(costlog.split(pdir)["total"], 2.75)
+
+    def test_hosted_project_files_approvals_locks_and_trash_are_tenant_scoped(self):
+        with patch.dict(os.environ, {"AISTUDIO_HOSTED": "1"}):
+            ws = Workspace(self.root)
+            a = context.RequestContext("tenant-a", "user-a", Role.WORKSPACE_EDITOR)
+            b = context.RequestContext("tenant-b", "user-b", Role.WORKSPACE_EDITOR)
+            with context.use_context(a):
+                ws.create_project("same")
+                p_a = ws.pdir("same")
+                (p_a / "private.txt").write_text("tenant a")
+                proposal = approvals.propose(p_a, "image", "s1", "m", 1, {})
+                project_lock.reserve(p_a, "proposal-a", 1)
+                trash_id = ws.delete_project("same", "same")["trash"]
+                self.assertTrue((self.root / "tenants" / "tenant-a" / "_trash" / trash_id).exists())
+            with context.use_context(b):
+                ws.create_project("same")
+                p_b = ws.pdir("same")
+                self.assertFalse((p_b / "private.txt").exists())
+                self.assertEqual(approvals._load(p_b), [])
+                self.assertEqual(project_lock.read_reservations(p_b), [])
+                self.assertEqual(ws.trash_list(), [])
+                with self.assertRaises(Exception):
+                    approvals.get(p_b, proposal["id"])
+            with context.use_context(a):
+                self.assertEqual(ws.trash_restore(trash_id)["name"], "same")
+                self.assertEqual((ws.pdir("same") / "private.txt").read_text(), "tenant a")
+
+    def test_hosted_tenant_ids_reject_traversal_and_symlink_roots(self):
+        with patch.dict(os.environ, {"AISTUDIO_HOSTED": "1"}):
+            ws = Workspace(self.root)
+            for tenant_id in ("../escape", "a/b", "a\\b"):
+                with context.use_context(context.RequestContext(tenant_id, "u", Role.WORKSPACE_EDITOR)):
+                    with self.assertRaises(RuntimeError):
+                        context.get_context()
+                    with self.assertRaises(RuntimeError):
+                        ws.create_project("demo")
+            outside = self.root / "outside"
+            outside.mkdir()
+            (self.root / "tenants").mkdir(exist_ok=True)
+            (self.root / "tenants" / "tenant-link").symlink_to(outside, target_is_directory=True)
+            with context.use_context(context.RequestContext("tenant-link", "u", Role.WORKSPACE_EDITOR)):
+                with self.assertRaises(RuntimeError):
+                    ws.create_project("demo")
+
+    def test_local_project_layout_is_unchanged(self):
+        ws = Workspace(self.root)
+        ws.create_project("demo")
+        self.assertTrue((self.root / "projects" / "demo").is_dir())
+        self.assertFalse((self.root / "tenants").exists())
 
 
 if __name__ == "__main__":

@@ -3,6 +3,7 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
 import os
+import re
 
 
 @dataclass(frozen=True)
@@ -18,6 +19,13 @@ def is_hosted():
 
 _UNSET = object()
 _CURRENT = ContextVar("aistudio_request_context", default=_UNSET)
+_TENANT_ID = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+
+
+def validate_tenant_id(tenant_id):
+    if not isinstance(tenant_id, str) or not _TENANT_ID.fullmatch(tenant_id) or tenant_id in (".", "..", "local"):
+        raise RuntimeError("invalid tenant id")
+    return tenant_id
 
 
 def get_context():
@@ -27,6 +35,7 @@ def get_context():
             raise RuntimeError("request context must be set explicitly in hosted mode")
         if ctx.tenant_id in (None, "", "local") or ctx.role in ("org_owner", None):
             raise RuntimeError("no default local tenant or org_owner allowed in hosted mode")
+        validate_tenant_id(ctx.tenant_id)
         return ctx
     if ctx is _UNSET:
         return RequestContext()
