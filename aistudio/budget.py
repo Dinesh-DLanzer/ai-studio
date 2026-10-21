@@ -35,7 +35,7 @@ def estimate(shots_doc, images_doc, rates, existing_images=(), failure=0.0, imag
         res = shot.get("resolution", final_resolution)
         audio = shot.get("audio", global_audio)
         
-        cost = clip_cost(rates, model, res, seconds, audio) / (1 - failure)
+        cost = (shot["price"] if "price" in shot else clip_cost(rates, model, res, seconds, audio)) / (1 - failure)      # "price": already quoted from the shot's GenerationSpec
         cost = round(cost, 6)
         
         per_shot.append({"id": shot_id, "seconds": seconds, "cost": cost})

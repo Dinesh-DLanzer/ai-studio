@@ -118,7 +118,7 @@ class CostDomain:
             sp = spec_mod.resolve(self.ws, p, "clip", s["id"], loose=True)
             k = pricing_mod.key(sp.provider, sp.model)
             rates[k] = sp.entry["card"]["per_second"]
-            priced.append({**s, "model": k, "seconds": sp.seconds, "resolution": sp.resolution, "audio": sp.audio})
+            priced.append({**s, "model": k, "seconds": sp.seconds, "resolution": sp.resolution, "audio": sp.audio, "price": sp.price})
         todo = [i for i in images["images"] if i["id"] not in existing]
         image_total = 0.0
         for i in todo:

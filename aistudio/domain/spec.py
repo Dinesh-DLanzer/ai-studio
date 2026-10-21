@@ -100,6 +100,12 @@ def select_entry(ws, p, role, model_ref=None, required=None, label="request"):
     raise ServiceError(f"No {role} model can serve this {label} ({'; '.join(reasons)}). Add one that can (built-in catalog: {hint}).")
 
 
+def _age(pricing, entry):
+    """[warning] when the model's price card is undated or older than 30 days (shown to the approver; never blocks)."""
+    w = pricing.age_warning(entry.get("card"))
+    return [w] if w and entry.get("ptype") != "fake" and not pricing.is_free(entry.get("card")) else []
+
+
 def _snap(profile, seconds, warnings):
     ds = profile["durations"]
     if not ds or seconds in ds:
@@ -123,9 +129,10 @@ def resolve(ws, p, kind, target, options=None, loose=False):
         req = {"task": "text_to_image", "refs": len(refs)}
         entry, explicit = select_entry(ws, p, role, spec.get("model"), req, f"image {target}")
         profile = _profile(ws, entry)
-        price = pricing.image_price(entry["card"])
+        price = pricing.image_price(entry["card"], len(refs))
         if price is None:
             raise ServiceError(f"No price set for {entry['model']}. Set it in Settings > Model Configuration before generating images.")
+        warnings += _age(pricing, entry)
         return GenerationSpec(kind, target, role, entry, "text_to_image", profile, aspect_ratio=spec.get("aspect_ratio", "9:16"), explicit=explicit,
                               refs=[{"id": r.stem, "path": r.relative_to(p).as_posix()} for r in refs if r.is_relative_to(p)], price=price, warnings=warnings)
     if kind == "image_edit":
@@ -133,7 +140,7 @@ def resolve(ws, p, kind, target, options=None, loose=False):
         price = pricing.image_price(entry["card"])
         if price is None:
             raise ServiceError(f"No price set for {entry['model']}. Set it in Settings > Model Configuration before editing stills.")
-        return GenerationSpec(kind, target, role, entry, "image_edit", _profile(ws, entry), price=price)
+        return GenerationSpec(kind, target, role, entry, "image_edit", _profile(ws, entry), price=price, warnings=_age(pricing, entry))
     runner = ws.runner()
     if kind == "clip_extend":
         entry, _ = select_entry(ws, p, role, None, {}, "clip extension")
@@ -142,7 +149,7 @@ def resolve(ws, p, kind, target, options=None, loose=False):
         price = runner.video_price(entry, {"seconds": seconds, "resolution": "720p", "audio": False})
         if price is None:
             raise ServiceError(f"No price for {entry['model']} at 720p ({seconds}s). Set it in Settings > Model Configuration.")
-        return GenerationSpec(kind, target, role, entry, "video_extend", profile, seconds, "720p", "16:9", price=price, warnings=warnings)
+        return GenerationSpec(kind, target, role, entry, "video_extend", profile, seconds, "720p", "16:9", price=price, warnings=warnings + _age(pricing, entry))
     pipe = ws.pipeline_domain
     shot, doc, res, audio, ff = (pipe._clip_spec_loose if loose else pipe._clip_spec)(p, target)
     end = shot.get("end_frame") or ""
@@ -165,8 +172,8 @@ def resolve(ws, p, kind, target, options=None, loose=False):
     cam = {"prompt_text": shot.get("camera") or "", "native": {}}
     if cam["prompt_text"] and profile["camera"]["mode"] == "none":
         warnings.append("this model has no camera control; the camera note stays in the prompt only")
-    price = runner.video_price(entry, {"seconds": seconds, "resolution": res, "audio": audio})
+    price = runner.video_price(entry, {"seconds": seconds, "resolution": res, "audio": audio}, len(shot_refs))      # reference charges are part of the quote
     if price is None:
         raise ServiceError(f"No price for {entry['model']} at {res} ({seconds}s). Set it in Settings > Model Configuration.")
     return GenerationSpec(kind, target, role, entry, req["task"], profile, seconds, res, aspect, audio, ff or "", end,
-                          [{"id": r, "path": r} for r in shot_refs], cam, price, warnings, explicit)
+                          [{"id": r, "path": r} for r in shot_refs], cam, price, warnings + _age(pricing, entry), explicit)

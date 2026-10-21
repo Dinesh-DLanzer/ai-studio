@@ -217,9 +217,9 @@ class RoleRunner:
         if role in ("chat", "verify", "vision"):
             computed = self.pricing.text_cost(card, usage or out.get("usage"))
         elif role == "image":
-            computed = self.pricing.image_price(card)
+            computed = self.pricing.image_price(card, (extra or {}).get("refs", 0))
         elif role == "video" and extra:
-            computed = self.pricing.video_price(card, extra["seconds"], extra.get("resolution", "720p"), extra.get("audio", False))
+            computed = self.pricing.video_price(card, extra["seconds"], extra.get("resolution", "720p"), extra.get("audio", False), extra.get("refs", 0))
         return self.pricing.actual_cost(reported, computed)
 
     def chat(self, role, messages, opts=None, project_dir=None, allow=None):
@@ -248,10 +248,10 @@ class RoleRunner:
     def image(self, prompt, refs=(), aspect_ratio="9:16", opts=None, project_dir=None, *, grant=None, first=None, required=None):
         grant = self._grant("image", project_dir, grant, first)
         approved_price = grant.price if grant else None
-        price_of = lambda e: self.pricing.image_price(e["card"])
+        price_of = lambda e: self.pricing.image_price(e["card"], len(refs))
         r = self.run("image", lambda a, m: a.image(m, prompt, refs, aspect_ratio, opts), project_dir, None, approved_price, price_of, first=first, required=required)
         out = r["result"]
-        cost, src = self._cost("image", out, r["card"])
+        cost, src = self._cost("image", out, r["card"], extra={"refs": len(refs)})
         return {**out, "cost": cost, "cost_source": src, "provider": r["provider"], "attempts": r["attempts"]}
 
     def image_edit(self, image_path, prompt, edit_mode="inpaint_insertion", mask_mode="MASK_MODE_BACKGROUND", aspect_ratio="9:16", opts=None, project_dir=None, *, grant=None):
@@ -263,8 +263,8 @@ class RoleRunner:
         cost, src = self._cost("image", out, r["card"])
         return {**out, "cost": cost, "cost_source": src, "provider": r["provider"], "attempts": r["attempts"]}
 
-    def video_price(self, entry, req):
-        return self.pricing.video_price(entry["card"], req["seconds"], req.get("resolution", "720p"), req.get("audio", False))
+    def video_price(self, entry, req, refs=0):
+        return self.pricing.video_price(entry["card"], req["seconds"], req.get("resolution", "720p"), req.get("audio", False), refs)
 
     def video_extend(self, video_path, prompt, seconds=5, aspect_ratio="16:9", resolution="720p", project_dir=None, *, grant=None, timeout=None, first=None):
         grant = self._grant("video", project_dir, grant, first)
@@ -313,11 +313,11 @@ class RoleRunner:
         cost, src = self._cost("video", {"cost": out.get("reported")}, r["card"], extra=req)
         return {**base, "status": "done", "bytes": out["bytes"], "cost": cost, "cost_source": src}
 
-    def video(self, req, project_dir=None, *, grant=None, timeout=None, first=None, required=None):
+    def video(self, req, project_dir=None, *, grant=None, timeout=None, first=None, required=None, ref_count=0):
         """-> {"status":"done","bytes",...} | {"status":"pending","job"} | {"status":"failed","error",...}. Raises ChainError/NeedsNewApproval."""
         grant = self._grant("video", project_dir, grant, first)
         approved_price = grant.price if grant else None
-        price_of = lambda e: self.video_price(e, req)
+        price_of = lambda e: self.video_price(e, req, ref_count)
         pol = self.policy("video", project_dir) if not self._fake("video", project_dir) else cfg.default_policy("video")
         limit = timeout if timeout is not None else pol.get("timeout", 1500)
         state = {}
@@ -357,7 +357,7 @@ class RoleRunner:
         base = {"provider": r["provider"], "model": r["model"], "attempts": r["attempts"], "job": out["job"]}
         if out["status"] == "pending":
             return {**base, "status": "pending", "cost": 0.0, "cost_source": "unknown"}
-        cost, src = self._cost("video", {"cost": out.get("reported")}, r["card"], extra=req)
+        cost, src = self._cost("video", {"cost": out.get("reported")}, r["card"], extra={**req, "refs": ref_count})
         return {**base, "status": "done", "bytes": out["bytes"], "cost": cost, "cost_source": src}
 
     def review(self, prompt, images, opts=None, project_dir=None, *, grant=None, allow_paid=False):
