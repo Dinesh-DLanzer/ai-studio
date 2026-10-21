@@ -176,7 +176,7 @@ export interface ProjectOverview {
   rates?: { models?: Record<string, Record<string, any>> };
   discarded: { file: string; cost: number; reason: string; when: string; original: string }[];
   proposals: Proposal[];
-  files: { stills: string[]; clips: string[] };
+  files: { stills: string[]; clips: string[]; audio?: string[] };
   reviews: Record<string, any>;
 }
 

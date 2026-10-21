@@ -3,7 +3,7 @@ import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
 import * as Dialog from "@radix-ui/react-dialog";
 import * as Menu from "@radix-ui/react-dropdown-menu";
 import {
-  ChevronDown, Clapperboard, Download, FlaskConical, Github, Star, Command as CmdIcon, Film, FolderOpen, HelpCircle, Home, Image as ImageIcon,
+  ArrowLeftRight, ChevronDown, Clapperboard, Download, FlaskConical, Github, Star, Command as CmdIcon, Film, FolderOpen, HelpCircle, Home, Image as ImageIcon,
   LayoutGrid, Library, Menu as MenuIcon, MessageCircle, Pencil, Plus, Search, Settings, Trash2, Users, Volume2, Wand2, Wallet, X,
 } from "lucide-react";
 import { api } from "../api";
@@ -29,6 +29,7 @@ const NAV = [
   { key: "crew", label: "Crew", icon: Users },
   { key: "audio", label: "Audio", icon: Volume2 },
   { key: "review", label: "Review & Export", icon: Clapperboard },
+  { key: "export", label: "Interchange", icon: ArrowLeftRight },
   { key: "costs", label: "Costs", icon: Wallet },
   { key: "discarded", label: "Discarded", icon: Trash2 },
 ];
@@ -174,6 +175,7 @@ function TopBar({ project, openMenu, openPalette }: { project?: ShellProject; op
     shots: "Search projects, scenes, or models...",
     audio: "Search voice lines, music prompts and captions...",
     review: "Edit, trim, add text and export your video...",
+    export: "Export for Premiere, Resolve, Final Cut or OTIO...",
     costs: "Search projects, scenes, or models...",
     discarded: "Search discarded items (scenes, shots, assets, videos)...",
   };
