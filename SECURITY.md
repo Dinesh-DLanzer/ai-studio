@@ -56,9 +56,12 @@ AI Studio runs **on your own machine** and calls paid AI APIs with **your own ke
 ## Library human-only
 - The workspace library search (`search_library` MCP tool, `/api/library*` HTTP routes) is human-session only because it can reveal data across projects. API keys and crew agents cannot access it.
 
-## No uploads/publishing
-- The app **never uploads media to any external service**. There are no integrations that post to YouTube, TikTok, Instagram, etc.
-- "Publishing" in the app means: rendering a local MP4 export, generating delivery metadata (title, description, tags), and packaging it into a zip for a delivery preset (YouTube, TikTok, etc.). The user manually uploads the result.
+## YouTube uploads (human-only, opt-in)
+- The YouTube OAuth client ID and client secret, access token, refresh token, and token expiry are stored through `aistudio/secrets.py` under the `youtube` reference, using the OS keychain when available or the private 0600 `~/.aistudio/secrets.json` file otherwise. They are write-only from Settings and are never returned by the API.
+- Upload requests can be started only from the human-session Publish page after preflight passes and the human confirms the saved title and reviews the exact export path, size, SHA-256, channel, metadata, and privacy.
+- The POST request must carry the previewed SHA-256, title, and privacy setting, and refuses on any mismatch.
+- Timeline and asset consent is strictly enforced: videos containing assets marked `real_person` or marked SHAs cannot be uploaded without recorded consent.
+- API keys, MCP, crew, recipes, and batches cannot upload.
 
 ## Known limits
 - This is a single-user local tool. A hostile process running as you on the same machine can read project metadata and the external local state. The fallback HMAC secret is kept in the OS keychain when available (or the 0600 external secrets file); challenge codes are never stored in a project. The approval design stops accidents and agent self-approval, not a malicious local user.
@@ -71,6 +74,3 @@ AI Studio runs **on your own machine** and calls paid AI APIs with **your own ke
 
 ## Reporting
 Open a private security advisory on the repository, or email the maintainers. Please do not post keys or exploit details in public issues.
-# YouTube uploads
-
-The YouTube OAuth client ID and client secret, access token, refresh token, and token expiry are stored through `aistudio/secrets.py` under the `youtube` reference, using the OS keychain when available or the private 0600 `~/.aistudio/secrets.json` file otherwise. They are write-only from Settings and are never returned by the API. Upload requests can be started only from the human-session Publish page after preflight passes and the human confirms the saved title and reviews the exact export path, size, SHA-256, channel, metadata, and privacy. API keys, MCP, crew, recipes, and batches cannot upload.
