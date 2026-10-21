@@ -131,6 +131,7 @@ R = [
     ("DELETE", "/api/projects/{name}/comments", False, "Review and Export", "Delete a comment. Human session only.", '{"id": "..."}', '{"id", "deleted": true}'),
     ("POST", "/api/projects/{name}/review-package", False, "Review and Export", "Export a self-contained offline review package as a zip archive (video, shot list, poster frames, open comments). Human session only.", '{"include_prompts"?: false}', "application/zip"),
     ("POST", "/api/projects/{name}/comments/import-feedback", False, "Review and Export", "Import reviewer feedback (feedback.json) and merge comments into the project. Human session only.", "feedback.json contents (up to 1 MB)", '{"imported", "total", "comments"}'),
+    ("GET", "/api/projects/{name}/captions/preview", True, "Review and Export", "The caption cues of one shot: the shot's voice line (or the english gloss), timed over the shot. Read-only: nothing is written and no provider is called. ?shot=s01&duration=4&max_chars=42&max_lines=2. Free.", "query parameters", '{"shot", "script", "source", "duration", "cues": [{"text", "start", "end"}]}'),
     ("GET", "/api/projects/{name}/exports", True, "Review and Export", "Rendered MP4s in the project's exports folder.", "-", '{"exports": [{file, bytes, when}]}'),
     ("GET", "/api/delivery/presets", True, "Review and Export", "List validated local delivery presets.", "-", '{"presets": [...]}'),
     ("GET", "/api/projects/{name}/publish", False, "Review and Export", "Read publishing metadata. Human session only.", "-", "publish metadata"),

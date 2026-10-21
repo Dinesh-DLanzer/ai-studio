@@ -1356,6 +1356,18 @@ def create_app(root=None, token=None, rates_path=None, transport=None, static_di
         guard(ws.pdir, name)
         data = await request.body()
         return guard(commentsmod.import_feedback, ws, name, data)
+    # ---- the caption cues of one shot, read-only (nothing is written, no provider is called)
+    @app.get("/api/projects/{name}/captions/preview", dependencies=[api])
+    def captions_preview(name: str, shot: str = "", duration: float = 0, max_chars: int = 42, max_lines: int = 2):
+        from aistudio import captions as captionsmod
+        p = guard(ws.pdir, name)
+        if not shot.strip():
+            raise HTTPException(400, "shot is required (for example ?shot=s01)")
+        try:
+            return captionsmod.preview(p, shot.strip(), duration=duration or None,
+                                       max_chars=max_chars, max_lines=max_lines)
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from None
 
     @app.post("/api/projects/{name}/audio", dependencies=[api])
     async def audio_upload(name: str, filename: str, request: Request):
