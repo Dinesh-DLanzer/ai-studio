@@ -20,6 +20,7 @@ export default function CastPanel({ project, spec, stills, hasMaster, onBatch, o
   const toast = useToast();
   const [consent, setConsent] = useState<Consent[]>([]); const [drift, setDrift] = useState<Drift | null>(null);
   const [subject, setSubject] = useState(""); const [statement, setStatement] = useState(""); const [kind, setKind] = useState("real_person");
+  const [sha, setSha] = useState("");
   const [count, setCount] = useState("2"); const [busy, setBusy] = useState(false);
   const base = `/api/projects/${encodeURIComponent(project)}`;
   const loadConsent = useCallback(() => api<{ consent: Consent[] }>("GET", `${base}/consent`).then((r) => setConsent(r.consent)).catch(() => {}), [base]);
@@ -49,7 +50,7 @@ export default function CastPanel({ project, spec, stills, hasMaster, onBatch, o
     toast("ok", `Using version ${n} of ${spec.id}.`); reload();
   });
   const record = () => run(async () => {
-    await api("POST", `${base}/consent`, { subject: subject.trim(), statement: statement.trim(), kind });
+    await api("POST", `${base}/consent`, { subject: subject.trim(), statement: statement.trim(), kind, ...(sha ? { asset_id: spec.id } : {}) });
     toast("ok", `Consent recorded for ${subject.trim()}.`); setSubject(""); setStatement(""); await loadConsent();
   });
 
@@ -119,6 +120,10 @@ export default function CastPanel({ project, spec, stills, hasMaster, onBatch, o
               <Button type="submit" size="sm" variant="outline" disabled={busy || !subject.trim() || !statement.trim()}>Record consent</Button>
             </div>
           </form>
+          <div className="mt-2 rounded-lg border border-slate-700 p-2">
+            <p className="text-xs text-slate-400">Bind the record to this asset’s current file before using consent-gated tools.</p>
+            <Button type="button" size="sm" variant="outline" className="mt-2" disabled={busy || !hasMaster} onClick={() => void run(async () => { const r = await api<{ sha: string }>("POST", `${base}/consent/mark`, { asset_id: spec.id }); setSha(r.sha); toast("ok", `Current asset bytes marked (${r.sha.slice(0, 12)}…).`); })}>{sha ? `File marked · ${sha.slice(0, 12)}…` : "Mark current file as a real person"}</Button>
+          </div>
           <p className="mt-1 text-[0.68rem] text-slate-400">Only you can record consent here. Agents and the crew cannot.</p>
         </section>
       </div>

@@ -4,6 +4,7 @@ import { fileUrl } from "../api";
 import type { AClip, Edit, Sel, TText, VClip, TElement, TSubtitleCue } from "./types";
 import { audioSpan, clamp, editEnd, fileName, lanes, layout, mmssd, round1, round2, textSpan, elementSpan, subtitleSpan } from "./time";
 import { knownDuration, peaks, thumbs } from "./media";
+import ClipToolsPanel from "../components/ClipToolsPanel";
 
 const LABEL_W = 128, RULER_H = 34, LANE_H = 40, VIDEO_H = 58;
 
@@ -50,6 +51,7 @@ export default function Timeline(p: TimelineProps) {
   const { project, edit, set, t, setT, sel, setSel } = p; const drag = useDrag();
   const area = useRef<HTMLDivElement>(null); const [areaW, setAreaW] = useState(900); const [zoom, setZoom] = useState(1);
   const [ghost, setGhost] = useState<{ id: string; dx: number } | null>(null);
+  const [toolsClip, setToolsClip] = useState<string | null>(null);
   useEffect(() => {
     const el = area.current; if (!el) return; const ro = new ResizeObserver(() => setAreaW(el.clientWidth || 900)); ro.observe(el); setAreaW(el.clientWidth || 900); return () => ro.disconnect();
   }, []);
@@ -235,7 +237,7 @@ export default function Timeline(p: TimelineProps) {
                 const c = pl.clip; const w = pl.dur * pps; const isSel = sel?.kind === "video" && sel.id === c.id; const g = ghost?.id === c.id ? ghost.dx : 0;
                 return (
                   <div key={c.id} data-testid={`vbar-${c.id}`} className={`re-bar re-bar-video ${isSel ? "is-sel" : ""}`}
-                    style={{ left: pl.start * pps + g, width: w, top: 4, height: VIDEO_H, zIndex: g ? 5 : 1, opacity: g ? 0.85 : 1 }} onPointerDown={(e) => clipDrag(e, c, i)} title={`${fileName(c.src)} (${(pl.dur).toFixed(1)}s)`}>
+                    style={{ left: pl.start * pps + g, width: w, top: 4, height: VIDEO_H, zIndex: g ? 5 : 1, opacity: g ? 0.85 : 1 }} onContextMenu={(e) => { e.preventDefault(); setToolsClip(fileName(c.src)); }} onPointerDown={(e) => clipDrag(e, c, i)} title={`${fileName(c.src)} (${(pl.dur).toFixed(1)}s). Right-click for clip tools.`}>
                     <Filmstrip url={fileUrl(project, c.src)} from={c.in} to={c.out} w={w} />
                     {pl.td > 0 && <span className="re-trans" style={{ width: pl.td * pps }} aria-hidden />}
                     <span className="re-grip l" onPointerDown={(e) => trimV(e, c, "l")} /><span className="re-grip r" onPointerDown={(e) => trimV(e, c, "r")} />
@@ -288,6 +290,7 @@ export default function Timeline(p: TimelineProps) {
           </div>
         </div>
       </div>
+      {toolsClip && <div className="fixed bottom-5 right-5 z-50 w-[min(36rem,calc(100vw-2rem))] rounded-xl border border-slate-700 bg-slate-950 p-3 shadow-2xl"><div className="mb-2 flex items-center justify-between"><strong className="text-sm">Clip tools</strong><button type="button" className="btn btn-outline btn-sm" onClick={() => setToolsClip(null)}>Close</button></div><ClipToolsPanel project={project} clip={toolsClip} reload={() => window.location.reload()} /></div>}
     </section>
   );
 }
