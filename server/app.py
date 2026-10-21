@@ -325,7 +325,8 @@ def create_app(root=None, token=None, rates_path=None, transport=None, static_di
     def camera_presets():
         return json.loads((REPO / "catalog" / "camera_presets.json").read_text(encoding="utf-8"))
 
-    # brand kits: workspace-level, human session only (agent=False in api_docs); the kit is COPIED into a project when attached
+    # brand kits: workspace-level, human session only (agent=False in api_docs AND the handler checks it again);
+    # the kit is COPIED into a project when attached
     from aistudio import brand_kits as kitsmod
 
     def kit_call(fn, *a, **kw):
@@ -334,11 +335,13 @@ def create_app(root=None, token=None, rates_path=None, transport=None, static_di
         except ValueError as e: raise HTTPException(400, str(e)) from None
 
     @app.get("/api/brand-kits", dependencies=[api])
-    def brand_kits_list():
+    def brand_kits_list(request: Request):
+        human_session(request)          # a kit can hold a logo: humans only, even to read
         return {"kits": kit_call(kitsmod.list_kits), "fonts": sorted(kitsmod._font_families())}
 
     @app.post("/api/brand-kits", dependencies=[api])
     async def brand_kit_create(request: Request):
+        human_session(request)
         import base64
         import tempfile
         b = await request.json()
@@ -354,21 +357,25 @@ def create_app(root=None, token=None, rates_path=None, transport=None, static_di
             return kit_call(kitsmod.create_kit, b.get("name") or "", logo_path=logo, **fields)
 
     @app.get("/api/brand-kits/{kid}", dependencies=[api])
-    def brand_kit_get(kid: str):
+    def brand_kit_get(kid: str, request: Request):
+        human_session(request)
         return kit_call(kitsmod.get_kit, kid)
 
     @app.put("/api/brand-kits/{kid}", dependencies=[api])
     async def brand_kit_update(kid: str, request: Request):
+        human_session(request)
         b = await request.json()
         return kit_call(kitsmod.update_kit, kid, **{k: b[k] for k in ("name", "palette", "fonts", "caption", "watermark", "end_card", "voice", "style_words", "avoid") if k in b})
 
     @app.delete("/api/brand-kits/{kid}", dependencies=[api])
-    def brand_kit_delete(kid: str):
+    def brand_kit_delete(kid: str, request: Request):
+        human_session(request)
         kit_call(kitsmod.delete_kit, kid)      # moves to brand_kits/_trash, never erases
         return {"ok": True}
 
     @app.get("/api/brand-kits/{kid}/logo", dependencies=[api])
-    def brand_kit_logo(kid: str):
+    def brand_kit_logo(kid: str, request: Request):
+        human_session(request)
         kit = kit_call(kitsmod.get_kit, kid)
         if not kit.get("logo"): raise HTTPException(404, "this kit has no logo")
         return FileResponse(ws.root / "brand_kits" / kid / kit["logo"])
