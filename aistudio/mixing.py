@@ -143,6 +143,21 @@ def loudnorm_filter(target_lufs=-14):
     return f"loudnorm=I={_lufs(target_lufs)}:TP={TP:g}:LRA={LRA:g}"
 
 
+def loudness_for_format(format_id):
+    """The loudness target of a format (-14 LUFS for social, -16 for podcasts, -23 for broadcast).
+    None when the format does not say."""
+    from aistudio import formats
+    try:
+        value = formats.get_format(format_id).get("loudness")
+    except (ValueError, OSError):
+        return None
+    try:
+        value = int(value)
+    except (TypeError, ValueError):
+        return None
+    return value if -70 <= value <= -5 else None
+
+
 # ---------------------------------------------------------------- the local runner
 def _inside(path, root):
     p, r = Path(path).resolve(), Path(root).resolve()

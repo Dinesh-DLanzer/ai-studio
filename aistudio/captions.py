@@ -390,6 +390,22 @@ def caption_style(style=None):
             "color": _hex(st.get("color")) or "#ffffff", "bg": _hex(st.get("bg"))}
 
 
+def style_from_format(format_id):
+    """The caption style of a format (templates/formats/<id>.json): {font, size, weight, y, bg}."""
+    from aistudio import formats
+    return dict(formats.get_format(format_id).get("caption") or {})
+
+
+def style_from_kit(kit):
+    """The caption style of a brand kit: the kit document (or the path of its kit.json)."""
+    data = kit
+    if isinstance(kit, (str, Path)):
+        data = json.loads(Path(kit).read_text(encoding="utf-8"))
+    if not isinstance(data, dict):
+        return {}
+    return dict(data.get("caption") or {})
+
+
 def to_text_track(cues, style=None, prefix="cap"):
     """The cues as the editor's text items (TText), ready for edit.json.
     The items go through the editor's own clean(), so they are valid by construction."""

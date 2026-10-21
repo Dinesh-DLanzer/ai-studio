@@ -151,6 +151,19 @@ class TestTextTrack(unittest.TestCase):
         self.assertEqual(len(out["tracks"]["text"]), 2)
         self.assertEqual(len(edit["tracks"]["text"]), 0)           # the caller's edit is untouched
 
+    def test_the_style_comes_from_a_format(self):
+        style = captions.style_from_format("instagram-reel")
+        self.assertEqual(style["font"], "Poppins")
+        items = captions.to_text_track(self.CUES, style)
+        self.assertEqual((items[0]["font"], items[0]["size"], items[0]["weight"], items[0]["y"]), ("Poppins", 40.0, 700, 0.72))
+        self.assertEqual(items[0]["bg"], "#000000")                # the format's alpha is dropped
+
+    def test_the_style_comes_from_a_brand_kit(self):
+        kit = {"caption": {"font": "Pacifico", "size": 32, "weight": 400, "y": 0.8, "bg": "#101010"}}
+        self.assertEqual(captions.style_from_kit(kit)["font"], "Pacifico")
+        items = captions.to_text_track(self.CUES, captions.style_from_kit(kit))
+        self.assertEqual((items[0]["font"], items[0]["size"], items[0]["bg"]), ("Pacifico", 32.0, "#101010"))
+
 
 class TestVoiceoverPlacement(unittest.TestCase):
     def edit(self):
@@ -238,6 +251,65 @@ class TestPreview(unittest.TestCase):
         before = sorted(p.name for p in self.p.iterdir())
         captions.preview(self.p, "s01")
         self.assertEqual(sorted(p.name for p in self.p.iterdir()), before)
+
+
+try:
+    from fastapi.testclient import TestClient
+    from server.app import create_app
+    HAVE_API = True
+except Exception:
+    HAVE_API = False
+H = {"x-aistudio-token": "tok"}
+
+
+class TestPreviewRoute(unittest.TestCase):
+    @unittest.skipUnless(HAVE_API, "needs the venv with fastapi + httpx")
+    def setUp(self):
+        self.root = tempfile.mkdtemp()
+        self.c = TestClient(create_app(self.root, token="tok", static_dir="/nonexistent"))
+        self.call("post", "/api/projects", json={"name": "demo"})
+        self.call("put", "/api/projects/demo/shots", json={"aspect_ratio": "9:16", "audio": False, "shots": [
+            {"id": "s01", "model": "m", "seconds": 4, "prompt": "p", "voice_mode": "off-camera",
+             "voice_line": "The shop opens at seven", "english": "The shop opens at seven"},
+            {"id": "s02", "model": "m", "seconds": 3, "prompt": "p", "voice_mode": "silent",
+             "voice_line": "", "english": ""}]})
+
+    def call(self, m, url, **kw):
+        return self.c.request(m.upper(), url, headers=H, **kw)
+
+    def test_the_preview_returns_the_cues_of_the_shot(self):
+        r = self.call("get", "/api/projects/demo/captions/preview?shot=s01")
+        self.assertEqual(r.status_code, 200, r.text)
+        body = r.json()
+        self.assertEqual(body["shot"], "s01")
+        self.assertEqual(body["source"], "voice_line")
+        self.assertEqual(body["script"], "The shop opens at seven")
+        self.assertTrue(body["cues"])
+        self.assertAlmostEqual(body["cues"][0]["start"], 0.0)
+        self.assertAlmostEqual(body["cues"][-1]["end"], 4.0)
+
+    def test_a_silent_shot_has_no_cues(self):
+        body = self.call("get", "/api/projects/demo/captions/preview?shot=s02").json()
+        self.assertEqual(body["cues"], [])
+
+    def test_the_line_limits_can_be_set(self):
+        body = self.call("get", "/api/projects/demo/captions/preview?shot=s01&max_chars=12&max_lines=1").json()
+        for cue in body["cues"]:
+            self.assertEqual(len(cue["text"].split("\n")), 1)
+            self.assertLessEqual(len(cue["text"]), 12)
+
+    def test_a_missing_shot_or_project_is_refused(self):
+        self.assertEqual(self.call("get", "/api/projects/demo/captions/preview").status_code, 400)
+        self.assertEqual(self.call("get", "/api/projects/demo/captions/preview?shot=").status_code, 400)
+        self.assertEqual(self.call("get", "/api/projects/nope/captions/preview?shot=s01").status_code, 400)
+
+    def test_the_token_is_needed(self):
+        self.assertEqual(self.c.get("/api/projects/demo/captions/preview?shot=s01").status_code, 401)
+
+    def test_the_route_is_described_in_the_api_reference(self):
+        from server import api_docs
+        self.assertEqual(api_docs.undocumented(self.c.app), [])
+        self.assertTrue(api_docs.agent_allowed("GET", "/api/projects/{name}/captions/preview"))
 
 
 if __name__ == "__main__":

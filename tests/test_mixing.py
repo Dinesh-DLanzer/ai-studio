@@ -53,6 +53,10 @@ class TestLoudnessArgs(unittest.TestCase):
     def test_the_one_pass_filter(self):
         self.assertEqual(mixing.loudnorm_filter(-14), "loudnorm=I=-14:TP=-1.5:LRA=11")
 
+    def test_the_target_of_a_format(self):
+        self.assertEqual(mixing.loudness_for_format("instagram-reel"), -14)
+        self.assertIsNone(mixing.loudness_for_format("no-such-format"))
+
 
 class TestParseLoudnorm(unittest.TestCase):
     TEXT = ('[Parsed_loudnorm_0 @ 0x7f8] \n{\n\t"input_i" : "-23.44",\n\t"input_tp" : "-6.19",\n'
@@ -136,6 +140,16 @@ class TestEditorOptions(unittest.TestCase):
         self.assertEqual(editor.mix_options({}), {})
         self.assertEqual(editor.mix_options({"audio": {"loudness": 3}}), {})       # nonsense is ignored
 
+    def test_the_options_survive_the_save_of_the_edit(self):
+        from aistudio.service import Workspace
+        ws = Workspace(tempfile.mkdtemp())
+        ws.create_project("demo")
+        doc = self.edit()
+        doc["audio"] = {"loudness": -14, "duck": True}
+        ws.edit_put("demo", doc)
+        raw = json.loads((ws.pdir("demo") / "edit.json").read_text(encoding="utf-8"))
+        self.assertEqual(editor.mix_options(raw), {"loudness": -14.0, "duck": True})
+
 
 @unittest.skipUnless(FF, "needs ffmpeg")
 class TestRealFfmpeg(unittest.TestCase):
@@ -178,6 +192,24 @@ class TestRealFfmpeg(unittest.TestCase):
         loud = editor.render(p, doc, options={"loudness": -14})
         self.assertAlmostEqual(float(mixing.loudness_of(p / loud)["input_i"]), -14.0, delta=1.5)
         self.assertNotAlmostEqual(float(mixing.loudness_of(p / plain)["input_i"]), -14.0, delta=1.5)
+
+    def test_the_ducking_and_the_denoise_render(self):
+        """The sidechain graph has to be a real ffmpeg graph, not only a string."""
+        p = Path(tempfile.mkdtemp()) / "demo"
+        (p / "clips").mkdir(parents=True)
+        (p / "audio").mkdir()
+        make_clip(p / "clips" / "a.mp4", 2.0, "red")
+        subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-f", "lavfi", "-i", "sine=frequency=880:duration=2",
+                        str(p / "audio" / "vo.mp3")], check=True)
+        subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-f", "lavfi", "-i", "sine=frequency=220:duration=2",
+                        str(p / "audio" / "bg.mp3")], check=True)
+        doc = editor.clean({"tracks": {
+            "video": [{"id": "s01", "src": "clips/a.mp4", "in": 0, "out": 2, "volume": 1, "transition": {"type": "cut", "dur": 0.5}}],
+            "audio": [{"id": "vo_s01", "src": "audio/vo.mp3", "start": 0, "in": 0, "out": 2, "volume": 1, "name": "voiceover s01"},
+                      {"id": "m1", "src": "audio/bg.mp3", "start": 0, "in": 0, "out": 2, "volume": 0.4, "name": "music"}]}})
+        out = editor.render(p, doc, options={"duck": True, "denoise": True})
+        self.assertTrue((p / out).is_file())
+        self.assertGreater((p / out).stat().st_size, 1000)
 
 
 if __name__ == "__main__":
