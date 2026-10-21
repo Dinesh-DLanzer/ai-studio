@@ -28,6 +28,7 @@ Commands:
   python3 -m aistudio.cli crew run <p> --agent A --task T [--autonomy assist|copilot] [--json]   Run a studio-crew agent
   python3 -m aistudio.cli crew status <p> [run] [--json]   List runs, or show one run
   python3 -m aistudio.cli crew undo <p> <run> [--json]     Restore the documents a run changed
+  python3 -m aistudio.cli eval crew [--case ID] [--model M] [--allow-paid] [--json] Run crew evaluation suite
   python3 -m aistudio.cli publish export|draft <p> [--preset ID] [--platform ID] [--json]  Local publishing tools
   python3 -m aistudio.cli agent-setup [claude|agy]   Configure agent manifests
 """
@@ -227,6 +228,14 @@ def main(argv=None, ask=input, out=print):
     c_un.add_argument("run")
     for c in (c_run, c_st, c_un):
         c.add_argument("--json", action="store_true")
+
+    p_eval = sp.add_parser("eval", help="Deterministic evaluation suites")
+    esp = p_eval.add_subparsers(dest="eval_cmd", required=True)
+    e_crew = esp.add_parser("crew", help="Run deterministic crew evaluation cases")
+    e_crew.add_argument("--case", default=None, help="Case ID to run (default: all)")
+    e_crew.add_argument("--model", default=None, help="Chat model to evaluate against (refuses paid models unless --allow-paid)")
+    e_crew.add_argument("--allow-paid", action="store_true", help="Allow running against paid chat models")
+    e_crew.add_argument("--json", action="store_true", help="Output report as JSON")
 
     p_exp = sp.add_parser("export-project", help="Export project as zip")
     p_exp.add_argument("project")
@@ -451,6 +460,16 @@ def main(argv=None, ask=input, out=print):
                     out(f"  batch awaiting human approval: {res['batch']}")
                 if res.get("error"):
                     out(f"  error: {res['error']}")
+
+        elif args.cmd == "eval":
+            from aistudio.crew import evals
+            if args.eval_cmd == "crew":
+                rep = evals.run_eval(ws, case_id=args.case, model=args.model, allow_paid=args.allow_paid, out=out)
+                if is_json:
+                    out(json.dumps(rep, indent=2, ensure_ascii=False))
+                else:
+                    out(evals.format_table(rep))
+                    out(f"\nReport saved to: {rep['report_path']}")
 
         elif args.cmd == "pending":
             proposals = ws.overview(args.project)["proposals"]

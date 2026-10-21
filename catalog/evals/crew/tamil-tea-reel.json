@@ -1,0 +1,28 @@
+{
+  "id": "tamil-tea-reel",
+  "name": "Tamil Tea Reel (9:16)",
+  "description": "Instagram Reel in Tamil promoting fresh Nilgiri tea with authentic cultural imagery.",
+  "format": "9:16",
+  "stage": "write_storyboard",
+  "brief": {
+    "brand": "Nilgiri Chai Co.",
+    "goal": "Promote morning tea ritual with authentic South Indian flavor",
+    "story": "Misty morning in the Nilgiris; steaming traditional brass davarah of freshly brewed tea; warm family moment.",
+    "audience": "Tamil diaspora and families in South India",
+    "platform": "instagram_reels",
+    "length_seconds": 15,
+    "language": "Tamil",
+    "characters": "Meena (traditional yet modern South Indian woman)",
+    "setting": "Veranda overlooking tea gardens at sunrise",
+    "cta": "நீலகிரி தேநீரை இன்றே சுவையுங்கள்!",
+    "budget_cap": 0.50
+  },
+  "expected": {
+    "min_shots": 3,
+    "max_shots": 6,
+    "format": "9:16",
+    "language": "Tamil",
+    "script": "tamil",
+    "max_paid_total": 0.50
+  }
+}

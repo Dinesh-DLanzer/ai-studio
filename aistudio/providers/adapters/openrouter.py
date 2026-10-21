@@ -3,6 +3,7 @@
 OpenAI-compatible chat plus OpenRouter's own /images and /videos endpoints (same request shapes the app has used since v1).
 """
 import base64
+import json
 
 from aistudio.providers.adapters.openai import OpenAIAdapter
 from aistudio.providers.base import Rejected, Retryable, data_url
@@ -52,6 +53,32 @@ class OpenRouterAdapter(OpenAIAdapter):
 
     def chat(self, model, messages, opts=None):
         return self._complete(model, messages, opts)
+
+    def chat_tools(self, model, messages, tools, opts=None):
+        opts = opts or {}
+        body = {"model": model, "messages": messages, "max_tokens": opts.get("max_tokens", 3500), "temperature": opts.get("temperature", 0.4), "usage": {"include": True}}
+        body["tools"] = [{"type": "function", "function": {
+            "name": t["name"],
+            "description": t.get("description", ""),
+            "parameters": t.get("parameters") or t.get("input_schema") or {"type": "object"}
+        }} for t in tools]
+        r = self._call("POST", "/chat/completions", body)
+        msg = ((r.get("choices") or [{}])[0].get("message") or {})
+        text = msg.get("content") or ""
+        tool_calls = []
+        for tc in msg.get("tool_calls") or []:
+            fn = tc.get("function") or {}
+            raw_args = fn.get("arguments", "{}")
+            try:
+                args = json.loads(raw_args) if isinstance(raw_args, str) else (raw_args or {})
+            except ValueError:
+                args = {}
+            tool_calls.append({"id": tc.get("id"), "name": fn.get("name"), "args": args})
+        if not text.strip() and not tool_calls:
+            raise Retryable("empty answer")
+        u = r.get("usage") or {}
+        return {"text": text, "tool_calls": tool_calls, "usage": {"input": u.get("prompt_tokens", 0), "output": u.get("completion_tokens", 0)},
+                "cost": float(u["cost"]) if isinstance(u.get("cost"), (int, float)) else None, "model": model}
 
     def vision(self, model, prompt, images, opts=None):
         content = [{"type": "text", "text": prompt}] + [{"type": "image_url", "image_url": {"url": data_url(p)}} for p in images]

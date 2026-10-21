@@ -84,7 +84,7 @@ class VerifyDomain:
     def ai_spent(self, name):
         return round(sum(float(r["cost"] or 0) for r in costlog.read_log(self.ws.pdir(name)) if r["stage"] in ("chat", "verify")), 6)
 
-    def _ai_call(self, name, role, messages):
+    def _ai_call(self, name, role, messages, tools=None):
         """The ONE place a text AI model is called (chat and verify roles)."""
         p = self.ws.pdir(name)
         cfg = self.ai_settings()["settings"]
@@ -106,7 +106,7 @@ class VerifyDomain:
                 if paid:
                     project_lock.reserve(p, rid, planned, actor="local", shot="_ai", stage=role, model="", provider="")
             try:
-                res = runner.chat(role, messages, {"max_tokens": 8192, "temperature": 0.4}, project_dir=p, allow=allow)
+                res = runner.chat(role, messages, {"max_tokens": 8192, "temperature": 0.4}, project_dir=p, allow=allow, tools=tools)
             finally:
                 if paid:
                     with project_lock.lock(p):

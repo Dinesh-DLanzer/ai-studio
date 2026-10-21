@@ -55,6 +55,29 @@ class AnthropicAdapter(Adapter):
     def chat(self, model, messages, opts=None):
         return self._complete(model, messages, opts)
 
+    def chat_tools(self, model, messages, tools, opts=None):
+        opts = opts or {}
+        system = "\n\n".join(m.get("content") or "" for m in messages if m.get("role") == "system")
+        body = {"model": model, "max_tokens": opts.get("max_tokens", 3500),
+                "messages": [m for m in messages if m.get("role") != "system"]}
+        if "temperature" in opts:
+            body["temperature"] = opts["temperature"]
+        if system:
+            body["system"] = system
+        body["tools"] = [{"name": t["name"], "description": t.get("description", ""),
+                          "input_schema": t.get("input_schema") or t.get("parameters") or {"type": "object"}}
+                         for t in tools]
+        data = self.transport("POST", self.base_url + "/messages", headers=self._headers(), body=body)
+        text = "".join(b.get("text", "") for b in data.get("content") or [] if b.get("type") == "text")
+        tool_calls = [{"id": b.get("id"), "name": b.get("name"), "args": b.get("input") or {}}
+                      for b in data.get("content") or [] if b.get("type") == "tool_use"]
+        if not text.strip() and not tool_calls:
+            raise Retryable("empty answer")
+        u = data.get("usage") or {}
+        return {"text": text, "tool_calls": tool_calls,
+                "usage": {"input": u.get("input_tokens") or 0, "output": u.get("output_tokens") or 0},
+                "cost": None, "model": model}
+
     def vision(self, model, prompt, images, opts=None):
         content = [{"type": "image", "source": {"type": "base64", "media_type": mime_of(p), "data": b64_of(p)}}
                    for p in images]

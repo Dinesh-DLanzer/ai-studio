@@ -146,11 +146,35 @@ def list_runs(ws, project):
 
 def default_llm(ws, project):
     """The project's chat role. Its allow_paid rules and ai_cap_usd apply, and usage is metered into the cost log (ws._ai_call)."""
-    return lambda messages: ws._ai_call(project, "chat", messages)
+    def _chat_call(messages, tools=None):
+        if tools is not None:
+            try:
+                return ws._ai_call(project, "chat", messages, tools=tools)
+            except TypeError:
+                pass
+        return ws._ai_call(project, "chat", messages)
+    return _chat_call
+
+
+def _tools_mode(ws, project, llm=None):
+    if hasattr(llm, "tools_mode"):
+        return getattr(llm, "tools_mode")
+    if isinstance(llm, dict) and "tools_mode" in llm:
+        return llm["tools_mode"]
+    try:
+        p = ws.pdir(project)
+        entries = ws.runner().resolve("chat", p)
+        if entries and entries[0].get("problem") is None:
+            e = entries[0]
+            prof = ws.catalog().profile(e["provider"]["id"], e["ptype"], e["model"], e.get("card"))
+            return prof.get("tools") or "json"
+    except Exception:
+        pass
+    return "json"
 
 
 # ---------------------------------------------------------------- the loop
-def run(ws, project, agent, task, autonomy="copilot", run_id=None, llm=None, progress=None):
+def run(ws, project, agent, task, autonomy="copilot", run_id=None, llm=None, progress=None, tools_mode=None):
     """Run `agent` (a loaded definition) on `task`. Returns the run record. `progress(pct)` may raise jobs.Cancelled to stop."""
     if autonomy not in AUTONOMY:
         raise ServiceError(f"autonomy must be one of {AUTONOMY} ('autopilot' is not available yet)")
@@ -159,6 +183,8 @@ def run(ws, project, agent, task, autonomy="copilot", run_id=None, llm=None, pro
         raise ServiceError("the task must be 1 to 5000 characters")
     p = ws.pdir(project)
     llm = llm or default_llm(ws, project)
+    if tools_mode is None:
+        tools_mode = _tools_mode(ws, project, llm)
     lim = agent["limits"]
     allowed = set(agent["tools"]) & set(tool_registry.crew_tools())     # re-checked here: a definition can never widen the registry rule
     catalogue = tool_registry.crew_catalogue(sorted(allowed))
@@ -166,7 +192,7 @@ def run(ws, project, agent, task, autonomy="copilot", run_id=None, llm=None, pro
     rec = {"id": run_id or secrets.token_hex(5), "project": project, "agent": {"id": agent["id"], "version": agent["version"]}, "task": task,
            "autonomy": autonomy, "status": "running", "started": time.time(), "finished": None, "steps": [], "proposals": [], "suggested_changes": [],
            "changes": [], "batch": None, "llm_usd": 0.0, "tokens": 0, "limits": lim, "summary": "", "error": "",
-           "pre_run": {d: _sha(b) for d, b in pre.items()}, "undone": None}
+           "pre_run": {d: _sha(b) for d, b in pre.items()}, "undone": None, "tools_mode": tools_mode}
     messages = [
         {"role": "system", "content": agent["prompt"] + "\n\n" + RULES + "\n\nTool catalogue (JSON):\n" + json.dumps(
             [{k: c[k] for k in ("name", "description", "input_schema", "cost_class")} for c in catalogue], ensure_ascii=False)},
@@ -175,7 +201,7 @@ def run(ws, project, agent, task, autonomy="copilot", run_id=None, llm=None, pro
     ]
     _save(ws, project, rec)
     try:
-        _loop(ws, project, rec, allowed, messages, llm, autonomy, lim, progress)
+        _loop(ws, project, rec, allowed, messages, llm, autonomy, lim, progress, tools_mode=tools_mode, catalogue=catalogue)
     except jobs.Cancelled:
         rec["status"] = "stopped"
     except Exception as e:   # the run must always end with a readable record
@@ -184,14 +210,29 @@ def run(ws, project, agent, task, autonomy="copilot", run_id=None, llm=None, pro
     return rec
 
 
-def _call(llm, messages, rec, lim):
-    res = llm(messages)
+def _call(llm, messages, rec, lim, tools=None):
+    if tools is not None:
+        try:
+            res = llm(messages, tools=tools)
+        except TypeError:
+            res = llm(messages)
+    else:
+        res = llm(messages)
     rec["llm_usd"] = round(rec["llm_usd"] + float(res.get("cost") or 0), 6)
     rec["tokens"] += _tokens(res.get("usage"))
     return res
 
 
-def _loop(ws, project, rec, allowed, messages, llm, autonomy, lim, progress):
+def _loop(ws, project, rec, allowed, messages, llm, autonomy, lim, progress, tools_mode="json", catalogue=None):
+    tools_payload = None
+    if tools_mode == "native":
+        tools_payload = [
+            {"name": c["name"], "description": c["description"], "input_schema": c["input_schema"]}
+            for c in (catalogue or [])
+        ] + [
+            {"name": "done", "description": "Finish the task and return a summary of what you did.", "input_schema": {"type": "object", "properties": {"summary": {"type": "string"}}, "required": ["summary"]}}
+        ]
+
     for n in range(1, lim["max_steps"] + 1):
         if progress:
             progress(100.0 * (n - 1) / lim["max_steps"])
@@ -202,9 +243,23 @@ def _loop(ws, project, rec, allowed, messages, llm, autonomy, lim, progress):
             if rec["llm_usd"] >= lim["max_llm_usd"] or rec["tokens"] >= lim["max_tokens"]:
                 rec["status"] = "stopped_cap"
                 return
-            res = _call(llm, messages, rec, lim)
-            action, err = parse_action(res.get("text"))
-            messages.append({"role": "assistant", "content": str(res.get("text") or "")[:3000]})
+            res = _call(llm, messages, rec, lim, tools=tools_payload)
+            if tools_payload and res.get("tool_calls"):
+                tc = res["tool_calls"][0]
+                name = str(tc.get("name") or "")
+                if name == "done":
+                    action = {"done": True, "summary": str((tc.get("args") or {}).get("summary", ""))[:2000]}
+                    err = ""
+                else:
+                    action = {"tool": name, "args": tc.get("args") or {}, "why": str(res.get("text") or "")[:300]}
+                    err = ""
+                messages.append({"role": "assistant", "content": f"tool_call: {name}"})
+            else:
+                action, err = parse_action(res.get("text"))
+                if not action and tools_payload and str(res.get("text") or "").strip():
+                    action = {"done": True, "summary": str(res.get("text") or "").strip()[:2000]}
+                    err = ""
+                messages.append({"role": "assistant", "content": str(res.get("text") or "")[:3000]})
             if action:
                 break
             messages.append({"role": "user", "content": f"Your reply was invalid ({err}). Reply with exactly one JSON object as described."})

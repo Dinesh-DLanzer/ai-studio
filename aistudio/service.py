@@ -519,8 +519,8 @@ class Workspace(SettingsMixin):
     def ai_spent(self, name):
         return self._verify.ai_spent(name)
 
-    def _ai_call(self, name, role, messages):
-        return self._verify._ai_call(name, role, messages)
+    def _ai_call(self, name, role, messages, tools=None):
+        return self._verify._ai_call(name, role, messages, tools=tools)
 
     def languages(self):
         return self._verify.languages()

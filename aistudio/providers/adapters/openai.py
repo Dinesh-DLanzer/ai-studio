@@ -26,6 +26,7 @@ image(model, prompt, refs=(), aspect_ratio="9:16", opts=None): if refs is non-em
 video_*: inherited (Unsupported).
 """
 import base64
+import json
 
 from aistudio.providers.base import Adapter, Retryable, Unsupported, data_url
 
@@ -66,6 +67,35 @@ class OpenAIAdapter(Adapter):
         usage = {"input": u.get("prompt_tokens", 0) or 0, "output": u.get("completion_tokens", 0) or 0}
         cost = u.get("cost")
         return {"text": text, "usage": usage, "cost": cost if isinstance(cost, (int, float)) else None, "model": model}
+
+    def chat_tools(self, model, messages, tools, opts=None):
+        body = {"model": model, "messages": messages}
+        for k in ("max_tokens", "temperature"):
+            if opts and k in opts:
+                body[k] = opts[k]
+        body["tools"] = [{"type": "function", "function": {
+            "name": t["name"],
+            "description": t.get("description", ""),
+            "parameters": t.get("parameters") or t.get("input_schema") or {"type": "object"}
+        }} for t in tools]
+        resp = self._post("/chat/completions", body)
+        msg = (resp.get("choices") or [{}])[0].get("message") or {}
+        text = msg.get("content") or ""
+        tool_calls = []
+        for tc in msg.get("tool_calls") or []:
+            fn = tc.get("function") or {}
+            raw_args = fn.get("arguments", "{}")
+            try:
+                args = json.loads(raw_args) if isinstance(raw_args, str) else (raw_args or {})
+            except ValueError:
+                args = {}
+            tool_calls.append({"id": tc.get("id"), "name": fn.get("name"), "args": args})
+        if not text.strip() and not tool_calls:
+            raise Retryable("empty answer")
+        u = resp.get("usage") or {}
+        usage = {"input": u.get("prompt_tokens", 0) or 0, "output": u.get("completion_tokens", 0) or 0}
+        cost = u.get("cost")
+        return {"text": text, "tool_calls": tool_calls, "usage": usage, "cost": cost if isinstance(cost, (int, float)) else None, "model": model}
 
     def vision(self, model, prompt, images, opts=None):
         content = [{"type": "text", "text": prompt}]

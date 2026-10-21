@@ -1,0 +1,28 @@
+{
+  "id": "tamil-handicrafts-ad",
+  "name": "Tamil Traditional Handicrafts Ad (9:16)",
+  "description": "Heritage product ad in Tamil celebrating handloom weavers and terracotta artisans.",
+  "format": "9:16",
+  "stage": "write_storyboard",
+  "brief": {
+    "brand": "Chettinad Kalai",
+    "goal": "Showcase artisanal hand-woven sarees and terracotta pottery",
+    "story": "Hands weaving silk threads on a wooden loom; clay shaped on the pottery wheel; vibrant festive showcase of finished artisanal crafts.",
+    "audience": "Heritage craft lovers and festive shoppers",
+    "platform": "instagram_reels",
+    "length_seconds": 20,
+    "language": "Tamil",
+    "characters": "Kavitha (artisan weaver)",
+    "setting": "Heritage Chettinad courtyard workshop with sunbeams",
+    "cta": "பாரம்பரியத்தின் அழகை உங்கள் வீட்டில் இணையுங்கள்.",
+    "budget_cap": 0.60
+  },
+  "expected": {
+    "min_shots": 4,
+    "max_shots": 7,
+    "format": "9:16",
+    "language": "Tamil",
+    "script": "tamil",
+    "max_paid_total": 0.60
+  }
+}
