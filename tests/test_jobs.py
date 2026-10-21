@@ -150,5 +150,31 @@ class TestLedger(unittest.TestCase):
         self.assertEqual(len({r["id"] for r in rows}), 90)
 
 
+class TestInterfaces(unittest.TestCase):
+    def test_cli_jobs_json_and_mcp_tools(self):
+        import json
+        import os
+        from unittest.mock import patch
+        import tests._hermetic  # noqa: F401
+        from aistudio import cli, mcp_server
+        from aistudio.service import Workspace
+        root = tempfile.mkdtemp()
+        a = jobs.enqueue(root, "demo", "export", state="completed")
+        jobs.enqueue(root, "other", "execute")
+        lines = []
+        with patch.dict(os.environ, {"AISTUDIO_HOME": root}):
+            cli.main(["jobs", "demo", "--json"], out=lines.append)
+            cli.main(["jobs"], out=lines.append)
+        self.assertEqual([j["id"] for j in json.loads(lines[0])], [a["id"]])
+        self.assertEqual(len(lines) - 1, 2)
+        ws = Workspace(root)
+        listed = mcp_server.TOOLS["list_jobs"][2](ws, {"name": "demo"})["jobs"]
+        self.assertEqual([j["id"] for j in listed], [a["id"]])
+        self.assertEqual(mcp_server.TOOLS["get_job"][2](ws, {"id": a["id"]})["state"], "completed")
+        with self.assertRaises(ServiceError):
+            mcp_server.TOOLS["get_job"][2](ws, {"id": "nope"})
+        self.assertNotIn("cancel_job", mcp_server.TOOLS)    # cancelling is human-only
+
+
 if __name__ == "__main__":
     unittest.main()

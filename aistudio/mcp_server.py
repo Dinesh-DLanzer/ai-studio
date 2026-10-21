@@ -12,13 +12,17 @@ import json
 import os
 import sys
 
-from aistudio import approvals, notifications
+from aistudio import approvals, jobs, notifications
 from aistudio.service import REPO, ServiceError, Workspace
 
 PROTOCOL = "2025-11-25"
 SUPPORTED_PROTOCOLS = ("2025-11-25", "2025-06-18", "2024-11-05")
 S = lambda **props: {"type": "object", "properties": props, "required": [k for k, v in props.items() if not v.get("optional")]}
 STR = {"type": "string"}
+
+
+def _no_job(jid):
+    raise ServiceError(f"unknown job {jid}")
 
 
 class MCPConnection:
@@ -271,6 +275,10 @@ TOOLS = {
         S(name=STR, shot_id=STR),
         _human_only_shot_approval,
     ),
+    "list_jobs": ("Jobs in the durable job ledger (generation, exports, batches) with their state: queued, running, provider_pending, completed, failed, cancelled or needs_sync. Read-only.",
+                  S(name={"type": "string", "optional": True}, state={"type": "string", "optional": True}),
+                  lambda ws, a: {"jobs": jobs.list_jobs(ws.root, a.get("name") or None, a.get("state") or None)}),
+    "get_job": ("One job from the ledger by id. Read-only; cancelling is human-only (web page).", S(id=STR), lambda ws, a: jobs.get(ws.root, a["id"]) or _no_job(a["id"])),
     "get_costs": ("Cost log, used vs discarded split, budget.", S(name=STR), lambda ws, a: ws.costs(a["name"])),
     "discard": ("Move a clip/still to _discarded (never deletes) with a reason.", S(name=STR, rel=STR, reason={"type": "string", "optional": True}), lambda ws, a: ws.discard(a["name"], a["rel"], a.get("reason", ""))),
     "restore": ("Restore a discarded file.", S(name=STR, rel=STR), lambda ws, a: {"file": ws.restore(a["name"], a["rel"])}),
