@@ -227,8 +227,10 @@ class JobRunner:
                 elif job["state"] == "queued":
                     update(self.root, job["id"], state="needs_sync",
                            error="the server stopped before this started; approvals do not carry over a restart. Propose again if you still want it")
+        from aistudio.context import is_hosted
+        from aistudio.tenancy import Role
         for tid in {j["tenant_id"] for j in _all_jobs(self.root)}:
-            with use_context(RequestContext(tenant_id=tid)):
+            with use_context(RequestContext(tenant_id=tid, actor="system" if is_hosted() else "local", role=Role.ORG_ADMIN if is_hosted() else "org_owner")):
                 prune(self.root)
         self._start_poller()
 

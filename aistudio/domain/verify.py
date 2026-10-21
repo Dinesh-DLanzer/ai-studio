@@ -200,13 +200,18 @@ class VerifyDomain:
         """Called after every modification. With auto_verify on (web server) the AI review runs in the background for changed content."""
         if not self.ws.auto_verify:
             return
+        from aistudio.context import get_context, use_context
+        ctx = get_context()
         for scope in scopes:
             key = (name, scope)
             with self.ws._verify_lock:
                 if key in self.ws._verify_running:
                     continue
                 self.ws._verify_running.add(key)
-            threading.Thread(target=self._verify_bg, args=(name, scope), daemon=True).start()
+            def run_bg(s=scope, c=ctx):
+                with use_context(c):
+                    self._verify_bg(name, s)
+            threading.Thread(target=run_bg, daemon=True).start()
 
     def _verify_bg(self, name, scope):
         try:
@@ -239,14 +244,18 @@ class VerifyDomain:
                 return {"running": True}
             self.ws._verify_running.add(key)
 
+        from aistudio.context import get_context, use_context
+        ctx = get_context()
+
         def work():
-            try:
-                self.verify_run(name, scope, ai=True)
-            except Exception:
-                pass
-            finally:
-                with self.ws._verify_lock:
-                    self.ws._verify_running.discard(key)
+            with use_context(ctx):
+                try:
+                    self.verify_run(name, scope, ai=True)
+                except Exception:
+                    pass
+                finally:
+                    with self.ws._verify_lock:
+                        self.ws._verify_running.discard(key)
 
         threading.Thread(target=work, daemon=True).start()
         return {"running": True}

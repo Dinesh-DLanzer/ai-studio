@@ -88,7 +88,7 @@ class SecretStore:
             raise SecretError("invalid secret namespace")
         return ref if namespace == "local" else f"{namespace}/{ref}"   # "/" is rejected by REF_RE, so no tenant/ref pair can collide with another
 
-    # -- public API
+    # -- public API (namespace= parameter is internal only; applications must not accept or pass external namespace arguments)
     def backend(self):
         return "keychain" if self.kr else "file"
 
