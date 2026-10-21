@@ -188,7 +188,7 @@ def create_app(root=None, token=None, rates_path=None, transport=None, static_di
     def guard(fn, *a, **kw):
         try:
             return fn(*a, **kw)
-        except ServiceError as e:
+        except (ServiceError, ValueError) as e:
             if hasattr(e, "diff"):
                 return JSONResponse({"detail": str(e), "budget_diff": e.diff}, status_code=400)
             raise HTTPException(400, str(e)) from None
@@ -1023,6 +1023,44 @@ def create_app(root=None, token=None, rates_path=None, transport=None, static_di
     @app.get("/api/projects/{name}/exports", dependencies=[api])
     def exports_list(name: str):
         return {"exports": guard(ws.exports, name)}
+
+    @app.get("/api/delivery/presets", dependencies=[api])
+    def delivery_presets():
+        from aistudio.delivery import load_presets
+        return {"presets": list(load_presets().values())}
+
+    @app.get("/api/projects/{name}/publish", dependencies=[api])
+    def publish_get(name: str, request: Request):
+        human_session(request)
+        from aistudio import publish
+        return guard(publish.get, ws, name)
+
+    @app.put("/api/projects/{name}/publish", dependencies=[api])
+    async def publish_put(name: str, request: Request):
+        human_session(request)
+        from aistudio import publish
+        return guard(publish.save, ws, name, await request.json())
+
+    @app.post("/api/projects/{name}/publish/draft", dependencies=[api])
+    async def publish_draft(name: str, request: Request):
+        human_session(request)
+        from aistudio import publish
+        body = await request.json()
+        return guard(publish.draft_metadata, ws, name, body.get("platform", "youtube"))
+
+    @app.post("/api/projects/{name}/publish/export", dependencies=[api])
+    async def publish_export(name: str, request: Request):
+        human_session(request)
+        from aistudio import publish
+        body = await request.json()
+        return guard(publish.export_for, ws, name, body.get("preset", ""))
+
+    @app.post("/api/projects/{name}/publish/thumbnail", dependencies=[api])
+    async def publish_thumbnail(name: str, request: Request):
+        human_session(request)
+        from aistudio import publish
+        body = await request.json()
+        return {"thumbnail": guard(publish.choose_thumbnail, ws, name, body.get("source", ""), body.get("time", 0))}
 
     # ---- the timeline also leaves as Final Cut Pro XML, a CMX 3600 EDL, captions and a Canva / Google Vids bundle (all free)
     @app.get("/api/projects/{name}/edit/export-fcpxml", dependencies=[api])

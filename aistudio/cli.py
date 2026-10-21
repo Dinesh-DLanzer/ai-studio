@@ -23,6 +23,7 @@ Commands:
   python3 -m aistudio.cli crew run <p> --agent A --task T [--autonomy assist|copilot] [--json]   Run a studio-crew agent
   python3 -m aistudio.cli crew status <p> [run] [--json]   List runs, or show one run
   python3 -m aistudio.cli crew undo <p> <run> [--json]     Restore the documents a run changed
+  python3 -m aistudio.cli publish export|draft <p> [--preset ID] [--platform ID] [--json]  Local publishing tools
   python3 -m aistudio.cli agent-setup [claude|agy]   Configure agent manifests
 """
 import argparse
@@ -200,6 +201,16 @@ def main(argv=None, ask=input, out=print):
     p_export.add_argument("project")
     p_export.add_argument("--format", required=True, choices=["otio", "otioz", "xmeml", "fcpxml", "edl", "srt", "vtt", "bundle"])
     p_export.add_argument("--out", required=True, type=Path)
+    p_publish = sp.add_parser("publish", help="Draft publishing metadata or export locally; never uploads")
+    pubsp = p_publish.add_subparsers(dest="publish_cmd", required=True)
+    pub_draft = pubsp.add_parser("draft", help="Draft metadata with the project's chat role")
+    pub_draft.add_argument("project")
+    pub_draft.add_argument("--platform", default="youtube")
+    pub_export = pubsp.add_parser("export", help="Render and package a preset export")
+    pub_export.add_argument("project")
+    pub_export.add_argument("--preset", required=True)
+    for c in (pub_draft, pub_export):
+        c.add_argument("--json", action="store_true")
 
     p_set = sp.add_parser("agent-setup", help="Configure agent manifests")
     p_set.add_argument("agent", choices=["claude", "agy", "all"], default="all", nargs="?")
@@ -213,6 +224,15 @@ def main(argv=None, ask=input, out=print):
         if args.cmd == "serve":
             from server.app import main as serve
             return serve()
+
+        if args.cmd == "publish":
+            from aistudio import publish
+            res = (publish.draft_metadata(ws, args.project, args.platform) if args.publish_cmd == "draft"
+                   else publish.export_for(ws, args.project, args.preset))
+            if is_json:
+                out(json.dumps(res, indent=2, ensure_ascii=False))
+            else:
+                out(json.dumps(res, ensure_ascii=False))
 
         if args.cmd == "projects":
             res = ws.list_projects()
@@ -489,7 +509,7 @@ def main(argv=None, ask=input, out=print):
             if is_json:
                 out(json.dumps(res, indent=2))
 
-    except ServiceError as e:
+    except (ServiceError, ValueError) as e:
         if is_json:
             out(json.dumps({"error": str(e)}))
         else:
