@@ -224,7 +224,11 @@ def redeem_code(pdir, code_id, code, reference, kind, request_hash_value, keycha
     if (item.get("reference"), item.get("kind"), item.get("request_hash")) != (str(reference), kind, request_hash_value):
         raise ApprovalError("approval code is bound to a different request")
     if not hmac.compare_digest(str(code), _fallback_code(code_id, keychain_secret)):
-        raise ApprovalError("wrong approval code")
+        item["tries"] = int(item.get("tries", 0)) + 1
+        if item["tries"] >= MAX_TRIES:
+            item["status"] = "locked"       # a 6-digit code must not be guessable by a looping agent
+        f.write_text(json.dumps(items, ensure_ascii=False, indent=2), encoding="utf-8")
+        raise ApprovalError("approval code locked after too many wrong tries" if item["status"] == "locked" else "wrong approval code")
     item["status"] = "used"
     f.write_text(json.dumps(items, ensure_ascii=False, indent=2), encoding="utf-8")
     return True
