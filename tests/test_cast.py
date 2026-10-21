@@ -174,6 +174,58 @@ class IdentitySheetTests(CastBase):
         self.assertTrue(hasattr(runtime, "_open_proposal"))
 
 
+class MetadataTests(CastBase):
+    def meta(self, rel):
+        return json.loads((self.p / (rel + ".meta.json")).read_text())
+
+    def test_image_and_clip_outputs_get_meta_after_the_cost_row(self):
+        for t in ("meena", "main_place"):
+            self.run_image(t)
+        res = self.run_image("s01")
+        m = self.meta(res["file"])
+        self.assertEqual((m["kind"], m["target"], m["seed"], m["actor"]), ("image", "s01", "not sent", "local"))
+        self.assertEqual({r["id"] for r in m["refs"]}, {"meena", "main_place"})
+        self.assertTrue(all(len(r["sha"]) == 64 for r in m["refs"]))
+        self.assertEqual(m["cost"], res["cost"])
+        self.assertEqual(len(m["spec_hash"]), 64)
+        self.assertTrue(m["prompt"] and m["model"] and m["provider"] and m["created"])
+        prop = self.ws.propose("demo", "clip", "s01")
+        self.ws.approve_human("demo", prop["id"])
+        clip = self.ws.execute("demo", prop["id"])
+        cm = self.meta(clip["file"])
+        self.assertEqual((cm["kind"], cm["params"]["seconds"], cm["spec_hash"]), ("clip", 4, self.ws.proposal_status("demo", prop["id"])["hash"]))
+        self.assertEqual(cm["refs"][0]["id"], "s01")
+        self.assertNotIn("s01.png.meta.json", self.ws.overview("demo")["files"]["stills"])      # sidecars stay out of the file lists
+
+    def test_meta_failure_never_loses_the_paid_result(self):
+        from unittest.mock import patch
+        from aistudio import project
+        real = project.save_json
+        def boom(pdir, fn, data):
+            if fn.endswith(".meta.json"):
+                raise OSError("disk")
+            return real(pdir, fn, data)
+        with patch.object(project, "save_json", side_effect=boom):
+            res = self.run_image("meena")
+        self.assertTrue((self.p / res["file"]).is_file())
+        self.assertEqual(costlog.read_log(self.p)[-1]["result"], "completed")
+
+    def test_remix_is_a_pending_proposal_only(self):
+        res = self.run_image("meena")
+        rows = costlog.read_log(self.p)
+        out = self.ws.remix("demo", res["file"] + ".meta.json")
+        prop = out["proposal"]
+        self.assertEqual((prop["status"], prop["kind"], prop["shot"]), ("pending", "image", "meena"))
+        self.assertNotIn("code", prop)
+        self.assertEqual(out["changed"], {"prompt": False, "model": False, "refs": False})
+        self.assertEqual(costlog.read_log(self.p), rows)
+        with self.assertRaises(ServiceError):
+            self.ws.execute("demo", prop["id"])                    # not approved: no spend
+        for bad in ("../x.meta.json", "stills/meena.png", "stills/missing.meta.json"):
+            with self.assertRaises(ServiceError):
+                self.ws.remix("demo", bad)
+
+
 @unittest.skipUnless(HAVE_API, "needs fastapi + httpx")
 class ConsentApiTests(unittest.TestCase):
     def setUp(self):

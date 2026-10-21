@@ -253,6 +253,9 @@ class Workspace(SettingsMixin):
     def _image_spec(self, p, img_id):
         return self._characters._image_spec(p, img_id)
 
+    def remix(self, name, meta_rel, reveal_code=False):
+        return self.pipeline_domain.remix(name, meta_rel, reveal_code=reveal_code)
+
     def identity_sheet(self, name, char_id, views=None, actor="local"):
         return self._characters.identity_sheet(name, char_id, views=views, actor=actor)
 

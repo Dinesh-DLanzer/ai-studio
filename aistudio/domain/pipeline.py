@@ -1,5 +1,6 @@
 """Pipeline domain: proposals, approvals, execution, batch generation and review logic."""
 from contextlib import contextmanager
+import json
 from datetime import datetime
 from pathlib import Path
 import shutil
@@ -383,6 +384,7 @@ class PipelineDomain:
             with self._logged_output(p, row):
                 out.parent.mkdir(parents=True, exist_ok=True)
                 out.write_bytes(res["bytes"])
+            self._write_meta(p, out, payload, row, grant, res["cost"], kind, target, refs=[(payload["source"], payload["source_sha"])])
             return {"kind": kind, "file": out.relative_to(p).as_posix(), "cost": res["cost"]}
         if kind == "clip_extend":
             source = inputs / payload["source"]
@@ -400,6 +402,7 @@ class PipelineDomain:
             with self._logged_output(p, {**row, "cost": res["cost"]}):
                 out.parent.mkdir(parents=True, exist_ok=True)
                 out.write_bytes(res["bytes"])
+            self._write_meta(p, out, payload, row, grant, res["cost"], kind, target, refs=[(payload["source"], payload["source_sha"])])
             return {"kind": kind, "file": out.relative_to(p).as_posix(), "cost": res["cost"]}
         if kind == "image":
             refs = [inputs / r["path"] for r in payload.get("refs", [])]
@@ -414,6 +417,7 @@ class PipelineDomain:
             with self._logged_output(p, {**log, "timestamp": datetime.now().isoformat(timespec="seconds"), "resolution": "2K", "cost": res["cost"]}):
                 out.parent.mkdir(parents=True, exist_ok=True)
                 out.write_bytes(data)
+            self._write_meta(p, out, payload, {**log, "resolution": "2K"}, grant, res["cost"], kind, target, refs=[(r["path"], r["sha"]) for r in payload.get("refs", [])])
             return {"kind": kind, "file": out.relative_to(p).as_posix(), "cost": res["cost"]}
         if kind == "clip":
             ff = str(inputs / payload["first_frame"]) if payload["first_frame"] else None
@@ -440,8 +444,51 @@ class PipelineDomain:
             with self._logged_output(p, {**row, "cost": res["cost"]}):
                 out.parent.mkdir(parents=True, exist_ok=True)
                 out.write_bytes(res["bytes"])
+            frames = [(payload[k], payload[k + "_sha"]) for k in ("first_frame", "end_frame") if payload.get(k)]
+            self._write_meta(p, out, payload, row, grant, res["cost"], kind, target, refs=frames)
             return {"kind": kind, "file": out.relative_to(p).as_posix(), "cost": res["cost"]}
         return self._do_review(p, target, payload, model, log, grant, inputs)
+
+    @staticmethod
+    def _write_meta(p, out, payload, row, grant, cost, kind, target, refs=()):
+        """<file>.meta.json: everything needed to reproduce or remix this output. Written AFTER the cost-log row, and never allowed to fail the
+        call: the paid result is already stored and accounted for. No seed is sent by any adapter yet, so it is recorded as 'not sent'."""
+        skip = ("prompt", "provider", "refs", "out", "source", "source_sha", "first_frame_sha", "end_frame_sha")
+        meta = {"kind": kind, "target": target, "prompt": payload.get("prompt", ""), "negative": payload.get("negative", ""), "model": row.get("model", ""), "provider": row.get("provider", ""),
+                "seed": payload.get("seed", "not sent"), "refs": [{"id": Path(r).stem, "path": r, "sha": s} for r, s in refs],
+                "params": {"kind": kind, "resolution": row.get("resolution", ""), **{k: v for k, v in payload.items() if k not in skip}},
+                "spec_hash": grant.request_hash, "cost": cost, "created": datetime.now().isoformat(timespec="seconds"), "actor": grant.actor}
+        try:
+            project_mod.save_json(p, out.relative_to(p).as_posix() + ".meta.json", meta)
+        except OSError:
+            pass
+
+    def remix(self, name, meta_rel, reveal_code=False):
+        """A PROPOSAL pre-filled from an output's .meta.json (nothing is spent; a human approves it like any other). It re-prices today's request
+        for the same kind and target, and says what differs from the recorded run. Providers do not promise identical results."""
+        p = self.ws.pdir(name)
+        meta_file = self._source_file(p, meta_rel, "metadata file")
+        if not meta_file.name.endswith(".meta.json"):
+            raise ServiceError("remix needs a .meta.json file")
+        try:
+            meta = json.loads(meta_file.read_text(encoding="utf-8"))
+            kind, target = meta["kind"], meta["target"]
+        except (ValueError, KeyError, TypeError):
+            raise ServiceError("metadata file is unreadable") from None
+        params, refs = meta.get("params") or {}, meta.get("refs") or []
+        options = None
+        if kind == "image_edit":
+            options = {"source": refs[0]["path"], "prompt": meta.get("prompt", ""), "edit_mode": params.get("edit_mode"), "mask_mode": params.get("mask_mode")}
+        elif kind == "clip_extend":
+            options = {"source": refs[0]["path"], "prompt": meta.get("prompt", ""), "seconds": params.get("seconds", 5)}
+        elif kind not in ("image", "clip"):
+            raise ServiceError(f"cannot remix a {kind}")
+        proposal = self.propose(name, kind, target, reveal_code=reveal_code, options=options)
+        now, _, _ = self._payload_and_price(name, kind, target, options)
+        changed = {"prompt": now.get("prompt", "") != meta.get("prompt", ""), "model": proposal["model"] != meta.get("model"),
+                   "refs": sorted(r["sha"] for r in now.get("refs", [])) != sorted(r["sha"] for r in refs if "sha" in r) if kind == "image" else False}
+        return {"proposal": proposal, "from": meta_rel, "changed": changed, "seed": meta.get("seed", "not sent"),
+                "note": "Providers do not promise identical results, even with the same inputs."}
 
     def _pin(self, role, p, payload, model):
         """The approved provider/model as a chain entry, so the shot's own model runs first (the rest of the chain stays as fallback)."""

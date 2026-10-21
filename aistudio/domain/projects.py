@@ -66,7 +66,7 @@ class ProjectDomain:
 
     def overview(self, name):
         p = self.ws.pdir(name)
-        listing = lambda d: sorted(f.name for f in (p / d).glob("*") if f.is_file() and not f.name.startswith("."))
+        listing = lambda d: sorted(f.name for f in (p / d).glob("*") if f.is_file() and not f.name.startswith(".") and not f.name.endswith(".meta.json"))
         test = self.ws.is_test(p)
         return {
             "name": name,
