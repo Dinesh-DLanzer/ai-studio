@@ -11,7 +11,7 @@
 Terminal agents (OpenCode, Codex, Claude Code, Antigravity CLI) can inspect projects, edit documents, estimate, create proposals, and execute proposals that a human has already approved. They cannot approve budgets, proposals or clips.
 
 ### Free read tools
-- `get_project`, `read_doc`, `get_brief`, `get_model_setup`, `get_todos`, `get_verification`, `get_proposal`, `get_spec`, `get_costs`, `list_providers`, `production_progress`, `get_batch`, `get_edit`, `unregistered_stills`, `list_recipes`
+- `get_project`, `read_doc`, `get_brief`, `get_model_setup`, `get_todos`, `get_verification`, `get_proposal`, `get_spec`, `get_costs`, `list_providers`, `production_progress`, `get_batch`, `get_edit`, `unregistered_stills`, `list_recipes`, `list_formats`
 
 ### Free write tools
 - `write_doc`, `update_brief`, `rename_asset`, `rename_shot`, `convert_story`, `update_shots`, `update_images`, `update_edit`, `import_stills`, `add_todo`, `toggle_todo`, `remove_todo`, `export_edit`, `export_project`
