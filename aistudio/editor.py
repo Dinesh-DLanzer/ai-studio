@@ -1035,6 +1035,42 @@ def export_otio(edit, files, probes):
     return json.dumps(timeline, indent=2) + "\n"
 
 
+def export_otioz(pdir, edit, files, probes):
+    """A portable OTIO archive with project media and archive-relative references."""
+    from io import BytesIO
+    root = Path(pdir).resolve()
+    timeline = json.loads(export_otio(edit, files, probes))
+    by_url = {Path(path).resolve().as_uri(): src for src, path in files.items()}
+    media = {}
+    def rewrite(node):
+        if isinstance(node, dict):
+            ref = node.get("media_reference")
+            if isinstance(ref, dict) and ref.get("target_url") in by_url:
+                src = by_url[ref["target_url"]]
+                path = (root / src).resolve()
+                try:
+                    path.relative_to(root)
+                except ValueError:
+                    raise EditError("media is outside the project") from None
+                if not path.is_file():
+                    raise EditError(f"file not found: {src}")
+                member = "media/" + Path(src).as_posix()
+                media[member] = path
+                ref["target_url"] = member
+            for value in node.values():
+                rewrite(value)
+        elif isinstance(node, list):
+            for value in node:
+                rewrite(value)
+    rewrite(timeline)
+    out = BytesIO()
+    with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("content.otio", json.dumps(timeline, indent=2) + "\n")
+        for member, path in media.items():
+            archive.write(path, member)
+    return out.getvalue()
+
+
 def export_xmeml(edit, files, probes):
     """Final Cut Pro 7 XML (xmeml version 4), with one video track, audio tracks and dissolve transition items."""
     import xml.etree.ElementTree as ET

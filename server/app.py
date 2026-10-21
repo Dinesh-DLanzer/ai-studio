@@ -53,7 +53,27 @@ def create_app(root=None, token=None, rates_path=None, transport=None, static_di
 
     @contextlib.asynccontextmanager
     async def lifespan(app_instance: FastAPI):
+        poll_stop = threading.Event()
+        def poll_external():
+            while not poll_stop.wait(2):
+                for project, edit_session in list(app_instance.state.external_edits.items()):
+                    try:
+                        from aistudio.external_edit import poll_and_register
+                        registered = poll_and_register(edit_session, ws.pdir(project))
+                        if registered:
+                            dest, metadata, original_rel = registered["file"], registered["metadata"], registered["original"]
+                            items = activitymod.load_activity(ws.pdir(project))
+                            items.insert(0, {"id": uuid.uuid4().hex, "kind": "external_edit", "target": original_rel,
+                                             "status": "done", "source": "external", "result": {"file": str(dest.relative_to(ws.pdir(project))), **metadata}})
+                            activitymod.save_activity(ws.pdir(project), items)
+                    except Exception:
+                        continue
+        poll_thread = threading.Thread(target=poll_external, name="external-edit-poller", daemon=True)
+        app_instance.state.external_edits = {}
+        poll_thread.start()
         yield
+        poll_stop.set()
+        poll_thread.join(timeout=2)
         if runner:
             runner.shutdown()
         _stop_chatgpt_listener(app_instance.state)
@@ -1021,6 +1041,103 @@ def create_app(root=None, token=None, rates_path=None, transport=None, static_di
         path = guard(ws.export_bundle, name)
         return FileResponse(path, media_type="application/zip", filename=f"{name}-edit-bundle.zip",
                             background=BackgroundTask(Path(path).unlink, missing_ok=True))
+
+    @app.get("/api/projects/{name}/edit/export/{fmt}", dependencies=[api])
+    def edit_export_format(name: str, fmt: str):
+        if fmt not in {"otio", "otioz", "xmeml", "fcpxml", "edl", "srt", "vtt", "bundle"}:
+            raise HTTPException(404, "unknown export format")
+        p, doc = guard(ws._storyboard._edit_for_export, name)
+        files, probes = editormod.media(p, doc)
+        if fmt == "otio":
+            body, media_type, suffix = editormod.export_otio(doc, files, probes), "application/json", "otio"
+        elif fmt == "otioz":
+            body, media_type, suffix = editormod.export_otioz(p, doc, files, probes), "application/zip", "otioz"
+        elif fmt == "xmeml":
+            body, media_type, suffix = editormod.export_xmeml(doc, files, probes), "application/xml", "xml"
+        elif fmt == "fcpxml":
+            body, media_type, suffix = ws.export_fcpxml(name), "application/xml", "fcpxml"
+        elif fmt == "edl":
+            body, media_type, suffix = ws.export_edl(name), "text/plain", "edl"
+        elif fmt in ("srt", "vtt"):
+            body, media_type, suffix = ws.export_subtitles(name, fmt), ("application/x-subrip" if fmt == "srt" else "text/vtt"), fmt
+        else:
+            path = ws.export_bundle(name)
+            return FileResponse(path, media_type="application/zip", filename=f"{name}-edit-bundle.zip",
+                                background=BackgroundTask(Path(path).unlink, missing_ok=True))
+        return Response(body, media_type=media_type, headers={"content-disposition": f'attachment; filename="{name}.{suffix}"'})
+
+    @app.post("/api/projects/{name}/edit/import-otio", dependencies=[api])
+    async def edit_import_otio(name: str, request: Request):
+        if getattr(request.state, "scope", "") != "session":
+            raise HTTPException(403, "human session required")
+        from aistudio.otio_import import read_otio
+        payload = await request.json()
+        raw = payload.get("otio", "")
+        if not isinstance(raw, str) or len(raw) > 10_000_000:
+            raise HTTPException(400, "otio must be text under 10 MB")
+        p, current = guard(ws._storyboard._edit_for_export, name)
+        return guard(read_otio, raw, current, p)
+
+    def human_session(request):
+        if getattr(request.state, "scope", "") != "session":
+            raise HTTPException(403, "human session required")
+
+    def external_apps():
+        path = ws.settings_dir / "external_apps.json"
+        try:
+            apps = json.loads(path.read_text(encoding="utf-8")).get("apps", [])
+        except (OSError, ValueError, AttributeError):
+            apps = []
+        return [x for x in apps if isinstance(x, str) and x.strip() and len(x) <= 100 and "/" not in x and "\\" not in x]
+
+    @app.get("/api/external-apps", dependencies=[api])
+    def get_external_apps(request: Request):
+        human_session(request)
+        return {"apps": external_apps()}
+
+    @app.put("/api/external-apps", dependencies=[api])
+    async def put_external_apps(request: Request):
+        human_session(request)
+        data = await request.json()
+        apps = data.get("apps") if isinstance(data, dict) else None
+        if not isinstance(apps, list) or any(not isinstance(x, str) or not x.strip() or len(x) > 100 or "/" in x or "\\" in x for x in apps):
+            raise HTTPException(400, "apps must be a list of application names")
+        ws.settings_dir.mkdir(parents=True, exist_ok=True)
+        (ws.settings_dir / "external_apps.json").write_text(json.dumps({"apps": sorted(set(apps))}, indent=2) + "\n", encoding="utf-8")
+        return {"apps": sorted(set(apps))}
+
+    @app.post("/api/projects/{name}/external-edit", dependencies=[api])
+    async def external_edit_start(name: str, request: Request):
+        human_session(request)
+        from aistudio.external_edit import ExternalEdit
+        data = await request.json()
+        rel = data.get("file") if isinstance(data, dict) else None
+        app_name = data.get("app") if isinstance(data, dict) else None
+        if not isinstance(rel, str) or Path(rel).is_absolute() or ".." in Path(rel).parts or "\\" in rel:
+            raise HTTPException(400, "file must be project relative")
+        p = guard(ws.pdir, name)
+        try:
+            session = ExternalEdit(p, apps=external_apps())
+            result = session.start(rel, app_name)
+        except (ValueError, OSError) as e:
+            raise HTTPException(400, str(e)) from None
+        app.state.external_edits[name] = session
+        return {"file": str(Path(result["path"]).relative_to(p)), "app": result["app"], "status": "editing"}
+
+    @app.get("/api/projects/{name}/external-edit", dependencies=[api])
+    def external_edit_status(name: str, request: Request):
+        human_session(request)
+        session = app.state.external_edits.get(name)
+        return {"sessions": ([{"file": str(session.session["original"].relative_to(ws.pdir(name))), "app": session.session["app"], "status": "editing"}]
+                            if session and session.session and not session.session["reported"] else [])}
+
+    @app.post("/api/projects/{name}/external-edit/stop", dependencies=[api])
+    def external_edit_stop(name: str, request: Request):
+        human_session(request)
+        session = app.state.external_edits.pop(name, None)
+        if session:
+            session.stop()
+        return {"stopped": bool(session)}
 
     @app.post("/api/projects/{name}/audio", dependencies=[api])
     async def audio_upload(name: str, filename: str, request: Request):

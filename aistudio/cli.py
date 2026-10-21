@@ -196,6 +196,11 @@ def main(argv=None, ask=input, out=print):
     p_exp.add_argument("--include-discarded", action="store_true")
     p_exp.add_argument("--json", action="store_true")
 
+    p_export = sp.add_parser("export", help="Export an edit timeline for another editor")
+    p_export.add_argument("project")
+    p_export.add_argument("--format", required=True, choices=["otio", "otioz", "xmeml", "fcpxml", "edl", "srt", "vtt", "bundle"])
+    p_export.add_argument("--out", required=True, type=Path)
+
     p_set = sp.add_parser("agent-setup", help="Configure agent manifests")
     p_set.add_argument("agent", choices=["claude", "agy", "all"], default="all", nargs="?")
 
@@ -455,6 +460,29 @@ def main(argv=None, ask=input, out=print):
                 out(json.dumps({"path": res}, indent=2))
             else:
                 out(f"Exported project archive: {res}")
+
+        elif args.cmd == "export":
+            p, doc = ws._storyboard._edit_for_export(args.project)
+            from aistudio import editor
+            files, probes = editor.media(p, doc)
+            fmt = args.format
+            if fmt == "otio":
+                data = editor.export_otio(doc, files, probes).encode()
+            elif fmt == "otioz":
+                data = editor.export_otioz(p, doc, files, probes)
+            elif fmt == "xmeml":
+                data = editor.export_xmeml(doc, files, probes).encode()
+            elif fmt == "fcpxml":
+                data = ws.export_fcpxml(args.project).encode()
+            elif fmt == "edl":
+                data = ws.export_edl(args.project).encode()
+            elif fmt in ("srt", "vtt"):
+                data = ws.export_subtitles(args.project, fmt).encode()
+            else:
+                data = Path(ws.export_bundle(args.project)).read_bytes()
+            args.out.parent.mkdir(parents=True, exist_ok=True)
+            args.out.write_bytes(data)
+            out(str(args.out))
 
         elif args.cmd == "agent-setup":
             res = _setup_agent(args.agent, home, out=out)
