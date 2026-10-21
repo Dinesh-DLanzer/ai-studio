@@ -98,7 +98,8 @@ def tools():
 
 # ---------------------------------------------------------------- validation (pure)
 def safe_rel(rel, folder, suffixes):
-    """Project-relative path 'folder/name.ext' with no '..', not absolute, not inside _discarded.  Returns the posix string."""
+    """Project-relative path 'folder/name.ext' with no '..', not absolute, not inside _discarded.  Returns the posix string.
+    A sub-folder is allowed (the voiceover files live in 'audio/vo/'), but the first part must be one of the folders."""
     if not isinstance(rel, str) or not rel:
         raise EditError("a clip, sound or element has no file")
     p = Path(rel)
@@ -107,7 +108,7 @@ def safe_rel(rel, folder, suffixes):
     if "_discarded" in p.parts:
         raise EditError(f"{rel} is in Discarded; restore it first")
     allowed = (folder,) if isinstance(folder, str) else tuple(folder)
-    if not p.parts or p.parts[0] not in allowed or len(p.parts) != 2 or p.suffix.lower() not in suffixes:
+    if not p.parts or p.parts[0] not in allowed or len(p.parts) < 2 or p.suffix.lower() not in suffixes:
         raise EditError(f"{rel} must be {'/'.join(allowed)}/<file>{'|'.join(suffixes)}")
     return p.as_posix()
 
