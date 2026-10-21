@@ -12,12 +12,12 @@ Restart Resolve after installing the script if it does not appear in the Scripts
 
 ## Export and fallback routes
 
-The current server has no OTIO export route or approved-media listing route. The script expects these routes:
+The server provides both timeline exports and the approved media listing:
 
-- `GET /api/projects/{name}/export/otioz` (or `/otio`) to return an OTIO timeline export.
-- `GET /api/projects/{name}/media?approved=1` to return an ordered JSON list under `media`; each entry needs a local `path`/`src` or a downloadable `url`.
+- `GET /api/projects/{name}/export/otioz` (or `/otio`): Implemented in `server/app.py`. Returns OpenTimelineIO timeline exports.
+- `GET /api/projects/{name}/media?approved=1`: Implemented in `server/app.py`. Returns an ordered JSON list under `media`; each entry includes `name`, `kind`, `size`, `sha`, `path`, `src`, and `download_path`/`url`.
 
-Once the timeline export route exists, the script downloads `.otioz` first and `.otio` second, then passes the file to Resolve's `MediaPool.ImportTimelineFromFile`. If that call fails or the route is unavailable, it calls `MediaPool.ImportMedia` and then `MediaPool.AppendToTimeline` using the media endpoint's order. Those fallback clips are appended in order, but their edit in/out points are not represented by the media-list contract above.
+When importing, the script downloads `.otioz` first and `.otio` second, then passes the file to Resolve's `MediaPool.ImportTimelineFromFile`. If that call fails or the route is unavailable, it calls `MediaPool.ImportMedia` and then `MediaPool.AppendToTimeline` using the media endpoint's order. Device pairing tokens (`aisd_...`) via `POST /api/pair/confirm` are supported for authentication.
 
 ## Verification limits
 

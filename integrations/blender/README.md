@@ -39,7 +39,7 @@ In Blender's **3D Viewport**, press <kbd>N</kbd> to toggle the sidebar, and clic
 
 ### Pairing
 1. **Server URL:** Defaults to `http://127.0.0.1:8765`.
-2. **Token:** Enter your AI Studio session token or API key (`x-aistudio-token`).
+2. **Token:** Enter your AI Studio session token, API key, or paired device token (`x-aistudio-token`, `Authorization: Bearer <token>`). Paired device tokens can be generated via `POST /api/pair/confirm` with `host: "blender"`.
 3. Click **Pair**. The extension connects to the server and populates the **Project** and **Shot** dropdowns.
 
 ### Workflow
@@ -71,10 +71,18 @@ In Blender's **3D Viewport**, press <kbd>N</kbd> to toggle the sidebar, and clic
 
 ## 5. Needed Server Routes
 
-The following endpoints are needed or recommended to complete server-side previs integration:
+The following endpoints support blender integration:
 
-1. `POST /api/projects/{name}/shots/{shot}/camera-move`
-   - **Status:** Not yet implemented on server.
+1. **`GET /api/projects/{name}/media?approved=1`**
+   - **Status:** **Implemented** in `server/app.py`.
+   - **Purpose:** Delivers approved clips, stills, and audio assets with resolved download paths.
+
+2. **`POST /api/pair/confirm` & Device Tokens**
+   - **Status:** **Implemented** in `server/app.py`.
+   - **Purpose:** Supports `host: "blender"` for issuing 30-day paired device tokens.
+
+3. **`POST /api/projects/{name}/shots/{shot}/camera-move`**
+   - **Status:** Planned for camera motion classification.
    - **Payload format:**
      ```json
      {
@@ -97,9 +105,8 @@ The following endpoints are needed or recommended to complete server-side previs
      ```
    - **Server behavior:** Forward the samples to `storyboard/camera_classify.py` to classify motion (e.g. dolly-in, orbit, pan, tilt, zoom) and update shot direction (`direction.movement`).
 
-2. `GET /api/projects/{name}/shots`
-   - **Status:** Currently, `PUT /api/projects/{name}/shots` exists, but `GET` returns 405 Method Not Allowed. Shots must be read via the full project overview at `GET /api/projects/{name}`.
-   - **Recommendation:** Add `GET /api/projects/{name}/shots` returning `{"aspect_ratio": ..., "shots": [...]}`. The client module currently attempts `/shots` first with automatic fallback to `/api/projects/{name}`.
+4. **`GET /api/projects/{name}/shots`**
+   - **Status:** Recommended convenience route. Currently shots can be retrieved via `GET /api/projects/{name}` overview.
 
 ---
 
