@@ -208,6 +208,27 @@ class TestProjectFromFormat(unittest.TestCase):
             P.create_project(self.root, "badfmt", format="not-a-format")
         self.assertIn("not found", str(cm.exception))
 
+    def test_unknown_ids_leave_no_project_behind(self):
+        """A bad format or brand kit is refused before the folder is made (no half-made project)."""
+        with self.assertRaises(ValueError):
+            P.create_project(self.root, "badfmt", format="not-a-format")
+        self.assertFalse((self.root / "badfmt").exists())
+        with self.assertRaises(ValueError):
+            P.create_project(self.root, "badkit", brand_kit="not-a-kit", kit_root=self.root / "brand_kits")
+        self.assertFalse((self.root / "badkit").exists())
+        self.assertEqual(sorted(p.name for p in self.root.iterdir()), [])
+
+    def test_unknown_ids_leave_no_project_behind_in_the_service(self):
+        """The same through the service: the API answers 400 and the workspace stays clean."""
+        from aistudio.service import Workspace
+        ws = Workspace(tempfile.mkdtemp())
+        with self.assertRaises(Exception):
+            ws.create_project("bad", format="not-a-format")
+        self.assertFalse((ws.root / "projects" / "bad").exists())
+        with self.assertRaises(Exception):
+            ws.create_project("bad", brand_kit="not-a-kit")
+        self.assertFalse((ws.root / "projects" / "bad").exists())
+
     def test_no_settings_written(self):
         """No format writes anything under settings/ (no model selection)."""
         p = P.create_project(self.root, "testfmt", format="instagram-reel")
