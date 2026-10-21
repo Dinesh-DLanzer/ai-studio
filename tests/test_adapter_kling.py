@@ -62,6 +62,38 @@ class TestKling(unittest.TestCase):
         with self.assertRaises(Retryable):
             a.video_download(job)
 
+    # --------------------------- lip sync ----------------------------------
+
+    def test_lipsync_submit(self):
+        a, t = make({"code": 0, "data": {"task_id": "LS1"}}, {"code": 1002, "message": "bad"})
+        j = a.lipsync_submit("kling-v1-6", png(), png())
+        self.assertEqual(j, {"job_id": "lipsync:LS1", "model": "kling-v1-6"})
+        self.assertEqual(t.last["url"], "https://api.klingai.com/v1/lipsyncs")
+        self.assertEqual(t.last["body"]["model_name"], "kling-v1-6")
+        self.assertIn("video", t.last["body"])
+        self.assertIn("audio", t.last["body"])
+        with self.assertRaises(Rejected):
+            a.lipsync_submit("m", png(), png())
+
+    def test_lipsync_poll_and_download(self):
+        job = {"job_id": "lipsync:LS1", "model": "m"}
+        ok = {"code": 0, "data": {"task_status": "succeed", "task_result": {"video_url": "http://v/ls.mp4"}}}
+        a, t = make({"code": 0, "data": {"task_status": "processing"}}, ok,
+                    {"code": 0, "data": {"task_status": "failed", "task_status_msg": "policy"}}, ok, b"MP4", {"code": 0, "data": {"task_status": "submitted"}})
+        self.assertEqual(a.lipsync_poll(job)["status"], "pending")
+        self.assertEqual(t.last["url"], "https://api.klingai.com/v1/lipsyncs/LS1")
+        self.assertEqual(a.lipsync_poll(job), {"status": "done", "error": None, "cost": None})
+        self.assertEqual(a.lipsync_poll(job), {"status": "failed", "error": "policy", "cost": None})
+        self.assertEqual(a.lipsync_download(job), b"MP4")
+        self.assertTrue(t.last["raw"])
+        with self.assertRaises(Retryable):
+            a.lipsync_download(job)
+
+    def test_capabilities_include_lipsync(self):
+        a, _ = make()
+        self.assertIn("lipsync", a.capabilities)
+        self.assertIn("video", a.capabilities)
+
 
 if __name__ == "__main__":
     unittest.main()
