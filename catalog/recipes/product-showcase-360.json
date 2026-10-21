@@ -1,0 +1,18 @@
+{
+  "id": "product-showcase-360",
+  "label": "Product showcase 360",
+  "category": "Ads",
+  "description": "A product photo becomes a clean scene, then a slow 360 orbit clip.",
+  "consent": "none",
+  "format": "product-showcase-9x16",
+  "inputs": [
+    {"key": "product", "type": "image", "required": true, "label": "Product photo"},
+    {"key": "setting", "type": "choice", "required": true, "options": ["studio", "marble counter", "outdoor"], "label": "Scene"}
+  ],
+  "steps": [
+    {"id": "hero", "task": "image_edit", "source": "{product}", "params": {"edit_mode": "bgswap", "mask_mode": "MASK_MODE_BACKGROUND"},
+     "prompt": "Place the product in a {setting} scene, premium lighting. Keep the product unchanged."},
+    {"id": "orbit", "task": "image_to_video", "source": "{hero}", "seconds": 5, "direction": {"preset": "360-orbit"},
+     "prompt": "Slow, steady orbit around the product. The product stays sharp and unchanged."}
+  ]
+}

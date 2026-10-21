@@ -105,11 +105,12 @@ class BatchDomain:
             if not plan["items"]:
                 raise ServiceError("none of the proposed items can be batched right now")
         items = [{"kind": it["kind"], "target": it["target"], "label": it.get("label", ""), "model": it["model"], "price": round(float(it["price"]), 6),
-                  "request_hash": self.digest(p, it["kind"], it["target"], it["model"], it["price"], it.get("variant")), "status": "pending",
-                  **({"variant": it["variant"]} if it.get("variant") else {})} for it in plan["items"]]
+                  "request_hash": it["request_hash"] if it.get("recipe") else self.digest(p, it["kind"], it["target"], it["model"], it["price"], it.get("variant")),
+                  "status": "pending", **({"variant": it["variant"]} if it.get("variant") else {}),
+                  **({"recipe": it["recipe"]} if it.get("recipe") else {})} for it in plan["items"]]      # recipe items carry their own request hash (aistudio/recipes.py)
         total = round(sum(it["price"] for it in items), 6)
         batch = {"id": secrets.token_hex(6), "items": items, "total": total, "batch_hash": batch_hash(items, total), "status": "awaiting_approval",
-                 "created": time.time(), "actor": actor, "budget": plan["budget"]}
+                 "created": time.time(), "actor": actor, "budget": plan["budget"], **(plan.get("extra") or {})}
         self._save(name, batch)
         return batch
 
@@ -156,7 +157,11 @@ class BatchDomain:
                 self._save(name, batch)
                 if on_item:
                     on_item(item, "start")   # the job ledger records one child job per item
-                stop = self._run_item(name, p, item)
+                if item.get("recipe"):
+                    from aistudio import recipes
+                    stop = recipes.run_item(self.ws, name, p, item, batch)
+                else:
+                    stop = self._run_item(name, p, item)
                 self._save(name, batch)
                 if on_item:
                     on_item(item, "end")

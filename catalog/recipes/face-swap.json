@@ -1,0 +1,15 @@
+{
+  "id": "face-swap",
+  "label": "Face swap",
+  "category": "Portraits",
+  "description": "Swap a face between two photos. Needs a face-swap task and a recorded consent for every person involved. Never for public figures.",
+  "consent": "required",
+  "requires": ["face_swap"],
+  "inputs": [
+    {"key": "target", "type": "image", "required": true, "label": "Photo to change (a person who gave consent)"},
+    {"key": "face", "type": "image", "required": true, "label": "Face to use (a person who gave consent)"}
+  ],
+  "steps": [
+    {"id": "swap", "task": "face_swap", "source": "{target}", "clips": ["{face}"]}
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "id": "headshot",
+  "label": "Professional headshot",
+  "category": "Portraits",
+  "description": "A casual photo becomes a studio headshot. Needs a headshot task and a recorded consent for the person in the photo.",
+  "consent": "required",
+  "requires": ["headshot"],
+  "inputs": [
+    {"key": "photo", "type": "image", "required": true, "label": "Photo (a person who gave consent)"},
+    {"key": "backdrop", "type": "choice", "required": true, "options": ["grey", "white", "navy", "warm beige"], "label": "Backdrop"}
+  ],
+  "steps": [
+    {"id": "shot", "task": "headshot", "source": "{photo}", "prompt": "Professional studio headshot on a {backdrop} backdrop. Keep the identity unchanged."}
+  ]
+}

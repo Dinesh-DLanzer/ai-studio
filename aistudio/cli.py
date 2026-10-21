@@ -163,6 +163,18 @@ def main(argv=None, ask=input, out=print):
     l_search.add_argument("query", nargs="?", default="")
     l_search.add_argument("--json", action="store_true")
 
+    p_recipe = sp.add_parser("recipe", help="One-click recipes: list them, or plan one into an awaiting-approval batch (never approves or spends)")
+    rsp = p_recipe.add_subparsers(dest="recipe_cmd", required=True)
+    r_list = rsp.add_parser("list", help="List recipes and whether they can run")
+    r_list.add_argument("--project", default="")
+    r_list.add_argument("--available", action="store_true")
+    r_plan = rsp.add_parser("plan", help="Plan a recipe in a project")
+    r_plan.add_argument("project")
+    r_plan.add_argument("recipe")
+    r_plan.add_argument("--input", action="append", default=[], metavar="KEY=VALUE")
+    for c in (r_list, r_plan):
+        c.add_argument("--json", action="store_true")
+
     p_crew = sp.add_parser("crew", help="Studio crew agents: run, status, undo (a human terminal; agents never approve or spend)")
     csp = p_crew.add_subparsers(dest="crew_cmd", required=True)
     c_run = csp.add_parser("run", help="Run an agent on a task")
@@ -242,6 +254,21 @@ def main(argv=None, ask=input, out=print):
             else:
                 for item in (res if isinstance(res, list) else res["items"]):
                     out(f"{item['project']}  {item['kind']:<8} {item['file']}  {item['prompt'][:70]}")
+
+        elif args.cmd == "recipe":
+            from aistudio import recipes as recipes_mod
+            if args.recipe_cmd == "list":
+                res = recipes_mod.list_recipes(ws, args.project or None, args.available)
+            else:
+                given = dict(kv.split("=", 1) for kv in args.input if "=" in kv)
+                res = recipes_mod.plan(ws, args.project, args.recipe, {k: (float(v) if recipes_mod.is_number_input(args.recipe, k) else v) for k, v in given.items()}, actor="cli")
+            if is_json:
+                out(json.dumps(res, indent=2, default=str))
+            elif args.recipe_cmd == "list":
+                for r in res:
+                    out(f"{r['id']:<26} {'ready' if r['available'] else 'unavailable':<12} {r['label']}" + ("" if r["available"] else f"  ({'; '.join(r['reasons'])})"))
+            else:
+                out(f"Batch {res['id']} awaiting approval: {len(res['items'])} items, total ${res['total']:.3f}. Approve it with the web page or the approve_batch tool.")
 
         elif args.cmd == "crew":
             from aistudio import jobs as jobsmod
