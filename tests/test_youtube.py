@@ -151,6 +151,16 @@ class YouTubeTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "preflight"):
             youtube.preview(project, "youtube", preflight=[{"level": "error"}], channel_title="Test Channel")
 
+    def test_empty_title_is_refused(self):
+        project = self.root / "projects" / "demo"
+        project.mkdir(parents=True)
+        (project / "publish.json").write_text(json.dumps({"platform": "youtube", "title": "", "status": "exported", "preset_id": "youtube"}))
+        class WS:
+            secrets = self.store
+            def pdir(inner, _project): return project
+        with self.assertRaisesRegex(ValueError, "title"):
+            youtube.queue_upload(WS(), "demo", "youtube", confirm_title="", preflight=[], runner=object())
+
     def test_publish_human_only_api_keys_and_title_confirmation(self):
         try:
             from fastapi.testclient import TestClient

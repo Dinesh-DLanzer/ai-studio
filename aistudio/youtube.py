@@ -363,6 +363,8 @@ def upload_file(secret_store, call, path, metadata, privacy="private", progress=
 def queue_upload(ws, project, preset, privacy="private", confirm_title="", preflight=None, runner=None):
     pdir = ws.pdir(project)
     doc = publish.get(ws, project)
+    if not (doc.get("title") or "").strip():
+        raise ValueError("set a title in publish.json before uploading")
     if confirm_title != doc.get("title"):
         raise ValueError("typed title does not match publish.json")
     state = status(ws.secrets)
@@ -372,6 +374,12 @@ def queue_upload(ws, project, preset, privacy="private", confirm_title="", prefl
     payload = {**info, "privacy": info["privacy"]}
     if runner is None:
         raise ValueError("YouTube uploads require the durable job ledger")
+    from . import jobs
+    for old in jobs.list_jobs(runner.root, project=project, limit=500):    # one upload per exact file: a double click must not post twice
+        p = old.get("payload") or {}
+        if old["kind"] == "publish_upload" and old["target"] == preset and p.get("sha256") == info["sha256"] \
+                and old["state"] in ("queued", "running", "provider_pending", "completed", "needs_sync"):
+            raise ValueError("this exact export was already uploaded or is uploading; check the job list before sending it again")
     job = runner.submit(project, "publish_upload", target=preset, actor="local", payload=payload)
     return {"job": job["id"], "file": info["file"], "size": info["size"], "sha256": info["sha256"], "title": info["title"], "privacy": info["privacy"]}
 
@@ -398,8 +406,8 @@ def upload_job(secret_store, project_dir, job, progress, call=None):
             thumb = _project_file(project_dir, meta["thumbnail"])
             if thumb.stat().st_size > 50 * 1024 * 1024:
                 raise ValueError("thumbnail exceeds YouTube's 50 MB limit")
-            mime = mimetypes.guess_type(thumb.name)[0] or "application/octet-stream"
-            if mime not in ("image/png", "image/jpeg", "application/octet-stream"):
+            mime = mimetypes.guess_type(thumb.name)[0]
+            if mime not in ("image/png", "image/jpeg"):
                 raise ValueError("thumbnail must be a PNG or JPEG")
             tokens = valid_tokens(secret_store, call)
             url = UPLOAD + "/thumbnails/set?videoId=" + urllib.parse.quote(result["video_id"])
