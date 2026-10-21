@@ -544,9 +544,9 @@ class ProjectDomain:
 
         # 3. Audio
         if (p / "audio").is_dir():
-            for idx, f in enumerate(sorted((p / "audio").glob("*"))):
+            for idx, f in enumerate(sorted((p / "audio").glob("**/*"))):      # generated voiceover/music/sfx live in audio/vo, audio/music, audio/sfx
                 if f.is_file() and not f.name.startswith(".") and f.suffix.lower() in (".mp3", ".wav", ".m4a", ".aac", ".ogg"):
-                    rel = f"audio/{f.name}"
+                    rel = f.relative_to(p).as_posix()      # keeps the subfolder: audio/vo/<shot>.v1.mp3
                     if rel in seen_paths:
                         continue
                     info = _file_info(rel)

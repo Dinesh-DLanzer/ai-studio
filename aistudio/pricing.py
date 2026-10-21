@@ -213,7 +213,8 @@ class Pricing:
                 return v == 0 if isinstance(v, (int, float)) else all(zero(x) for x in (v.values() if isinstance(v, dict) else [t.get("rate") for t in v]))
             return bool(card.get("per_second")) and zero(card["per_second"])
         if card and card.get("kind") == "audio":
-            return all(v == 0 for v in card.values() if isinstance(v, (int, float)) and not isinstance(v, bool))
+            rates = [card[k] for k in ("per_1k_chars", "per_minute", "per_run", "per_second") if isinstance(card.get(k), (int, float)) and not isinstance(card.get(k), bool)]
+            return bool(rates) and all(v == 0 for v in rates)      # a card with NO rate is unpriced, never free (all([]) is True: that would skip the grant check)
         return bool(card and card.get("kind") == "text" and card.get("free"))
 
     def text_cost(self, card, usage):

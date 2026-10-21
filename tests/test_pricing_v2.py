@@ -117,3 +117,19 @@ class TestQuotesAgree(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class UnpricedAudioIsNeverFree(unittest.TestCase):
+    def test_an_audio_card_without_rates_is_unpriced_not_free(self):
+        from aistudio.pricing import Pricing
+        pr = Pricing({}, {})
+        self.assertFalse(pr.is_free({"kind": "audio"}))                          # all([]) is True: this used to skip the grant check
+        self.assertFalse(pr.is_free({"kind": "audio", "note": "x"}))
+        self.assertFalse(pr.is_free({"kind": "audio", "per_1k_chars": 0.3}))
+        self.assertTrue(pr.is_free({"kind": "audio", "per_1k_chars": 0}))        # an explicit zero rate is free
+
+    def test_paid_audio_with_an_unpriced_card_needs_a_grant(self):
+        import inspect
+        from aistudio import roles
+        src = inspect.getsource(roles.RoleRunner.audio_task)
+        self.assertIn('cost, source = grant.price, "estimated"', src)

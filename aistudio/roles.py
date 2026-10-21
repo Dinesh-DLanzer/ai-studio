@@ -414,10 +414,12 @@ class RoleRunner:
         out = r["result"]
         if out.get("pending"):
             return {"status": "pending", "job": out.get("job"), "provider": r["provider"], "model": r["model"]}
+        computed = price_of({"card": r["card"]})
+        cost, source = self.pricing.actual_cost(out.get("cost"), computed)
+        if out.get("cost") is None and computed is None and grant and not self.pricing.is_free(r["card"]):
+            cost, source = grant.price, "estimated"      # a paid call that reports no cost and cannot be recomputed is logged at the approved quote, never $0
         if task == "transcribe":
-            cost, source = self.pricing.actual_cost(out.get("cost"), price_of({"card": r["card"]}))
             return {"status": "done", "transcript": out, "provider": r["provider"], "model": r["model"], "cost": cost, "cost_source": source}
-        cost, source = self.pricing.actual_cost(out.get("cost"), price_of({"card": r["card"]}))
         return {"status": "done", "bytes": out.get("bytes", b""), "mime": out.get("mime", "application/octet-stream"),
                 "provider": r["provider"], "model": r["model"], "cost": cost, "cost_source": source}
 

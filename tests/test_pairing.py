@@ -324,3 +324,17 @@ class TestAuthReviewFixes(unittest.TestCase):
     def test_review_package_route_is_wired(self):
         res = self.c.post("/api/projects/demo/review-package", headers=self.H, json={})
         self.assertNotEqual(res.status_code, 500)      # a missing import used to raise NameError here
+
+
+@unittest.skipUnless(HAVE, "fastapi not installed")
+class TestMediaListingIncludesGeneratedAudio(unittest.TestCase):
+    def test_audio_in_subfolders_is_listed(self):
+        root = tempfile.mkdtemp()
+        from aistudio.service import Workspace
+        ws = Workspace(root)
+        ws.create_project("demo")
+        d = Path(root) / "projects" / "demo" / "audio" / "vo"
+        d.mkdir(parents=True)
+        (d / "s1.v1.mp3").write_bytes(b"x")
+        names = json.dumps(ws.list_media("demo", approved_only=False) if "approved_only" in ws.list_media.__code__.co_varnames else ws.list_media("demo"))
+        self.assertIn("audio/vo/s1.v1.mp3", names)
