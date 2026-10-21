@@ -160,8 +160,8 @@ class Workspace(SettingsMixin):
     def list_projects(self):
         return self._projects.list_projects()
 
-    def create_project(self, name, test_pipeline=False):
-        return self._projects.create_project(name, test_pipeline=test_pipeline)
+    def create_project(self, name, test_pipeline=False, format=None, brand_kit=None):
+        return self._projects.create_project(name, test_pipeline=test_pipeline, format=format, brand_kit=brand_kit)
 
     def set_favorite(self, name, on):
         return self._projects.set_favorite(name, on)

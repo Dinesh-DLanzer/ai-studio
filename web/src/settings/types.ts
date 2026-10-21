@@ -40,3 +40,9 @@ export interface CapabilityProfile {
   seed: boolean; negative_prompt: boolean; tools: "native" | "json";
   source: "user" | "provider_api" | "builtin" | "default"; verified_at: string | null; note?: string | null;
 }
+
+/** One image or video model with its effective profile, the user's partial override and its price (GET /api/capabilities). */
+export interface CapabilityModel {
+  provider: string; provider_label: string; ptype: string; id: string; name: string; capability: Capability;
+  price: string | null; priced: boolean; card: PriceCard | null; profile: CapabilityProfile; override: Partial<CapabilityProfile> | null;
+}

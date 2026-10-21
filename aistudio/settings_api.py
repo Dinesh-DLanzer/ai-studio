@@ -352,6 +352,41 @@ class SettingsMixin:
         self._save_models_doc(doc)
         return {"ok": True}
 
+    # ---------------------------------------------------------------- capabilities (plan 13 user layer)
+    def capabilities_all(self, capability=None):
+        """Every known model with its effective capability profile, the user's partial override and its price summary."""
+        from aistudio import catalog as catalog_mod
+        cat, out = self.catalog(), []
+        for m in self.models_all(capability)["models"]:
+            if m["capability"] not in ("image", "video"):
+                continue
+            prof = cat.profile(m["provider"], m["ptype"], m["id"], m["card"])
+            out.append({**{k: m[k] for k in ("provider", "provider_label", "ptype", "id", "name", "capability", "price", "priced", "card")},
+                        "profile": prof, "override": cat.override(m["provider"], m["id"])})
+        return {"models": out}
+
+    def capability_put(self, pid, model, partial):
+        """Save the user's override for one model. Validated against the backend schema (merged over the default) before it is written."""
+        from aistudio import catalog as catalog_mod
+        from aistudio.schemas.catalog import validate_profile
+        p = self._provider(pid)
+        if not isinstance(partial, dict):
+            raise _err("capabilities must be an object")
+        partial = {k: v for k, v in partial.items() if k not in ("source", "verified_at")}
+        problems = validate_profile(catalog_mod._merge(catalog_mod.default_profile(p["type"], self.pricing().card(pid, p["type"], model)), partial))
+        if problems:
+            raise _err("; ".join(problems))
+        doc = self._models_doc()
+        doc.setdefault("capabilities", {})[pricing_mod.key(pid, model)] = partial
+        self._save_models_doc(doc)
+        return {"profile": self.catalog().profile(pid, p["type"], model), "override": partial}
+
+    def capability_delete(self, pid, model):
+        doc = self._models_doc()
+        doc.get("capabilities", {}).pop(pricing_mod.key(pid, model), None)
+        self._save_models_doc(doc)
+        return {"ok": True}
+
     # ---------------------------------------------------------------- roles
     def _chain_view(self, role, project=None):
         runner = self.runner()

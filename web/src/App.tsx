@@ -14,6 +14,7 @@ import { SetupContext } from "./app/setupContext";
 const Settings = lazy(() => import("./Settings"));
 const Help = lazy(() => import("./pages/Help"));
 const Kit = lazy(() => import("./pages/Kit"));
+const Library = lazy(() => import("./pages/Library"));
 
 // Project screens are mutually exclusive routes. Keep the initial shell small and
 // download each screen only when the user opens it.
@@ -92,6 +93,7 @@ export default function App() {
           <Route path="/" element={<Plain><Projects /></Plain>} />
           <Route path="/settings" element={<Plain><Settings /></Plain>} />
           <Route path="/help" element={<Plain><Help /></Plain>} />
+          <Route path="/library" element={<Plain><Library /></Plain>} />
           <Route path="/kit" element={<Plain><Kit /></Plain>} />
           <Route path="/p/:name" element={<ProjectRoute />}>
             <Route index element={<Overview />} />

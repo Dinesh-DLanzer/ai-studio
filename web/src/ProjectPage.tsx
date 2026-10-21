@@ -35,6 +35,7 @@ export type TabProps = {
   name: string;
   load: () => void;
   start: (k: "image" | "clip" | "review", t: string) => void;
+  openProposal?: (p: import("./types").Proposal) => void;
   running: Running;
   openBudget: () => void;
   todoNode: React.ReactNode;

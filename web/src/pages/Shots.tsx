@@ -15,6 +15,8 @@ import { VerifyBar } from "../Verify";
 import { EmptyState, RailCard } from "../components/kit";
 import { ReviewBadge, stem, type TabProps } from "../ProjectPage";
 import type { Shot } from "../types";
+import DirectionSection from "../components/Direction";
+import ShotModelPicker from "../components/ShotModelPicker";
 
 const mmss = (s: number) => `0:${String(Math.round(s)).padStart(2, "0")}`;
 const money = (n?: number) => (n === undefined || n === null ? "-" : `$${n.toFixed(3)}`);
@@ -312,8 +314,7 @@ export function ShotsTab({ o, name, load, start, running }: TabProps) {
 
               <RailCard title="Generate Options">
                 <div className="grid grid-cols-2 gap-3">
-                  <div><label className="mb-1 block text-xs font-semibold text-slate-300">Model</label>
-                    <Select value={cur.model} disabled aria-label="Model"><option>{cur.model.split("/").pop()}</option></Select></div>
+                  <ShotModelPicker current={cur.model} imageToVideo={!!cur.first_frame} onPick={(ref) => upd(cur.id, { model: ref })} />
                   <div><label className="mb-1 block text-xs font-semibold text-slate-300" htmlFor="dur">Duration</label>
                     <Select id="dur" value={cur.seconds} onChange={(e) => upd(cur.id, { seconds: Number(e.target.value) })} aria-label={`Seconds for ${cur.id}`}>
                       {[4, 6, 8].map((n) => <option key={n} value={n}>{n} seconds</option>)}</Select></div>
@@ -336,6 +337,11 @@ export function ShotsTab({ o, name, load, start, running }: TabProps) {
                   {busy ? <><Spinner size={14} />Generating clip...</> : <>Generate New Version <ArrowRight size={16} /></>}
                 </Button>
                 <p className="mt-2 text-center text-[0.7rem] text-slate-400">Estimated {money(priceOf(cur))}</p>
+              </RailCard>
+
+              <RailCard title="Direction" sub="Camera, frames and what this model supports">
+                <DirectionSection project={name} shot={cur} stills={o.files.stills} onChange={(patch) => upd(cur.id, patch)}
+                  savedKey={JSON.stringify([o.shots.shots.find((x) => x.id === cur.id)?.model, o.shots.shots.find((x) => x.id === cur.id)?.direction, o.shots.shots.find((x) => x.id === cur.id)?.end_frame, o.shots.shots.find((x) => x.id === cur.id)?.keyframes, o.shots.shots.find((x) => x.id === cur.id)?.first_frame])} />
               </RailCard>
 
               <RailCard title="Verification"><VerifyBar scope="shots" label="Shots" /></RailCard>

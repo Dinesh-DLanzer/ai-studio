@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Coins, Cpu, KeyRound, Plug, SlidersHorizontal, Sparkles, Users } from "lucide-react";
+import { Coins, Cpu, KeyRound, Palette, Plug, SlidersHorizontal, Sparkles, Users } from "lucide-react";
 import { Card, Input, IconTile, PageHeader } from "./ui";
 import { useToast } from "./toast";
 import { confirmDialog } from "./dialogs";
@@ -7,6 +7,7 @@ import ProvidersSection from "./settings/Providers";
 import RolesSection from "./settings/Roles";
 import CrewAgentsSection from "./settings/CrewAgents";
 import IntegrationsSection from "./settings/Integrations";
+import BrandKitsSection from "./settings/BrandKits";
 import { settingsApi } from "./settings/client";
 import type { RolesResponse } from "./settings/types";
 
@@ -14,6 +15,7 @@ const SECTIONS = [
   { id: "set-providers", label: "AI Providers", sub: "Connect & manage providers", icon: <Sparkles size={17} /> },
   { id: "set-models", label: "Model Configuration", sub: "Assign models for each process", icon: <Cpu size={17} /> },
   { id: "set-limits", label: "Usage & Limits", sub: "Track usage and set limits", icon: <Coins size={17} /> },
+  { id: "set-brand", label: "Brand kits", sub: "Logo, palette, fonts, captions", icon: <Palette size={17} /> },
   { id: "set-agents", label: "Agents", sub: "Crew prompts and limits", icon: <Users size={17} /> },
   { id: "set-integrations", label: "Integrations", sub: "Connect agents (MCP) and API keys", icon: <Plug size={17} /> },
   { id: "set-prefs", label: "Preferences", sub: "App preferences", icon: <SlidersHorizontal size={17} /> },
@@ -90,6 +92,8 @@ export default function Settings() {
               )}
             </Card>
           </section>
+
+          <section id="set-brand" className="scroll-mt-24"><BrandKitsSection /></section>
 
           <section id="set-agents" className="scroll-mt-24"><CrewAgentsSection /></section>
 

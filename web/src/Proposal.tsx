@@ -5,6 +5,7 @@ import { Button, Modal, Badge, money } from "./ui";
 import { useToast } from "./toast";
 import { notifyDone, notifyStart } from "./notify";
 import type { Proposal } from "./types";
+import ProposalDetails from "./components/ProposalDetails";
 
 export const Spinner = ({ size = 14 }: { size?: number }) => <Loader2 size={size} className="animate-spin" aria-hidden />;
 
@@ -38,6 +39,9 @@ export function useProposal(project: string, mode: string, onDone: () => void) {
     catch (e: any) { toast("error", e.message); }
   }, [project, toast]);
 
+  /** Show a proposal that was created elsewhere (a remix, a drift check). The human still reads the exact price and clicks approve. */
+  const open = useCallback((p: Proposal) => { setMsg(""); setOverride(false); setProp(p); }, []);
+
   const close = async () => {
     if (prop) await api("POST", `/api/projects/${project}/proposals/${prop.id}/reject`).catch(() => {});
     setProp(null);
@@ -47,7 +51,8 @@ export function useProposal(project: string, mode: string, onDone: () => void) {
     if (!prop) return;
     const p = prop, key = runKey(p.kind, p.shot);
     try {
-      await api("POST", `/api/projects/${project}/proposals/${p.id}/approve`, { code: p.code });
+      if (p.code) await api("POST", `/api/projects/${project}/proposals/${p.id}/approve`, { code: p.code });
+      else await api("POST", `/api/projects/${project}/proposals/${p.id}/approve-human`);      // the human channel: only this click, never automatic
     } catch (e: any) { setMsg(e.message); return; }
     setProp(null);                                        // close the popup right away
     setRunning((r) => ({ ...r, [key]: p.kind }));
@@ -72,6 +77,7 @@ export function useProposal(project: string, mode: string, onDone: () => void) {
             <div className="text-2xl font-extrabold tracking-tight">{money(prop.price)}</div>
             <div className="mt-1 text-xs text-slate-400">This exact request, price and prompt. If anything changes after you approve, the approval is void.</div>
           </div>
+          <ProposalDetails summary={prop.summary} />
           {msg && <p className="text-red-600">{msg}</p>}
           <div className="flex items-center justify-end gap-2">
             <label className="mr-auto flex items-center gap-1.5 text-xs text-slate-400"><input type="checkbox" checked={override} onChange={(e) => setOverride(e.target.checked)} /> override stop-loss / attempt limit</label>
@@ -82,5 +88,5 @@ export function useProposal(project: string, mode: string, onDone: () => void) {
       )}
     </Modal>
   );
-  return { start, dialog, running };
+  return { start, open, dialog, running };
 }

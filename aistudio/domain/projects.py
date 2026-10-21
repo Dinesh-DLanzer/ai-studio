@@ -41,14 +41,15 @@ class ProjectDomain:
                 })
         return out
 
-    def create_project(self, name, test_pipeline=False):
+    def create_project(self, name, test_pipeline=False, format=None, brand_kit=None):
         try:
-            p = project_mod.create_project(self.ws.root / "projects", _ident(name, "project name"))
+            p = project_mod.create_project(self.ws.root / "projects", _ident(name, "project name"), format=format or None, brand_kit=brand_kit or None,
+                                           kit_root=self.ws.root / "brand_kits")
         except (ValueError, FileExistsError) as e:
             raise ServiceError(str(e)) from None
-        for fn in ("Story.md", "brief.md", "TODO.md"):  # start from the full guided templates
+        for fn in ("Story.md", "brief.md", "TODO.md"):  # start from the full guided templates (a format seeds its own Story.md and brief.md)
             t = REPO / "templates" / fn
-            if t.exists():
+            if t.exists() and not (format and fn != "TODO.md"):
                 (p / fn).write_text(t.read_text(encoding="utf-8").replace("{{PROJECT}}", name), encoding="utf-8")
         if test_pipeline:
             project_mod.save_json(p, "sandbox.json", {"test_pipeline": True})
