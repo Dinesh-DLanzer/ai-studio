@@ -21,7 +21,7 @@ class LocalClipRouteTest(unittest.TestCase):
 
     def test_local_transform_is_a_new_version_and_agent_safe(self):
         from unittest.mock import patch
-        with patch("aistudio.tools.run_local", return_value=self.project / "clips" / "s01_final_a1.v1.mp4") as run:
+        with patch("aistudio.tools.run_local", return_value=self.project.resolve() / "clips" / "s01_final_a1.v1.mp4") as run:
             out = self.client.post("/api/projects/demo/clips/s01_final_a1.mp4/local-tool", headers={"x-aistudio-token": self.token}, json={"tool": "speed", "params": {"factor": 2}})
         self.assertEqual(out.status_code, 200)
         self.assertEqual(out.json()["file"], "clips/s01_final_a1.v1.mp4")

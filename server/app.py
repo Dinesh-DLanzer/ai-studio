@@ -900,7 +900,7 @@ def create_app(root=None, token=None, rates_path=None, transport=None, static_di
         from aistudio import tools as local_tools
         tool = b.get("tool", "")
         params = b.get("params") or {}
-        root = ws.pdir(name)
+        root = ws.pdir(name).resolve()
         if Path(shot_id).name != shot_id or shot_id in ("", ".", ".."):
             raise HTTPException(400, "invalid clip name")
         source = root / "clips" / shot_id
