@@ -493,7 +493,16 @@ class StoryboardDomain:
         if tool not in spec_mod.AI_TOOLS:
             raise ServiceError(f"tool must be one of: {', '.join(spec_mod.AI_TOOLS)}")
         p = self.ws.pdir(name)
-        src = next((c for c in [*(p / "clips" / f"{clip_id}{e}" for e in (".mp4", ".mov", ".webm")), p / str(clip_id)] if c.is_file()), None)
+        # Accept clip_id as either a stem (s01) or a full filename (s01_final_a1.mp4, s01_final_a1.v1.mp4)
+        candidates = []
+        # If clip_id already has a video extension, also check it directly in clips/
+        if any(clip_id.endswith(ext) for ext in (".mp4", ".mov", ".webm")):
+            candidates.append(p / "clips" / clip_id)
+        # Always check with extensions appended (for stem input like "s01")
+        candidates.extend(p / "clips" / f"{clip_id}{e}" for e in (".mp4", ".mov", ".webm"))
+        # Fallback: check project root (for legacy paths)
+        candidates.append(p / str(clip_id))
+        src = next((c for c in candidates if c.is_file()), None)
         if not src:
             raise ServiceError(f"clip not found: {clip_id}")
         rel = src.resolve().relative_to(p.resolve()).as_posix()

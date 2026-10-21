@@ -260,5 +260,90 @@ class TestMcpFormats(unittest.TestCase):
         self.assertFalse((self.ws.root / "projects" / "bad").exists())
 
 
+class TestMcpCastTools(unittest.TestCase):
+    """The MCP propose-only tools for Phase 17 Cast: remix, propose_variants, select_version, drift_check."""
+
+    def setUp(self):
+        HERM.all_test(self)
+        self.ws = Workspace(tempfile.mkdtemp())
+        call(self.ws, "create_project", name="demo")
+        call(self.ws, "write_doc", name="demo", doc="Story.md", text=MD)
+        call(self.ws, "convert_story", name="demo")
+        call(self.ws, "estimate", name="demo")
+        self.p = self.ws.pdir("demo")
+
+    def test_tools_are_registered_consistently(self):
+        tools = {t["name"]: t for t in M.tool_list()}
+        for t in ("remix", "propose_variants", "select_version", "drift_check"):
+            self.assertIn(t, tools)
+        self.assertEqual(R.cost_class("remix"), "paid")
+        self.assertEqual(R.cost_class("propose_variants"), "paid")
+        self.assertEqual(R.cost_class("drift_check"), "paid")
+        self.assertEqual(R.cost_class("select_version"), "approval")
+        self.assertNotIn("select_version", R.crew_tools())
+
+    def test_propose_variants_creates_awaiting_approval_batch_without_spending(self):
+        from aistudio import costlog
+        before_rows = costlog.read_log(self.p)
+        res, err = call(self.ws, "propose_variants", name="demo", kind="image", target="s01", count=3)
+        self.assertFalse(err)
+        self.assertEqual(res["status"], "awaiting_approval")
+        self.assertEqual(len(res["items"]), 3)
+        unit = self.ws.spec("demo", "image", "s01")["price"]
+        self.assertEqual(res["total"], round(3 * unit, 6))
+        self.assertEqual(costlog.read_log(self.p), before_rows)
+
+    def test_drift_check_creates_proposal_only_without_spending(self):
+        from aistudio import costlog
+        (self.p / "stills").mkdir(exist_ok=True)
+        (self.p / "stills" / "meena.png").write_bytes(b"PNG-meena")
+        (self.p / "stills" / "s01.png").write_bytes(b"PNG-s01")
+        img_doc = self.ws._read(self.p, "images.json")
+        img_doc["images"].append({"id": "meena", "kind": "character", "out": "stills/meena.png", "prompt": "Meena portrait", "refs": []})
+        self.ws.put_images("demo", img_doc)
+        shots_doc = self.ws._read(self.p, "shots.json")
+        shots_doc["shots"][0]["refs"] = ["meena"]
+        self.ws.put_shots("demo", shots_doc)
+
+        before_rows = costlog.read_log(self.p)
+        res, err = call(self.ws, "drift_check", name="demo", target="s01")
+        self.assertFalse(err)
+        self.assertEqual(res["kind"], "review")
+        self.assertEqual(res["status"], "pending")
+        self.assertEqual(res["options"], {"review_type": "drift"})
+        self.assertNotIn("code", res)
+        self.assertEqual(costlog.read_log(self.p), before_rows)
+
+    def test_remix_creates_proposal_only_from_meta_without_spending_or_code(self):
+        from aistudio import costlog
+        (self.p / "stills").mkdir(exist_ok=True)
+        (self.p / "stills" / "s01.png").write_bytes(b"PNG-sample")
+        meta = {
+            "kind": "image", "target": "s01", "model": "fake/image", "provider": "fake",
+            "prompt": "sample prompt", "refs": [], "params": {}, "cost": 0.036
+        }
+        (self.p / "stills" / "s01.png.meta.json").write_text(json.dumps(meta))
+        before_rows = costlog.read_log(self.p)
+        res, err = call(self.ws, "remix", name="demo", meta="stills/s01.png.meta.json")
+        self.assertFalse(err)
+        self.assertEqual(res["proposal"]["status"], "pending")
+        self.assertNotIn("code", res["proposal"])
+        self.assertEqual(costlog.read_log(self.p), before_rows)
+
+    def test_select_version_selects_and_discards_others_without_spending(self):
+        from aistudio import costlog
+        (self.p / "stills").mkdir(exist_ok=True)
+        (self.p / "stills" / "s01.v1.png").write_bytes(b"PNG-v1")
+        (self.p / "stills" / "s01.v2.png").write_bytes(b"PNG-v2")
+        before_rows = costlog.read_log(self.p)
+        res, err = call(self.ws, "select_version", name="demo", kind="image", target="s01", version=2)
+        self.assertFalse(err)
+        self.assertEqual(res["selected_version"], 2)
+        self.assertEqual(res["discarded"], [1])
+        self.assertTrue((self.p / "stills" / "s01.v2.png").is_file())
+        self.assertFalse((self.p / "stills" / "s01.v1.png").exists())
+        self.assertEqual(costlog.read_log(self.p), before_rows)
+
+
 if __name__ == "__main__":
     unittest.main()

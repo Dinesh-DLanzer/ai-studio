@@ -20,8 +20,15 @@ export default function CastPanel({ project, spec, stills, hasMaster, onBatch, o
   const toast = useToast();
   const [consent, setConsent] = useState<Consent[]>([]); const [drift, setDrift] = useState<Drift | null>(null);
   const [subject, setSubject] = useState(""); const [statement, setStatement] = useState(""); const [kind, setKind] = useState("real_person");
+  const [sha, setSha] = useState("");
   const [count, setCount] = useState("2"); const [busy, setBusy] = useState(false);
+  const [unitPrice, setUnitPrice] = useState<number | null>(null);
   const base = `/api/projects/${encodeURIComponent(project)}`;
+  useEffect(() => {
+    api<{ price?: number }>("GET", `${base}/spec/image/${encodeURIComponent(spec.id)}`)
+      .then((r) => { if (typeof r.price === "number") setUnitPrice(r.price); })
+      .catch(() => {});
+  }, [base, spec.id]);
   const loadConsent = useCallback(() => api<{ consent: Consent[] }>("GET", `${base}/consent`).then((r) => setConsent(r.consent)).catch(() => {}), [base]);
   useEffect(() => { void loadConsent(); }, [loadConsent]);
   useEffect(() => {
@@ -49,7 +56,7 @@ export default function CastPanel({ project, spec, stills, hasMaster, onBatch, o
     toast("ok", `Using version ${n} of ${spec.id}.`); reload();
   });
   const record = () => run(async () => {
-    await api("POST", `${base}/consent`, { subject: subject.trim(), statement: statement.trim(), kind });
+    await api("POST", `${base}/consent`, { subject: subject.trim(), statement: statement.trim(), kind, ...(sha ? { asset_id: spec.id } : {}) });
     toast("ok", `Consent recorded for ${subject.trim()}.`); setSubject(""); setStatement(""); await loadConsent();
   });
 
@@ -68,7 +75,7 @@ export default function CastPanel({ project, spec, stills, hasMaster, onBatch, o
           </ul>
           <Button variant="outline" size="sm" className="mt-2 w-full" disabled={busy || !hasMaster || !missing.length} onClick={() => void sheet()}
             title={!hasMaster ? "Make or upload the master image first" : ""}>
-            <ScanFace size={14} />{missing.length ? `Build identity sheet (${missing.length} view${missing.length === 1 ? "" : "s"})` : "Identity sheet complete"}
+            <ScanFace size={14} />{missing.length ? `Build identity sheet (${missing.length} view${missing.length === 1 ? "" : "s"})${unitPrice != null ? ` · $${(missing.length * unitPrice).toFixed(3)}` : ""}` : "Identity sheet complete"}
           </Button>
           <p className="mt-1 text-[0.68rem] text-slate-400">Creates a batch with an exact total. Nothing is spent until you approve it.</p>
         </section>
@@ -91,7 +98,7 @@ export default function CastPanel({ project, spec, stills, hasMaster, onBatch, o
           ) : <p className="text-xs text-slate-400">No other versions yet.</p>}
           <div className="mt-2 flex items-end gap-2">
             <div><Label>Candidates</Label><Select aria-label="Number of candidates" value={count} onChange={(e) => setCount(e.target.value)}>{[2, 3, 4].map((n) => <option key={n} value={n}>{n}</option>)}</Select></div>
-            <Button variant="outline" size="sm" disabled={busy || !hasMaster} onClick={() => void variants()}>Generate variants</Button>
+            <Button variant="outline" size="sm" disabled={busy || !hasMaster} onClick={() => void variants()}>{unitPrice != null ? `Generate ${count} variants · ${count} × $${unitPrice.toFixed(3)} ($${(Number(count) * unitPrice).toFixed(3)})` : `Generate ${count} variants`}</Button>
           </div>
           <p className="mt-1 text-[0.68rem] text-slate-400">N candidates cost N times the price, shown before you approve.</p>
         </section>
@@ -119,6 +126,10 @@ export default function CastPanel({ project, spec, stills, hasMaster, onBatch, o
               <Button type="submit" size="sm" variant="outline" disabled={busy || !subject.trim() || !statement.trim()}>Record consent</Button>
             </div>
           </form>
+          <div className="mt-2 rounded-lg border border-slate-700 p-2">
+            <p className="text-xs text-slate-400">Bind the record to this asset’s current file before using consent-gated tools.</p>
+            <Button type="button" size="sm" variant="outline" className="mt-2" disabled={busy || !hasMaster} onClick={() => void run(async () => { const r = await api<{ sha: string }>("POST", `${base}/consent/mark`, { asset_id: spec.id }); setSha(r.sha); toast("ok", `Current asset bytes marked (${r.sha.slice(0, 12)}…).`); })}>{sha ? `File marked · ${sha.slice(0, 12)}…` : "Mark current file as a real person"}</Button>
+          </div>
           <p className="mt-1 text-[0.68rem] text-slate-400">Only you can record consent here. Agents and the crew cannot.</p>
         </section>
       </div>

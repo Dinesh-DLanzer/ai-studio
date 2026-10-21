@@ -20,6 +20,7 @@ import { useProjectAssets, type Kind } from "../hooks/useProjectAssets";
 import CastPanel from "../components/CastPanel";
 import BatchPlanModal from "../components/BatchPlanModal";
 import { useBatchPipeline } from "../hooks/useBatchPipeline";
+import ClipToolsPanel from "../components/ClipToolsPanel";
 
 const KIND_ICON: Record<Kind, JSX.Element> = { character: <Users size={17} />, background: <ImageIcon size={17} />, frame: <LayoutGrid size={17} />, other: <UploadIcon size={17} /> };
 
@@ -262,7 +263,7 @@ export function AssetsTab({ o, name, load, start, openProposal, running }: TabPr
               <div>
                 <h4 className="font-bold text-amber-200">Character Reference Image Detected</h4>
                 <p className="mt-1 text-xs text-amber-300/90 leading-relaxed">
-                  {checkingChar.analysis.summary || "This image appears to be a single-angle reference photo or face image."}
+                  {typeof checkingChar.analysis.summary === "string" ? checkingChar.analysis.summary : "This image appears to be a single-angle reference photo or face image."}
                 </p>
                 <p className="mt-2 text-xs text-slate-300 leading-relaxed">
                   For video scenes to remain consistent, an AI character master sheet needs <b>multi-angle body views</b> (front, side, back) and a <b>grid of facial expressions</b> (neutral, happy, angry, sad, etc.).
@@ -330,6 +331,14 @@ function AssetPreview({ description, renameTo, o, name, spec, file, img, urlOf, 
       toast("error", e.message);
     }
   };
+  const remix = async (label: string) => {
+    if (!file) return;
+    try { const r = await api<{ proposal: import("../types").Proposal }>("POST", `/api/projects/${encodeURIComponent(name)}/remix`, { meta: `stills/${file}.meta.json` });
+      toast("info", `${label} proposal is ready. Providers may return different results for the same inputs.`); openProposal?.(r.proposal);
+    } catch (e) { toast("error", (e as Error).message); }
+  };
+  const assetVersions = o.files.stills.map((f) => { const m = f.match(new RegExp(`^${spec.id.replace(/[.*+?^${}()|[\\]\\\\]/g, "\\\\$&")}\\.v(\\d+)\\.[A-Za-z0-9]+$`)); return m ? { file: f, version: Number(m[1]) } : null; }).filter((x): x is { file: string; version: number } => !!x).sort((a, b) => a.version - b.version);
+  const selectAssetVersion = async (version: number) => { try { await api("POST", `/api/projects/${encodeURIComponent(name)}/variants/select`, { kind: "image", target: spec.id, version }); toast("ok", `Selected version ${version}; other candidates are in Discarded and can be restored.`); reload(); } catch (e) { toast("error", (e as Error).message); } };
   const refMenu = (trigger: React.ReactNode, label: string) => (
     <Menu.Root>
       <Menu.Trigger aria-label={label} className="rounded-xl">{trigger}</Menu.Trigger>
@@ -358,6 +367,10 @@ function AssetPreview({ description, renameTo, o, name, spec, file, img, urlOf, 
           </span>
           <Badge tone="pink">{spec.kind}</Badge>
         </div>
+        {file && <div className="mt-3 flex flex-wrap gap-2"><Button size="sm" variant="outline" onClick={() => void remix("Remix")}>Remix</Button><Button size="sm" variant="outline" onClick={() => void remix("Reproduce")}>Reproduce</Button></div>}
+        {assetVersions.length > 0 && <section className="mt-3" aria-label="Still versions"><h3 className="mb-2 text-sm font-bold">Versions</h3><div className="flex flex-wrap gap-2">{assetVersions.map((v) => <button key={v.file} type="button" aria-label={`Select version ${v.version} of ${spec.id}`} onClick={() => void selectAssetVersion(v.version)} className={`rounded-lg border px-2 py-1 text-xs ${spec.selected_version === v.version ? "border-pink text-pink" : "border-slate-700 text-slate-300"}`}>{spec.selected_version === v.version ? "Selected" : "Select version"} {v.version}</button>)}</div></section>}
+        {spec.kind === "character" && <div className="mt-3 flex items-end gap-2"><label className="text-xs" htmlFor={`asset-variant-count-${spec.id}`}>Candidates</label><select id={`asset-variant-count-${spec.id}`} className="field !w-20 !py-1.5" defaultValue="2">{[2,3,4].map((n) => <option key={n}>{n}</option>)}</select><Button size="sm" variant="outline" onClick={async () => { const el = document.getElementById(`asset-variant-count-${spec.id}`) as HTMLSelectElement; try { onBatch(await api("POST", `/api/projects/${encodeURIComponent(name)}/variants`, { kind: "image", target: spec.id, count: Number(el.value) }) as import("../hooks/useBatchPipeline").Plan); } catch (e) { toast("error", (e as Error).message); } }}>Propose {`N × unit price`}</Button></div>}
+        {file && usedShots.some((s) => o.files.clips.some((c) => c.startsWith(`${s.id}_final_a`))) && <div className="mt-3"><ClipToolsPanel project={name} clip={o.files.clips.find((c) => usedShots.some((s) => c.startsWith(`${s.id}_final_a`)))!} reload={reload} openProposal={openProposal} /></div>}
 
         <div role="tablist" aria-label="Asset details" className="mt-3 flex border-b border-slate-800">
           {(["details", "used"] as const).map((t) => (

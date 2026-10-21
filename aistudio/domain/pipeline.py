@@ -868,6 +868,10 @@ class PipelineDomain:
         return {"kind": "review", "review": review}
 
     def select_version(self, name, kind, target, k):
+        with project_lock.lock(self.ws.pdir(name)):
+            return self._select_version(name, kind, target, k)
+
+    def _select_version(self, name, kind, target, k):
         """Pick version k of a still (stills/<id>.v<k>.<ext>) or a clip (clips/<id>.v<k>_final_a<n>.mp4). Every other version of that target goes
         through the normal discard path (moved to _discarded with its cost, restorable, never deleted). The shot (clip) or the asset (still)
         records selected_version, and the timeline / first-frame source now points at the chosen file. A human decision (not an agent route)."""

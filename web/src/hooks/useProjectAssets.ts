@@ -108,16 +108,8 @@ export function useProjectAssets({ name, o, load }: UseProjectAssetsProps) {
       toast("ok", replace ? `Replaced ${id}. The old image is in Discarded.` : `Uploaded ${id}.`);
       load();
 
-      const item = doc.find((x) => x.id === id);
-      if (item?.kind === "character") {
-        api<any>("POST", `/api/projects/${name}/character/analyze`, { rel: `stills/${id}.png` })
-          .then((analysis) => {
-            if (analysis && !analysis.is_character_sheet) {
-              setCheckingChar({ id, file: `${id}.png`, analysis, replacing: replace });
-            }
-          })
-          .catch(() => {});
-      }
+      // Character review is proposal-based (plan 09 / plan 17 via CastPanel / Vision Review).
+      // Automatic upload does not create unapproved paid review proposals.
     } catch (e: any) {
       toast("error", e.message);
     }
