@@ -201,7 +201,7 @@ def load_json(pdir, filename):
 def save_json(pdir, filename, data):
     path = Path(pdir) / filename
     content = json.dumps(data, indent=2, ensure_ascii=False).encode("utf-8")
-    tracked = filename in {"shots.json", "images.json", "edit.json", "brief.json", "todos.json", "Story.md"}
+    tracked = filename in {"shots.json", "images.json", "edit.json", "brief.json", "todos.json", "Story.md", "comments.json"}
     if not tracked:
         path.write_bytes(content)
         return
