@@ -236,6 +236,9 @@ class PipelineDomain:
         summary = {"prompt": payload.get("prompt", "")[:400], "seconds": payload.get("seconds"), "audio": payload.get("audio"),
                    "first_frame": payload.get("first_frame"), "refs": [r["path"] for r in payload.get("refs", [])], "file": payload.get("file") or payload.get("source"),
                    "review_type": payload.get("review_type"), "provider": payload.get("provider")}
+        if kind in ("image", "clip"):      # what the model can do, and what was adjusted, shown to the approver
+            sp = spec_mod.resolve(self.ws, p, kind, target)
+            summary.update(profile=sp.profile, warnings=sp.warnings, end_frame=sp.end_frame or None)
         return approvals.propose(p, kind, target, model, price, payload, reveal_code=reveal_code, summary=summary, options=options)
 
     def approve_human(self, name, pid):

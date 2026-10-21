@@ -85,6 +85,7 @@ R = [
     ("GET", "/api/fonts", False, "Review and Export", "Fonts and weights the text editor can use. Public (no token): the page loads them with CSS.", "-", '{"fonts": [...]}'),
     ("GET", "/api/fonts/{file}", False, "Review and Export", "One bundled font file (whitelisted names only). Public.", "-", "font/ttf"),
     # ---- costs and verification
+    ("GET", "/api/projects/{name}/spec/{kind}/{target}", True, "Costs and verification", "Read-only preview of what one generation will be: model, snapped seconds, resolution, frames, references, the model's capability profile, price and warnings. kind = image | clip | image_edit | clip_extend. Estimates, proposals and execution use this same spec.", "-", "spec object"),
     ("GET", "/api/projects/{name}/costs", True, "Costs and verification", "Cost log, used versus discarded spend, and the budget.", "-", "costs object"),
     ("GET", "/api/projects/{name}/usage", False, "Costs and verification", "AI usage (chat, verify, vision) by model: calls and cost.", "-", '{"rows": [...]}'),
     ("GET", "/api/projects/{name}/verify", True, "Costs and verification", "Verification of brief, story, assets, shots and todos: rule findings (always fresh) plus the latest AI review.", "-", "verification status"),

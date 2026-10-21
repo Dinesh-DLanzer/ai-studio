@@ -271,6 +271,8 @@ TOOLS = {
         S(name=STR, shot_id=STR),
         _human_only_shot_approval,
     ),
+    "get_spec": ("Read-only preview of one generation: the model, seconds, frames, references, capability profile, price and warnings. kind = image | clip | image_edit | clip_extend.",
+                 S(name=STR, kind={"type": "string", "enum": ["image", "clip", "image_edit", "clip_extend"]}, target=STR), lambda ws, a: ws.spec(a["name"], a["kind"], a["target"])),
     "get_costs": ("Cost log, used vs discarded split, budget.", S(name=STR), lambda ws, a: ws.costs(a["name"])),
     "discard": ("Move a clip/still to _discarded (never deletes) with a reason.", S(name=STR, rel=STR, reason={"type": "string", "optional": True}), lambda ws, a: ws.discard(a["name"], a["rel"], a.get("reason", ""))),
     "restore": ("Restore a discarded file.", S(name=STR, rel=STR), lambda ws, a: {"file": ws.restore(a["name"], a["rel"])}),
