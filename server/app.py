@@ -77,7 +77,16 @@ def create_app(root=None, token=None, rates_path=None, transport=None, static_di
                                error="" if ok else str(item.get("error") or "; ".join(item.get("changes", [])) or item["status"]))
         return ws.batches.run(job["project"], job["target"], record)
 
+    def run_crew_job(job, progress):
+        from aistudio.crew import agents as crew_agents, runtime as crew_runtime
+        pl = job["payload"]
+        rec = crew_runtime.run(ws, job["project"], crew_agents.load(pl["agent"], ws.settings_dir), pl["task"], pl["autonomy"], run_id=job["id"], progress=progress)
+        if rec["status"] == "error":
+            raise ServiceError(rec["error"])
+        return {"run": rec["id"], "status": rec["status"], "steps": len(rec["steps"]), "llm_usd": rec["llm_usd"]}
+
     handlers = {
+        "crew_run": run_crew_job,
         # the job only RUNS what a human approved: ws.execute re-checks the approval, budget, gates and consumes the grant itself
         "execute": lambda job, progress: ws.execute(job["project"], job["proposal_id"], bool(job["payload"].get("override"))),
         "export": lambda job, progress: ws.edit_export(job["project"], progress),
@@ -223,6 +232,51 @@ def create_app(root=None, token=None, rates_path=None, transport=None, static_di
     def run_batch(name: str, bid: str, request: Request):
         guard(ws.batches.get, name, bid)
         return start_job(request, name, "batch", target=bid)
+
+    def human_session(request):
+        if getattr(request.state, "scope", "") != "session":      # also enforced by api_docs (agent=False); belt and braces
+            raise HTTPException(403, "starting, stopping or undoing a crew run needs the human session")
+
+    @app.post("/api/projects/{name}/crew/runs", dependencies=[api])
+    async def crew_run_start(name: str, request: Request):
+        from aistudio.crew import agents as crew_agents, runtime as crew_runtime
+        human_session(request)
+        b = await request.json()
+        autonomy = str(b.get("autonomy") or "copilot")
+        guard(ws.pdir, name)
+        try:
+            crew_agents.load(str(b.get("agent", "")), ws.settings_dir)
+        except crew_agents.AgentError as e:
+            raise HTTPException(400, str(e)) from None
+        if autonomy not in crew_runtime.AUTONOMY or not str(b.get("task", "")).strip() or len(str(b["task"])) > 5000:
+            raise HTTPException(400, f"autonomy must be one of {crew_runtime.AUTONOMY} and the task 1 to 5000 characters")
+        res = start_job(request, name, "crew_run", payload={"agent": b["agent"], "task": str(b["task"]).strip(), "autonomy": autonomy})
+        return {**res, "run": res["job"]}
+
+    @app.get("/api/projects/{name}/crew/runs", dependencies=[api])
+    def crew_runs(name: str):
+        from aistudio.crew import runtime as crew_runtime
+        return {"runs": guard(crew_runtime.list_runs, ws, name)}
+
+    @app.get("/api/projects/{name}/crew/runs/{rid}", dependencies=[api])
+    def crew_run_get(name: str, rid: str):
+        from aistudio.crew import runtime as crew_runtime
+        return guard(crew_runtime.get_run, ws, name, rid)
+
+    @app.post("/api/projects/{name}/crew/runs/{rid}/undo", dependencies=[api])
+    def crew_run_undo(name: str, rid: str, request: Request):
+        from aistudio.crew import runtime as crew_runtime
+        human_session(request)
+        return guard(crew_runtime.undo, ws, name, rid)
+
+    @app.post("/api/projects/{name}/crew/runs/{rid}/stop", dependencies=[api])
+    def crew_run_stop(name: str, rid: str, request: Request):
+        human_session(request)
+        guard(ws.pdir, name)
+        row = jobsmod.get(ws.root, rid)
+        if not row or row["kind"] != "crew_run" or row["project"] != name:
+            raise HTTPException(404, "unknown crew run")
+        return jobsmod.cancel(ws.root, rid)
 
     @app.get("/api/projects/{name}", dependencies=[api])
     def overview(name: str):
